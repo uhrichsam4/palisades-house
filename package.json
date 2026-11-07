@@ -1,0 +1,22 @@
+{
+  "name": "palisades-house",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "esbuild": "^0.28.2",
+    "n8ao": "^2.0.1",
+    "playwright-core": "^1.65.0",
+    "postprocessing": "^6.39.6",
+    "three": "^0.187.0",
+    "trystero": "^0.26.0"
+  }
+}

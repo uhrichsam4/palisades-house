@@ -1,0 +1,63 @@
+#!/usr/bin/env node
+// Render photo-matched views of the house in headless Chrome (real GPU) and build comparison images.
+//   node tools/shot.mjs p04 p05            -> shots/p04.png, shots/p04_vs.jpg (photo | ours)
+//   node tools/shot.mjs p04 --only=family,kitchen   (faster: only those pieces + shell)
+//   node tools/shot.mjs --cam=x,y,z,lx,ly,lz,fov --name=test
+//   node tools/shot.mjs --top=0            (plan cutaway of level 0)
+//   node tools/shot.mjs p04 --blind=7      (also shots/p04_AB.jpg with seeded random A/B order; key in shots/p04_AB.json)
+// Prints a JSON line per shot: {id, png, vs, errors}. Exit code 1 if any page reported errors.
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { chromium } from 'playwright-core';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PHOTOS = path.resolve(ROOT, '../house_reference_photos/1_Palisades_mansion_listing_photos');
+const args = process.argv.slice(2); const opt = {}; const ids = [];
+for (const a of args) { const m = a.match(/^--(\w+)(?:=(.*))?$/); if (m) opt[m[1]] = m[2] ?? '1'; else ids.push(a); }
+const outDir = path.resolve(ROOT, opt.out || 'shots'); fs.mkdirSync(outDir, { recursive: true });
+
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.hdr': 'application/octet-stream', '.wasm': 'application/wasm', '.gltf': 'model/gltf+json', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream', '.ktx2': 'image/ktx2', '.webp': 'image/webp', '.exr': 'application/octet-stream' };
+const server = http.createServer((req, res) => {
+  const u = decodeURIComponent(new URL(req.url, 'http://x').pathname); let f = path.join(ROOT, u); if (u.endsWith('/')) f = path.join(f, 'index.html');
+  if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end('404'); }
+  res.writeHead(200, { 'Content-Type': TYPES[path.extname(f)] || 'application/octet-stream', 'Cache-Control': 'no-store' }); fs.createReadStream(f).pipe(res);
+});
+await new Promise(r => server.listen(0, '127.0.0.1', r)); const port = server.address().port;
+
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+const jobs = [];
+for (const id of ids) jobs.push({ id, q: `view=${id}` });
+if (opt.cam) jobs.push({ id: opt.name || 'cam', q: `cam=${opt.cam}` });
+if (opt.top !== undefined) jobs.push({ id: `top${opt.top}`, q: `top=${opt.top}` });
+let bad = false;
+for (const job of jobs) {
+  const page = await browser.newPage({ viewport: { width: 1080, height: 720 }, deviceScaleFactor: 1 });
+  const logs = [];
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => logs.push('pageerror: ' + e.message));
+  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1';
+  const t0 = Date.now();
+  await page.goto(`http://127.0.0.1:${port}/index.html?${q}`, { waitUntil: 'load', timeout: 60000 });
+  try { await page.waitForFunction(() => window.__ready === true, null, { timeout: Number(opt.timeout || 120000), polling: 250 }); }
+  catch { logs.push('timeout waiting for __ready'); }
+  const errs = await page.evaluate(() => window.__errors || []).catch(() => ['evaluate failed']);
+  const png = path.join(outDir, `${job.id}.png`);
+  await page.locator('#c').screenshot({ path: png });
+  await page.close();
+  const rec = { id: job.id, png: path.relative(ROOT, png), ms: Date.now() - t0, errors: [...errs, ...logs.filter(l => !/GPU stall|WebGL: INVALID|Automatic fallback/.test(l))].slice(0, 20) };
+  const photo = path.join(PHOTOS, `${job.id}.jpg`);
+  if (fs.existsSync(photo)) {
+    const vs = path.join(outDir, `${job.id}_vs.jpg`);
+    execFileSync('python3', ['-I', path.join(ROOT, 'tools/compose.py'), 'vs', photo, png, vs]);
+    rec.vs = path.relative(ROOT, vs);
+    if (opt.blind) {
+      const ab = path.join(outDir, `${job.id}_AB.jpg`);
+      const out = execFileSync('python3', ['-I', path.join(ROOT, 'tools/compose.py'), 'ab', photo, png, ab, String(opt.blind)]).toString().trim();
+      fs.writeFileSync(path.join(outDir, `${job.id}_AB.json`), out); rec.ab = path.relative(ROOT, ab);
+    }
+  }
+  if (rec.errors.length) bad = true;
+  console.log(JSON.stringify(rec));
+}
+await browser.close(); server.close();
+process.exit(bad ? 1 : 0);
