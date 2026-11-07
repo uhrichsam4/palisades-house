@@ -233,7 +233,8 @@ export function buildShell(ctx) {
       shapeTop.holes.push(new THREE.Path([V2(x0, -z0), V2(x1, -z0), V2(x1, -z1), V2(x0, -z1)]));
       shapeBot.holes.push(new THREE.Path([V2(x0, z0), V2(x0, z1), V2(x1, z1), V2(x1, z0)]));
     }
-    const gt = new THREE.ShapeGeometry(shapeTop); gt.rotateX(-Math.PI / 2); gt.translate(0, yTop, 0);
+    // visual top sits 5 mm low: per-room floor patches (lit by each room's light probe) cover it; it only shows in gaps
+    const gt = new THREE.ShapeGeometry(shapeTop); gt.rotateX(-Math.PI / 2); gt.translate(0, yTop - 0.005, 0);
     const mt = add(gt, topMat, name + ':top'); mt.castShadow = false;
     if (botMat) { const gb = new THREE.ShapeGeometry(shapeBot); gb.rotateX(Math.PI / 2); gb.translate(0, yTop - thick, 0); const mb = add(gb, botMat, name + ':bottom'); mb.castShadow = false; }
     // edges (void edges visible from the stair) + collider
@@ -249,6 +250,31 @@ export function buildShell(ctx) {
   slab(P.EXT[1], P.VOIDS[1] || [], P.LEVELS[1].floor, 0.30, M.oakFloor, M.ceilingWhite, 'slab1');
   // balcony slab
   { const r = P.ROOMS.balcony.rect; slab([[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]], [], P.LEVELS[1].floor, 0.30, M.paintWhite, M.ceilingWhite, 'balcony'); }
+
+  const skip0 = new Set(ctx.ownCeilings || []);
+  // ---- per-room floor + ground-ceiling patches (so each room can carry its own light probe; see lighting.js)
+  const rectMinus = (r, h) => {
+    const [x0, z0, x1, z1] = r, [hx0, hz0, hx1, hz1] = h;
+    if (hx1 <= x0 || hx0 >= x1 || hz1 <= z0 || hz0 >= z1) return [r];
+    const cx0 = Math.max(x0, hx0), cx1 = Math.min(x1, hx1), cz0 = Math.max(z0, hz0), cz1 = Math.min(z1, hz1); const out = [];
+    if (cz0 > z0) out.push([x0, z0, x1, cz0]); if (cz1 < z1) out.push([x0, cz1, x1, z1]);
+    if (cx0 > x0) out.push([x0, cz0, cx0, cz1]); if (cx1 < x1) out.push([cx1, cz0, x1, cz1]); return out;
+  };
+  const patch = (rect, y, up, mat, name) => {
+    const [x0, z0, x1, z1] = rect; if (x1 - x0 < 0.01 || z1 - z0 < 0.01) return;
+    const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0); g.rotateX(up ? -Math.PI / 2 : Math.PI / 2); g.translate((x0 + x1) / 2, y, (z0 + z1) / 2);
+    const p = g.attributes.position, uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i), up ? -p.getZ(i) : p.getZ(i)); // same UVs as the slab
+    const m = add(g, mat, name); m.castShadow = false;
+  };
+  for (const [id, r] of Object.entries(P.ROOMS)) {
+    if (r.outdoor) continue;
+    let rects = [r.rect]; for (const v of (P.VOIDS[r.level] || [])) rects = rects.flatMap(q => rectMinus(q, v));
+    for (const q of rects) patch(q, P.LEVELS[r.level].floor, true, M.oakFloor, 'floorpatch:' + id);
+    if (r.level === 0 && !skip0.has(id) && id !== 'family' && id !== 'powder') { // ground ceilings: leave the stairwell / double-height voids open
+      let crects = [r.rect]; for (const v of (P.VOIDS[1] || [])) crects = crects.flatMap(q => rectMinus(q, v));
+      for (const q of crects) patch(q, P.LEVELS[0].ceil - 0.005, false, M.ceilingWhite, 'ceilpatch:' + id);
+    }
+  }
 
   // ---- default flat ceilings for upper rooms (rooms that build their own are skipped)
   const skip = new Set(ctx.ownCeilings || []);

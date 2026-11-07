@@ -11,9 +11,12 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { N8AOPass } from 'n8ao';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { buildRoomProbes } from './lighting.js';
 import * as P from './plan.js';
 import { PIECES } from './rooms/index.js';
 import { createPhysics } from './physics.js';
@@ -38,7 +41,7 @@ const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: SHOT });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMappingExposure = 1.18; // LIGHT.exposure
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
 T.setMaxAnisotropy(renderer.capabilities.getMaxAnisotropy());
 const W = () => (SHOT ? 1080 : innerWidth), H = () => (SHOT ? 720 : innerHeight);
@@ -53,8 +56,10 @@ const camera = new THREE.PerspectiveCamera(70, W() / H(), 0.03, 4000);
 // morning light in the listing photos (p05, p09 show sun patches through the rear glass).
 export const LIGHT = {
   sunDir: new THREE.Vector3(0.42, 0.62, 0.66).normalize(),
-  sunIntensity: 3.2, sunColor: 0xfff1df,
-  envIntensity: 1.0, bgIntensity: 1.0, hemi: 0.35, exposure: 1.0,
+  sunIntensity: 4.2, sunColor: 0xfff1df,
+  envIntensity: 1.0, bgIntensity: 1.0, hemi: 0.35, exposure: 1.18,
+  probeIntensity: 1.12, bloom: { strength: 0.12, radius: 0.4, threshold: 1.6 },
+  whiteBalance: [0.93, 0.99, 1.09], // camera-style WB: cancels the warm cast of light bounced off oak floors
 };
 const HOUSE_C = new THREE.Vector3(11.7, 0, 11.0);
 const sun = new THREE.DirectionalLight(LIGHT.sunColor, LIGHT.sunIntensity);
@@ -107,6 +112,10 @@ function setupPost() {
   n8.setQualityMode(SHOT ? 'Ultra' : 'Medium'); // presets may toggle halfRes, which breaks on three r187 -> force it off after
   Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: false, denoiseRadius: 10 });
   composer.addPass(n8); window.__n8 = n8;
+  composer.addPass(new ShaderPass({ uniforms: { tDiffuse: { value: null }, wb: { value: new THREE.Vector3(...LIGHT.whiteBalance) } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'uniform sampler2D tDiffuse; uniform vec3 wb; varying vec2 vUv; void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722)); vec3 b = c.rgb * wb; float l2 = dot(b, vec3(0.2126, 0.7152, 0.0722)); gl_FragColor = vec4(b * (l / max(l2, 1e-5)), c.a); }' }));
+  const b = LIGHT.bloom; composer.addPass(new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), b.strength, b.radius, b.threshold)); // bright windows bloom a little, like a camera
   composer.addPass(new OutputPass());
   composer.addPass(new SMAAPass(W() * renderer.getPixelRatio(), H() * renderer.getPixelRatio()));
 }
@@ -142,6 +151,10 @@ async function main() {
     catch (e) { console.error('[piece build]', p, e); window.__errors.push(p + ': ' + (e.stack || e.message)); }
   }));
   await envP;
+  if (!params.get('noprobes')) { // per-room light probes with one bounce (see lighting.js)
+    try { await buildRoomProbes(ctxBase, { intensity: LIGHT.probeIntensity, onStatus: status }); }
+    catch (e) { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); }
+  }
   setupPost();
 
   // views registry
