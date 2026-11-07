@@ -104,9 +104,9 @@ function setupPost() {
   composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(W(), H());
   composer.addPass(new RenderPass(scene, camera));
   n8 = new N8AOPass(scene, camera, W(), H());
-  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: !SHOT, denoiseRadius: 10 });
-  n8.setQualityMode(SHOT ? 'Ultra' : 'Medium');
-  composer.addPass(n8);
+  n8.setQualityMode(SHOT ? 'Ultra' : 'Medium'); // presets may toggle halfRes, which breaks on three r187 -> force it off after
+  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: false, denoiseRadius: 10 });
+  composer.addPass(n8); window.__n8 = n8;
   composer.addPass(new OutputPass());
   composer.addPass(new SMAAPass(W() * renderer.getPixelRatio(), H() * renderer.getPixelRatio()));
 }
