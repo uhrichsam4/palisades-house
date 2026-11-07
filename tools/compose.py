@@ -12,9 +12,11 @@ def load(p):
     return im
 
 def mask_logo(im):
-    box = (975, 645, 1080, 720)
-    patch = im.crop((box[0] - 40, box[1] - 40, box[2], box[3])).filter(ImageFilter.GaussianBlur(18)).crop((40, 40, 40 + box[2] - box[0], 40 + box[3] - box[1]))
-    im.paste(patch, box); return im
+    # cover the MLS logo with a softened copy of the floor just left of it (never blur the red logo itself,
+    # which leaves a pink smudge that gives the real photo away in the blind test)
+    box = (972, 645, 1080, 720); w = box[2] - box[0]
+    src = im.crop((box[0] - w - 4, box[1], box[0] - 4, box[3])).transpose(Image.FLIP_LEFT_RIGHT).filter(ImageFilter.GaussianBlur(3))
+    im.paste(src, box); return im
 
 def font(sz):
     for f in ['/System/Library/Fonts/Helvetica.ttc', '/System/Library/Fonts/SFNS.ttf']:
