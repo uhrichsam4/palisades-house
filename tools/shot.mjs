@@ -7,10 +7,30 @@
 //   node tools/shot.mjs p04 --blind=7      (also shots/p04_AB.jpg with seeded random A/B order; key in shots/p04_AB.json)
 // Prints a JSON line per shot: {id, png, vs, errors}. Exit code 1 if any page reported errors.
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 
+// Be gentle with the user's Mac: run at 'utility' QoS (inherited by Chrome) ...
+if (!process.env.SHOT_NICE && process.platform === 'darwin') {
+  const r = spawnSync('taskpolicy', ['-c', 'utility', process.execPath, ...process.argv.slice(1)], { stdio: 'inherit', env: { ...process.env, SHOT_NICE: '1' } });
+  process.exit(r.status ?? 1);
+}
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// ... and through a machine-wide queue: at most SHOT_SLOTS (default 2) headless Chromes render at once,
+// however many agents call this tool.
+const LOCKS = path.join(ROOT, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursive: true });
+const SLOTS = Number(process.env.SHOT_SLOTS || 2); let mySlot = null;
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+for (let waited = 0; mySlot === null; waited++) {
+  for (let i = 0; i < SLOTS && mySlot === null; i++) {
+    const d = path.join(LOCKS, 'slot' + i);
+    try { fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'pid'), String(process.pid)); mySlot = d; }
+    catch { let pid = 0; try { pid = Number(fs.readFileSync(path.join(d, 'pid'), 'utf8')); } catch {} if (pid && !alive(pid)) fs.rmSync(d, { recursive: true, force: true }); }
+  }
+  if (mySlot === null) { if (waited === 0) console.error('[shot] waiting for a free render slot…'); await new Promise(r => setTimeout(r, 1500)); }
+}
+const release = () => { try { fs.rmSync(mySlot, { recursive: true, force: true }); } catch {} };
+process.on('exit', release); process.on('SIGINT', () => process.exit(130)); process.on('SIGTERM', () => process.exit(143));
 const PHOTOS = path.resolve(ROOT, '../house_reference_photos/1_Palisades_mansion_listing_photos');
 const args = process.argv.slice(2); const opt = {}; const ids = [];
 for (const a of args) { const m = a.match(/^--(\w+)(?:=(.*))?$/); if (m) opt[m[1]] = m[2] ?? '1'; else ids.push(a); }
