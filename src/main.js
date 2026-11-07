@@ -163,6 +163,14 @@ async function main() {
       while (photo.samples < ptSamples) { photo.render(); await new Promise(r => requestAnimationFrame(r)); }
       window.__ptSamples = photo.samples;
     }
+    if (params.get('stats')) { // ?stats=1 : what is heavy in this scene (per piece, biggest meshes, textures)
+      const per = {}, big = [], texs = new Map();
+      scene.traverse(o => { if (!o.isMesh) return; let p = o; while (p && !(p.name || '').startsWith('piece:') && p.name !== 'shell') p = p.parent; const k = p ? p.name : 'other';
+        const v = (o.geometry.attributes.position?.count || 0) * (o.isInstancedMesh ? o.count : 1); per[k] = per[k] || { meshes: 0, verts: 0 }; per[k].meshes++; per[k].verts += v; big.push([v, k, o.name || o.material?.name || o.material?.type]);
+        for (const m of [].concat(o.material)) for (const key of ['map', 'normalMap', 'roughnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'metalnessMap']) { const t = m?.[key]; const img = t?.image; if (img && img.width) texs.set(t.source?.uuid || t.uuid, [img.width, img.height, k]); } });
+      big.sort((a, b) => b[0] - a[0]);
+      const tx = [...texs.values()]; window.__stats = { per, top: big.slice(0, 8), programs: renderer.info.programs?.length, textures: tx.length, texMB: Math.round(tx.reduce((a, [w, h]) => a + w * h * 4 * 1.33, 0) / 1e6), bigTex: tx.filter(([w, h]) => w * h >= 2048 * 2048) };
+    }
     window.__ready = true; status(''); return;
   }
 

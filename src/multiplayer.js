@@ -5,7 +5,7 @@
 // Doors (wrapped `target`) and big splashes are synced; chat + join/leave toasts in #mp.
 // Any networking failure leaves single-player untouched.
 import * as THREE from 'three';
-import { createCreature } from './fluid/creature.js';
+import { createAvatar } from './avatar.js';
 import { waterBodies } from './water/index.js';
 import { identity, setName as saveName } from './net/identity.js';
 import { createUI } from './net/ui.js';
@@ -42,7 +42,7 @@ export async function start(ctx) {
     const body = phys.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(msg.p[0], msg.p[1] + 0.83, msg.p[2]));
     const collider = phys.world.createCollider(R.ColliderDesc.capsule(0.55, 0.28).setFriction(0), body);
     let seed = 0; for (const ch of id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
-    const creature = createCreature(ctx, { hue: msg.h ?? 0.5, name: msg.n || 'Guest', local: false, exclude: collider, seed: (seed % 9973) + 3 });
+    const creature = createAvatar(ctx, { hue: msg.h ?? 0.5, name: msg.n || 'Guest', local: false, seed: (seed % 9973) + 3 });
     const r = { id, body, collider, creature, buf: [], off: null, name: msg.n || 'Guest', hue: msg.h ?? 0.5, pos: new THREE.Vector3(...msg.p), vel: new THREE.Vector3(), yaw: msg.y || 0, grounded: true, swimming: false, last: performance.now() };
     peers.set(id, r); ui.toast(`${r.name} joined`); ui.setPeers(peers.size);
     return r;

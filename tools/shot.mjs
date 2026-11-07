@@ -57,12 +57,13 @@ for (const job of jobs) {
   const logs = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => logs.push('pageerror: ' + e.message));
-  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1'; if (opt.pt) q += `&pt=${opt.pt}`;
+  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1'; if (opt.pt) q += `&pt=${opt.pt}`; if (opt.stats) q += '&stats=1';
   const t0 = Date.now();
   await page.goto(`http://127.0.0.1:${port}/index.html?${q}`, { waitUntil: 'load', timeout: 60000 });
   try { await page.waitForFunction(() => window.__ready === true, null, { timeout: Number(opt.timeout || 120000), polling: 250 }); }
   catch { logs.push('timeout waiting for __ready'); }
   const errs = await page.evaluate(() => window.__errors || []).catch(() => ['evaluate failed']);
+  const stats = opt.stats ? await page.evaluate(() => window.__stats).catch(() => null) : null;
   const png = path.join(outDir, `${job.id}.png`);
   await page.locator('#c').screenshot({ path: png });
   await page.close();
@@ -78,6 +79,7 @@ for (const job of jobs) {
       fs.writeFileSync(path.join(outDir, `${job.id}_AB.json`), out); rec.ab = path.relative(ROOT, ab);
     }
   }
+  if (stats) rec.stats = stats;
   if (rec.errors.length) bad = true;
   console.log(JSON.stringify(rec));
 }

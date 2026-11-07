@@ -42,7 +42,9 @@ export function pbrMaps(id, res = '1k', opt = {}) {
 // Canvas texture: canvasTex(512, 512, (g, w, h) => { ...draw... }, { srgb:true, repeat })
 export function canvasTex(w, h, draw, opt = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const g = c.getContext('2d'); draw(g, w, h);
+  // CPU-backed 2D canvas: blur filters/heavy painting run on the CPU and can't hang Chrome's GPU process
+  // (a GPU-canvas blur per stroke used to drop the WebGL context for the whole house).
+  const g = c.getContext('2d', { willReadFrequently: true }); draw(g, w, h);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = opt.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;

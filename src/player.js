@@ -1,19 +1,19 @@
-// Local player: Rapier kinematic character controller (capsule) driving a living-water creature
-// (src/fluid/). Third-person orbit camera by default (smooth follow, sphere-cast wall collision,
-// mouse wheel zoom); V toggles first-person. WASD move, Shift run, Space jump, E use door.
+// Local player: Rapier kinematic character controller (capsule) with a person avatar (src/avatar.js).
+// First-person by default; V toggles a third-person orbit camera (smooth follow, sphere-cast wall
+// collision, mouse wheel zoom). WASD move, Shift run, Space jump, E use door.
 // Swimming: inside a water body below its surface the creature floats (buoyancy), swims slowly in 3D
 // (look direction + Space up / C down), dissolves into the pool and re-forms when it climbs out.
 // Walking into dynamic props shoves them (KCC applies impulses).
 import * as THREE from 'three';
-import { createCreature } from './fluid/creature.js';
+import { createAvatar } from './avatar.js';
 import { waterBodies } from './water/index.js';
 import { identity } from './net/identity.js';
 
 export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = {}) {
   const { phys, camera, dom } = ctx; const R = phys.RAPIER; const world = phys.world;
   const radius = 0.28, halfH = 0.55;
-  const EYE_FP = 1.32;            // first-person eye height (creature eyes ~1.2 m; a touch higher for the tour)
-  const PIVOT = 1.25;             // third-person orbit pivot height
+  const EYE_FP = 1.62;            // first-person eye height (adult)
+  const PIVOT = 1.55;             // third-person orbit pivot height
   const body = world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn[0], spawn[1] + halfH + radius, spawn[2]));
   const collider = world.createCollider(R.ColliderDesc.capsule(halfH, radius).setFriction(0.0), body);
   const cc = world.createCharacterController(0.02);
@@ -21,12 +21,12 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   cc.setApplyImpulsesToDynamicBodies(true); cc.setCharacterMass(70);
 
   const state = {
-    yaw, pitch: -0.18, facing: yaw, vy: 0, grounded: false, thirdPerson: true, keys: new Set(), locked: false, speed: 0,
+    yaw, pitch: -0.05, facing: yaw, vy: 0, grounded: false, thirdPerson: false, keys: new Set(), locked: false, speed: 0,
     pos: new THREE.Vector3(spawn[0], spawn[1], spawn[2]), vel: new THREE.Vector3(), swimming: false, inWater: false, water: null, waterY: 0,
     camDist: 2.9, camWant: 2.9, jumpQueued: false, autopilot: null,
   };
   const me = identity();
-  const creature = createCreature(ctx, { hue: me.hue, name: me.name, local: true, exclude: collider, seed: 11 });
+  const creature = createAvatar(ctx, { hue: me.hue, name: me.name, local: true, seed: 11 }); // person avatar (seen in third-person / by others)
   const splashFns = [];
   const emitSplash = (x, y, z, s) => { for (const f of splashFns) { try { f(x, y, z, s); } catch (e) { console.warn(e); } } };
 
@@ -93,7 +93,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       let wy = spch * mz * (state.thirdPerson ? 0.6 : 1); if (k.has('Space')) wy += 1; if (k.has('KeyC') || k.has('ControlLeft')) wy -= 1;
       const a = 1 - Math.exp(-dt * 2.2);
       state.vel.x += (wx * sp - state.vel.x) * a; state.vel.z += (wz * sp - state.vel.z) * a;
-      const target = wt.y - 1.06; // head centre just above the surface
+      const target = wt.y - 1.45; // head just above the surface
       if (Math.abs(wy) > 0.1) state.vy += (wy * sp - state.vy) * a + (wy < 0 ? 0 : 0);
       else state.vy += ((target - p.y) * 7 - state.vy * 3.2) * dt;
       // climb out: Space at the surface kicks up and out
