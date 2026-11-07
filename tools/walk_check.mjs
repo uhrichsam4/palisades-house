@@ -26,10 +26,12 @@ await page.goto(`http://127.0.0.1:${server.address().port}/index.html?room=${opt
 await page.waitForFunction(() => window.__ready === true, null, { timeout: 120000 }).catch(() => errs.push('timeout'));
 await page.waitForTimeout(1500);
 const secs = Number(opt.secs || 4);
+if (opt.goto) { const [x, y, z, yaw] = opt.goto.split(',').map(Number); await page.evaluate(([x, y, z, yaw]) => window.__player?.teleport(x, y, z, yaw), [x, y, z, yaw]); await page.waitForTimeout(500); }
 await page.keyboard.down('KeyW'); await page.waitForTimeout(secs * 1000); await page.keyboard.up('KeyW'); await page.waitForTimeout(800);
 const where = await page.evaluate(() => document.getElementById('where')?.textContent);
+const player = await page.evaluate(() => { const s = window.__player?.state; return s ? { pos: s.pos.toArray().map(v => +v.toFixed(2)), inWater: s.inWater, swimming: s.swimming, grounded: s.grounded } : null; });
 const fps = await page.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(Math.round(n / ((performance.now() - t0) / 1000))); }; requestAnimationFrame(f); }));
 await page.screenshot({ path: path.join(ROOT, 'shots', 'walk_check.png') });
 const uniq = [...new Set(errs)].slice(0, 12);
-console.log(JSON.stringify({ where, fps, errors: uniq }));
+console.log(JSON.stringify({ where, fps, player, errors: uniq }));
 await ctx.close(); server.close(); process.exit(uniq.length ? 1 : 0);
