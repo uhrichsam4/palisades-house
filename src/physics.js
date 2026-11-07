@@ -92,8 +92,10 @@ export async function createPhysics() {
       for (const d of dynamics) {
         const t = d.body.translation(), r = d.body.rotation();
         bm.compose(_v.set(t.x, t.y, t.z), _q.set(r.x, r.y, r.z, r.w), _s.set(1, 1, 1)).multiply(d.offset);
-        d.parent.updateWorldMatrix(true, false); pinv.copy(d.parent.matrixWorld).invert();
-        bm.premultiply(pinv); bm.decompose(d.obj.position, d.obj.quaternion, d.obj.scale);
+        // use the object's CURRENT parent (pieces may register props before adding them, or re-parent them)
+        const parent = d.obj.parent;
+        if (parent) { parent.updateWorldMatrix(true, false); pinv.copy(parent.matrixWorld).invert(); bm.premultiply(pinv); }
+        bm.decompose(d.obj.position, d.obj.quaternion, d.obj.scale);
       }
     },
   };

@@ -1,64 +1,176 @@
-// Local player: Rapier kinematic character controller (capsule), first/third-person camera,
-// WASD + mouse look (pointer lock), Shift run, Space jump, E use door, V toggle camera.
-// The visible avatar (water creature) is provided by ctx.avatar if present (see src/fluid/).
+// Local player: Rapier kinematic character controller (capsule) driving a living-water creature
+// (src/fluid/). Third-person orbit camera by default (smooth follow, sphere-cast wall collision,
+// mouse wheel zoom); V toggles first-person. WASD move, Shift run, Space jump, E use door.
+// Swimming: inside a water body below its surface the creature floats (buoyancy), swims slowly in 3D
+// (look direction + Space up / C down), dissolves into the pool and re-forms when it climbs out.
+// Walking into dynamic props shoves them (KCC applies impulses).
 import * as THREE from 'three';
+import { createCreature } from './fluid/creature.js';
+import { waterBodies } from './water/index.js';
+import { identity } from './net/identity.js';
 
 export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = {}) {
   const { phys, camera, dom } = ctx; const R = phys.RAPIER; const world = phys.world;
-  const radius = 0.28, halfH = 0.55, eye = 1.62;
+  const radius = 0.28, halfH = 0.55;
+  const EYE_FP = 1.32;            // first-person eye height (creature eyes ~1.2 m; a touch higher for the tour)
+  const PIVOT = 1.25;             // third-person orbit pivot height
   const body = world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn[0], spawn[1] + halfH + radius, spawn[2]));
   const collider = world.createCollider(R.ColliderDesc.capsule(halfH, radius).setFriction(0.0), body);
   const cc = world.createCharacterController(0.02);
   cc.enableAutostep(0.26, 0.18, true); cc.enableSnapToGround(0.3); cc.setMaxSlopeClimbAngle((50 * Math.PI) / 180);
   cc.setApplyImpulsesToDynamicBodies(true); cc.setCharacterMass(70);
-  const state = { yaw, pitch: 0, vy: 0, grounded: false, thirdPerson: false, keys: new Set(), locked: false, speed: 0, pos: new THREE.Vector3() };
 
+  const state = {
+    yaw, pitch: -0.18, facing: yaw, vy: 0, grounded: false, thirdPerson: true, keys: new Set(), locked: false, speed: 0,
+    pos: new THREE.Vector3(spawn[0], spawn[1], spawn[2]), vel: new THREE.Vector3(), swimming: false, inWater: false, water: null, waterY: 0,
+    camDist: 2.9, camWant: 2.9, jumpQueued: false, autopilot: null,
+  };
+  const me = identity();
+  const creature = createCreature(ctx, { hue: me.hue, name: me.name, local: true, exclude: collider, seed: 11 });
+  const splashFns = [];
+  const emitSplash = (x, y, z, s) => { for (const f of splashFns) { try { f(x, y, z, s); } catch (e) { console.warn(e); } } };
+
+  // ---------------------------------------------------------------- input
   const onKey = (e, down) => {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-    const k = e.code; if (down) state.keys.add(k); else state.keys.delete(k);
+    const k = e.code;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) { if (!down) state.keys.delete(k); return; } if (down) state.keys.add(k); else state.keys.delete(k);
+    if (down && e.repeat) return;
     if (down && k === 'KeyV') state.thirdPerson = !state.thirdPerson;
     if (down && k === 'KeyE') ctx.useNearest?.(state.pos);
+    if (down && k === 'Space') state.jumpQueued = true;
   };
   addEventListener('keydown', e => onKey(e, true)); addEventListener('keyup', e => onKey(e, false));
+  addEventListener('blur', () => state.keys.clear());
   dom.addEventListener('click', () => { if (!state.locked && !ctx.uiBlocking?.()) dom.requestPointerLock?.(); });
   document.addEventListener('pointerlockchange', () => { state.locked = document.pointerLockElement === dom; ctx.onLockChange?.(state.locked); });
   addEventListener('mousemove', e => { if (!state.locked) return; state.yaw -= e.movementX * 0.0022; state.pitch = THREE.MathUtils.clamp(state.pitch - e.movementY * 0.0022, -1.45, 1.45); });
+  dom.addEventListener('wheel', e => { state.camWant = THREE.MathUtils.clamp(state.camWant * (1 + Math.sign(e.deltaY) * 0.12), 1.4, 6); }, { passive: true });
   // touch: left half = move stick, right half = look
   let touchMove = null, touchLook = null; const tm = new THREE.Vector2();
   dom.addEventListener('touchstart', e => { for (const t of e.changedTouches) { if (t.clientX < innerWidth / 2 && !touchMove) touchMove = { id: t.identifier, x: t.clientX, y: t.clientY }; else if (!touchLook) touchLook = { id: t.identifier, x: t.clientX, y: t.clientY }; } }, { passive: true });
   dom.addEventListener('touchmove', e => { for (const t of e.changedTouches) { if (touchMove && t.identifier === touchMove.id) tm.set((t.clientX - touchMove.x) / 60, (t.clientY - touchMove.y) / 60).clampScalar(-1, 1); if (touchLook && t.identifier === touchLook.id) { state.yaw -= (t.clientX - touchLook.x) * 0.005; state.pitch = THREE.MathUtils.clamp(state.pitch - (t.clientY - touchLook.y) * 0.005, -1.4, 1.4); touchLook.x = t.clientX; touchLook.y = t.clientY; } } }, { passive: true });
   dom.addEventListener('touchend', e => { for (const t of e.changedTouches) { if (touchMove && t.identifier === touchMove.id) { touchMove = null; tm.set(0, 0); } if (touchLook && t.identifier === touchLook.id) touchLook = null; } });
 
-  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
+  // ---------------------------------------------------------------- helpers
+  function waterAt(x, y, z) {
+    for (const w of waterBodies) { try { if (w.isInside(x, z)) { const s = w.heightAt(x, z); if (y < s + 0.05) return { w, y: s }; } } catch {} }
+    return null;
+  }
+  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), wish = new THREE.Vector3(), hv = new THREE.Vector3();
+  const pivot = new THREE.Vector3(spawn[0], spawn[1] + PIVOT, spawn[2]); let pivotInit = false;
+  const camShape = new R.Ball(0.16); const ROT0 = { x: 0, y: 0, z: 0, w: 1 };
+  const CAM_FLAGS = R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+  const euler = new THREE.Euler(0, 0, 0, 'YXZ'); const back = new THREE.Vector3();
+  let disturbT = 0, frameMs = 0;
+
   function update(dt) {
-    dt = Math.min(dt, 0.05);
+    const t0 = performance.now();
+    dt = Math.min(dt, 0.05); if (dt <= 0) return;
     const k = state.keys; let mx = 0, mz = 0;
     if (k.has('KeyW') || k.has('ArrowUp')) mz += 1; if (k.has('KeyS') || k.has('ArrowDown')) mz -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) mx += 1; if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
+    if (ctx.uiBlocking?.()) { mx = 0; mz = 0; k.clear(); }
     mx += tm.x; mz -= tm.y;
-    const run = k.has('ShiftLeft') || k.has('ShiftRight'); const speed = run ? 5.2 : 2.6;
+    if (state.autopilot) { const a = state.autopilot(dt, state); if (a) { mx = a.mx ?? mx; mz = a.mz ?? mz; if (a.run !== undefined) k[a.run ? 'add' : 'delete']('ShiftLeft'); if (a.jump) state.jumpQueued = true; } }
+    const run = k.has('ShiftLeft') || k.has('ShiftRight');
     fwd.set(-Math.sin(state.yaw), 0, -Math.cos(state.yaw)); right.set(-fwd.z, 0, fwd.x);
-    move.set(0, 0, 0).addScaledVector(fwd, mz).addScaledVector(right, mx); if (move.lengthSq() > 1) move.normalize(); move.multiplyScalar(speed * dt);
-    if (state.grounded && k.has('Space')) state.vy = 4.6;
-    state.vy -= 9.81 * dt; if (state.grounded && state.vy < 0) state.vy = -0.5;
-    move.y = state.vy * dt;
-    cc.computeColliderMovement(collider, { x: move.x, y: move.y, z: move.z });
+    wish.set(0, 0, 0).addScaledVector(fwd, mz).addScaledVector(right, mx); if (wish.lengthSq() > 1) wish.normalize();
+
+    // ---- water state (hysteresis on feet depth)
+    const p = state.pos; const wt = waterAt(p.x, p.y, p.z); const depth = wt ? wt.y - p.y : -1;
+    const wasIn = state.inWater, wasSwim = state.swimming;
+    state.inWater = !!wt && depth > 0.02; state.water = wt?.w || null; state.waterY = wt?.y ?? 0;
+    if (!state.swimming && wt && depth > 1.0) state.swimming = true;
+    else if (state.swimming && (!wt || depth < 0.7)) state.swimming = false;
+    if (state.inWater && !wasIn && state.vy < -1.2) { const s = Math.min(3, -state.vy * 0.55); try { wt.w.splash(p.x, wt.y, p.z, s); wt.w.disturb(p.x, p.z, 0.8, s); } catch {} emitSplash(p.x, wt.y, p.z, s); }
+    if (wasSwim && !state.swimming && wt) { try { wt.w.splash(p.x, wt.y, p.z, 0.7); } catch {} }
+
+    let mvx, mvy, mvz;
+    if (state.swimming) {
+      // slow 3D swimming along the look direction, buoyancy holds the head at the surface
+      const sp = run ? 2.1 : 1.3; const cp = Math.cos(state.pitch), spch = Math.sin(state.pitch);
+      const wx = (-Math.sin(state.yaw) * cp) * mz + right.x * mx, wz = (-Math.cos(state.yaw) * cp) * mz + right.z * mx;
+      let wy = spch * mz * (state.thirdPerson ? 0.6 : 1); if (k.has('Space')) wy += 1; if (k.has('KeyC') || k.has('ControlLeft')) wy -= 1;
+      const a = 1 - Math.exp(-dt * 2.2);
+      state.vel.x += (wx * sp - state.vel.x) * a; state.vel.z += (wz * sp - state.vel.z) * a;
+      const target = wt.y - 1.06; // head centre just above the surface
+      if (Math.abs(wy) > 0.1) state.vy += (wy * sp - state.vy) * a + (wy < 0 ? 0 : 0);
+      else state.vy += ((target - p.y) * 7 - state.vy * 3.2) * dt;
+      // climb out: Space at the surface kicks up and out
+      if (state.jumpQueued && p.y > target - 0.25) { state.vy = 5.1; state.swimming = false; try { wt.w.splash(p.x, wt.y, p.z, 1.2); } catch {} }
+      state.vy = THREE.MathUtils.clamp(state.vy, -2.5, 6);
+      mvx = state.vel.x * dt; mvy = state.vy * dt; mvz = state.vel.z * dt;
+    } else {
+      const sp = (run ? 5.2 : 2.6) * (state.inWater ? 0.6 : 1);
+      const accel = state.grounded ? 12 : 2.5; const a = 1 - Math.exp(-dt * accel);
+      state.vel.x += (wish.x * sp - state.vel.x) * a; state.vel.z += (wish.z * sp - state.vel.z) * a;
+      if (state.grounded && state.jumpQueued) state.vy = 4.8;
+      state.vy -= 9.81 * dt * (state.inWater ? 0.55 : 1); if (state.grounded && state.vy < 0) state.vy = -0.5;
+      mvx = state.vel.x * dt; mvy = state.vy * dt; mvz = state.vel.z * dt;
+    }
+    state.jumpQueued = false;
+
+    cc.computeColliderMovement(collider, { x: mvx, y: mvy, z: mvz });
     const m = cc.computedMovement(); const t = body.translation();
-    body.setNextKinematicTranslation({ x: t.x + m.x, y: t.y + m.y, z: t.z + m.z });
-    state.grounded = cc.computedGrounded();
-    state.speed = Math.hypot(m.x, m.z) / Math.max(dt, 1e-4);
-    if (t.y < -30) body.setNextKinematicTranslation({ x: spawn[0], y: spawn[1] + 1, z: spawn[2] });
-    state.pos.set(t.x + m.x, t.y + m.y - halfH - radius, t.z + m.z);
-    // camera
-    const eyeP = new THREE.Vector3(state.pos.x, state.pos.y + eye, state.pos.z);
-    camera.rotation.set(state.pitch, state.yaw, 0, 'YXZ');
+    let nx = t.x + m.x, ny = t.y + m.y, nz = t.z + m.z;
+    if (ny < -30) { nx = spawn[0]; ny = spawn[1] + 1; nz = spawn[2]; state.vy = 0; }
+    body.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
+    const groundedNow = cc.computedGrounded();
+    if (groundedNow && !state.grounded && state.vy < -6) { /* hard landing: the fluid sim squashes + splashes */ }
+    state.grounded = groundedNow && !state.swimming;
+    // real velocity from the resolved movement (what the fluid and the network see)
+    const iv = 1 / dt; const rvx = m.x * iv, rvy = m.y * iv, rvz = m.z * iv;
+    if (!state.swimming) { state.vel.x = rvx; state.vel.z = rvz; if (state.grounded) state.vy = Math.min(state.vy, Math.max(-0.5, rvy)); else if (rvy > state.vy + 0.5 || (state.vy > 0 && m.y < mvy * 0.5)) state.vy = rvy; }
+    state.speed = Math.hypot(rvx, rvz);
+    state.pos.set(nx, ny - halfH - radius, nz);
+    state.velOut = state.velOut || new THREE.Vector3(); state.velOut.set(rvx, state.swimming ? rvy : (state.grounded ? 0 : state.vy), rvz);
+
+    // swimming ripples
+    if (state.inWater && wt) { disturbT -= dt; if (disturbT <= 0 && state.speed > 0.25) { disturbT = 0.09; try { wt.w.disturb(p.x, p.z, 0.45, Math.min(1, state.speed * 0.35)); } catch {} } }
+
+    // ---- facing: third-person turns toward travel, first-person = look yaw
     if (state.thirdPerson) {
-      const back = new THREE.Vector3(0, 0, 1).applyEuler(camera.rotation).multiplyScalar(2.6);
-      const ray = new phys.RAPIER.Ray({ x: eyeP.x, y: eyeP.y, z: eyeP.z }, { x: back.x / 2.6, y: back.y / 2.6, z: back.z / 2.6 });
-      const hit = world.castRay(ray, 2.6, true, undefined, undefined, collider);
-      const d = hit ? Math.max(0.3, hit.timeOfImpact - 0.2) : 2.6;
-      camera.position.copy(eyeP).addScaledVector(back.normalize(), d);
-    } else camera.position.copy(eyeP);
+      if (state.speed > 0.3) { const want = Math.atan2(-rvx, -rvz); let d = want - state.facing; d = Math.atan2(Math.sin(d), Math.cos(d)); state.facing += d * (1 - Math.exp(-dt * 9)); }
+    } else state.facing = state.yaw;
+
+    // ---- creature
+    creature.setVisible(state.thirdPerson && state.camDist > 0.8);
+    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: state.facing, grounded: state.grounded, swimming: state.swimming });
+
+    // ---- camera
+    euler.set(state.pitch, state.yaw, 0, 'YXZ');
+    if (state.thirdPerson) {
+      const tgt = _v.set(state.pos.x, state.pos.y + PIVOT, state.pos.z);
+      if (!pivotInit) { pivot.copy(tgt); pivotInit = true; }
+      const ah = 1 - Math.exp(-dt * 14), av = 1 - Math.exp(-dt * 7);
+      pivot.x += (tgt.x - pivot.x) * ah; pivot.z += (tgt.z - pivot.z) * ah; pivot.y += (tgt.y - pivot.y) * av;
+      back.set(0, 0, 1).applyEuler(euler);
+      let d = state.camWant;
+      const hit = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, undefined, collider);
+      if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04);
+      state.camDist = d < state.camDist ? d : state.camDist + (d - state.camDist) * (1 - Math.exp(-dt * 3));
+      // boxed in (back to a wall): fall back to an eye-level view instead of jamming the lens into the wall
+      const close = THREE.MathUtils.clamp((state.camDist - 0.55) / 0.35, 0, 1);
+      camera.position.copy(pivot).addScaledVector(back, state.camDist * close);
+      if (close < 1) camera.position.y += (state.pos.y + EYE_FP - camera.position.y) * (1 - close);
+      camera.quaternion.setFromEuler(euler);
+    } else {
+      pivotInit = false;
+      camera.position.set(state.pos.x, state.pos.y + EYE_FP, state.pos.z);
+      camera.quaternion.setFromEuler(euler);
+    }
+    frameMs = performance.now() - t0;
   }
-  return { update, state, body, collider, get position() { return state.pos; } };
+  const _v = new THREE.Vector3();
+  function teleport(x, y, z, yaw2) {
+    body.setTranslation({ x, y: y + halfH + radius, z }, true); body.setNextKinematicTranslation({ x, y: y + halfH + radius, z });
+    state.pos.set(x, y, z); state.vel.set(0, 0, 0); state.vy = 0; pivotInit = false;
+    if (yaw2 !== undefined) { state.yaw = yaw2; state.facing = yaw2; }
+  }
+  return {
+    update, state, body, collider, creature, teleport,
+    onSplash(fn) { splashFns.push(fn); },
+    get position() { return state.pos; }, get velocity() { return state.velOut || state.vel; },
+    get frameMs() { return frameMs; },
+  };
 }

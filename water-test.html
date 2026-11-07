@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Water test</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font: 13px system-ui, sans-serif; }
+  #c { display: block; width: 100%; height: 100%; }
+  #info { position: fixed; left: 10px; top: 8px; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  body.shot #info { display: none; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/three-addons/",
+  "rapier": "./vendor/rapier.js",
+  "n8ao": "./vendor/n8ao.js"
+} }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">Drag: orbit · click water: splash · B: throw a ball · U: toggle underwater cam · flags: ?cam=x,y,z,lx,ly,lz,fov ?shot=1 ?nopost=1 ?perf=1</div>
+<script type="module" src="src/water/test.js"></script>
+</body>
+</html>

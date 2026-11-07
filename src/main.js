@@ -167,7 +167,7 @@ async function main() {
   }
 
   // ---- walk mode
-  const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => useNearestDoor(pos), onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => document.body.classList.contains('ui-open') }, { spawn: [9.8, 0.05, 5.6], yaw: Math.PI });
+  const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => useNearestDoor(pos), onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => document.body.classList.contains('ui-open') }, { spawn: [9.8, 0.05, 6.6], yaw: Math.PI });
   ctxBase.player = player;
   try { const game = await import('./multiplayer.js'); await game.start({ ...ctxBase, player }); } catch (e) { console.warn('[game] not loaded:', e.message); }
   document.getElementById('loading')?.classList.add('done');
@@ -179,9 +179,9 @@ async function main() {
     if (!photo) { const { createPhotoMode } = await import('./pathtrace.js'); photo = createPhotoMode(ctxBase); }
     if (photo.active) { photo.exit(); status(''); } else { status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
   });
-  const clock = new THREE.Clock(); let t = 0;
+  let last = performance.now(), t = 0;
   renderer.setAnimationLoop(() => {
-    const dt = Math.min(clock.getDelta(), 0.1); t += dt;
+    const now = performance.now(); const dt = Math.min((now - last) / 1000, 0.1); last = now; t += dt;
     if (photo && photo.active) { photo.render(); if (photo.ready) status('Photo mode (path traced) · ' + photo.samples + ' samples · P to exit'); return; }
     animateDoors(dt);
     player.update(dt);
@@ -242,7 +242,7 @@ function hud(player) {
   const el = document.getElementById('where'); if (!el) return;
   const p = player.position; const level = p.y > 2.5 ? 1 : 0;
   let name = 'Outside';
-  for (const [id, r] of Object.entries(P.ROOMS)) { if (r.level !== level) continue; const [x0, z0, x1, z1] = r.rect; if (p.x >= x0 - 0.1 && p.x <= x1 + 0.1 && p.z >= z0 - 0.1 && p.z <= z1 + 0.1) { name = r.name; break; } }
+  for (const [id, r] of Object.entries(P.ROOMS)) { if (r.level !== level) continue; const [x0, z0, x1, z1] = r.rect; if (p.x >= x0 - 0.35 && p.x <= x1 + 0.35 && p.z >= z0 - 0.35 && p.z <= z1 + 0.35) { name = r.name; break; } }
   if (el.textContent !== name) el.textContent = name;
 }
 
