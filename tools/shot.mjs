@@ -16,10 +16,10 @@ if (!process.env.SHOT_NICE && process.platform === 'darwin') {
   process.exit(r.status ?? 1);
 }
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// ... and through a machine-wide queue: at most SHOT_SLOTS (default 2) headless Chromes render at once,
+// ... and through a machine-wide queue: at most SHOT_SLOTS (default 1) headless Chromes render at once,
 // however many agents call this tool.
 const LOCKS = path.join(ROOT, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursive: true });
-const SLOTS = Number(process.env.SHOT_SLOTS || 2); let mySlot = null;
+const SLOTS = Number(process.env.SHOT_SLOTS || 1); let mySlot = null;
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 for (let waited = 0; mySlot === null; waited++) {
   for (let i = 0; i < SLOTS && mySlot === null; i++) {
@@ -44,14 +44,15 @@ const server = http.createServer((req, res) => {
 });
 await new Promise(r => server.listen(0, '127.0.0.1', r)); const port = server.address().port;
 
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+// Persistent profile per slot: Chrome keeps its compiled-shader cache between runs (far less Metal compiling).
+const browser = await chromium.launchPersistentContext(path.join(ROOT, 'shots', '.chrome-' + path.basename(mySlot)), { channel: 'chrome', headless: true, viewport: { width: 1080, height: 720 }, deviceScaleFactor: 1, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
 const jobs = [];
 for (const id of ids) jobs.push({ id, q: `view=${id}` });
 if (opt.cam) jobs.push({ id: opt.name || 'cam', q: `cam=${opt.cam}` });
 if (opt.top !== undefined) jobs.push({ id: `top${opt.top}`, q: `top=${opt.top}` });
 let bad = false;
 for (const job of jobs) {
-  const page = await browser.newPage({ viewport: { width: 1080, height: 720 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage();
   const logs = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => logs.push('pageerror: ' + e.message));
