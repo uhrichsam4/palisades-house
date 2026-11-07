@@ -10,7 +10,8 @@ import http from 'node:http'; import fs from 'node:fs'; import path from 'node:p
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 
-// Be gentle with the user's Mac: run at 'utility' QoS (inherited by Chrome) ...
+// Be gentle with the user's Mac: run at 'utility' QoS (inherited by Chrome; 'background' starves the GPU
+// process until Chrome's watchdog drops the WebGL context and renders come out broken) ...
 if (!process.env.SHOT_NICE && process.platform === 'darwin') {
   const r = spawnSync('taskpolicy', ['-c', 'utility', process.execPath, ...process.argv.slice(1)], { stdio: 'inherit', env: { ...process.env, SHOT_NICE: '1' } });
   process.exit(r.status ?? 1);
@@ -81,4 +82,6 @@ for (const job of jobs) {
   console.log(JSON.stringify(rec));
 }
 await browser.close(); server.close();
+// keep the slot a few seconds so back-to-back renders from several agents can't peg the GPU
+await new Promise(r => setTimeout(r, Number(process.env.SHOT_COOLDOWN_MS || 4000)));
 process.exit(bad ? 1 : 0);
