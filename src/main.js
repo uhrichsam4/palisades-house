@@ -90,7 +90,7 @@ async function loadEnvironment() {
   scene.environment = room; scene.background = hdr;
   scene.environmentRotation.set(0, 0, 0); scene.backgroundRotation.set(0, rotY, 0);
   scene.environmentIntensity = LIGHT.envIntensity; scene.backgroundIntensity = LIGHT.bgIntensity;
-  ENV.outdoor = outdoor; ENV.room = room; ENV.rotY = rotY;
+  ENV.outdoor = outdoor; ENV.room = room; ENV.rotY = rotY; ENV.hdr = hdr;
   for (const m of ENV.pending) applyOutdoor(m); ENV.pending.length = 0;
   window.__env = { rotY, hdrAz, u };
 }
@@ -156,6 +156,13 @@ async function main() {
     await waitForLoads();
     await renderer.compileAsync(scene, camera);
     for (let i = 0; i < 6; i++) { for (const u of updates) u(1 / 60, i / 60); render(); await new Promise(r => requestAnimationFrame(r)); }
+    const ptSamples = Number(params.get('pt') || 0);
+    if (ptSamples > 0) { // path-traced still: ?view=p04&pt=256
+      const { createPhotoMode } = await import('./pathtrace.js');
+      const photo = createPhotoMode(ctxBase); await photo.enter({ bounces: Number(params.get('bounces') || 6), exposure: Number(params.get('exposure') || 2.6) });
+      while (photo.samples < ptSamples) { photo.render(); await new Promise(r => requestAnimationFrame(r)); }
+      window.__ptSamples = photo.samples;
+    }
     window.__ready = true; status(''); return;
   }
 
@@ -165,9 +172,17 @@ async function main() {
   try { const game = await import('./multiplayer.js'); await game.start({ ...ctxBase, player }); } catch (e) { console.warn('[game] not loaded:', e.message); }
   document.getElementById('loading')?.classList.add('done');
   status('');
+  // P = path-traced photo mode (freezes the camera, accumulates samples until P again)
+  let photo = null;
+  addEventListener('keydown', async (e) => {
+    if (e.code !== 'KeyP' || (e.target && e.target.tagName === 'INPUT')) return;
+    if (!photo) { const { createPhotoMode } = await import('./pathtrace.js'); photo = createPhotoMode(ctxBase); }
+    if (photo.active) { photo.exit(); status(''); } else { status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
+  });
   const clock = new THREE.Clock(); let t = 0;
   renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.1); t += dt;
+    if (photo && photo.active) { photo.render(); if (photo.ready) status('Photo mode (path traced) · ' + photo.samples + ' samples · P to exit'); return; }
     animateDoors(dt);
     player.update(dt);
     phys.step(dt);

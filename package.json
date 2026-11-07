@@ -17,6 +17,8 @@
     "playwright-core": "^1.65.0",
     "postprocessing": "^6.39.6",
     "three": "^0.187.0",
+    "three-gpu-pathtracer": "^0.0.28",
+    "three-mesh-bvh": "^0.9.18",
     "trystero": "^0.26.0"
   }
 }

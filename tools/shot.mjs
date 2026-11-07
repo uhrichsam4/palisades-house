@@ -35,7 +35,7 @@ for (const job of jobs) {
   const logs = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => logs.push('pageerror: ' + e.message));
-  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1';
+  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1'; if (opt.pt) q += `&pt=${opt.pt}`;
   const t0 = Date.now();
   await page.goto(`http://127.0.0.1:${port}/index.html?${q}`, { waitUntil: 'load', timeout: 60000 });
   try { await page.waitForFunction(() => window.__ready === true, null, { timeout: Number(opt.timeout || 120000), polling: 250 }); }
