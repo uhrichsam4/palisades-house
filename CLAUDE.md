@@ -47,6 +47,11 @@ export async function build(ctx) { /* add everything under ctx.root */ }
   `phys.boxAABB(min,max)`, `phys.trimesh(worldGeo)`; `phys.dynamic(mesh, {mass, shape:'box'|'ball'|'hull'})`
   makes a pushable rigid body (players are water creatures and shove things).
 
+## Water
+Water surfaces go through `src/water/index.js` (`createWater(ctx, {outline, surfaceY, floorY, color, name})` →
+`{group, disturb, splash, heightAt, isInside, addFloater}`). The pool piece calls it; the water simulation
+module implements it; the characters query `waterBodies`. Don't change its signature.
+
 ## Ownership — you may edit ONLY
 1. `src/rooms/<your piece>.js`
 2. New files under `src/rooms/<your piece>/` and `assets/<your piece>/` (generated textures, models).
