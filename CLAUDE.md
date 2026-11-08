@@ -52,6 +52,12 @@ Water surfaces go through `src/water/index.js` (`createWater(ctx, {outline, surf
 `{group, disturb, splash, heightAt, isInside, addFloater}`). The pool piece calls it; the water simulation
 module implements it; the characters query `waterBodies`. Don't change its signature.
 
+## Realism guide
+Read `docs/LOOKDEV.md` before building: fabric library (`kit.fabric.*`), geometry detail rules (bevels, cushions,
+tufting, piping, draped bedding, cabinet reveals), CC0 texture/model IDs (`tools/ph.mjs`, `tools/acg.mjs`),
+metal/glass/mirror/fixture recipes, outdoor rules. Lighting (room probes with bounce + box-projected
+reflections) is global.
+
 ## Ownership — you may edit ONLY
 1. `src/rooms/<your piece>.js`
 2. New files under `src/rooms/<your piece>/` and `assets/<your piece>/` (generated textures, models).

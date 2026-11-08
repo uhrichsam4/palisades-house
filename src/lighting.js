@@ -55,13 +55,44 @@ function anchor(mesh, group) {
   return c.addScaledVector(nn, 0.25);
 }
 
+// Box-projected (parallax-corrected) reflections: a probe's cube map is treated as the inside of the
+// room's box, so reflections on floors, stone, glass and metal line up with the real walls instead of
+// looking infinitely far away. Diffuse lighting is unchanged.
+const BP_FUNC = `
+uniform vec3 bpMin; uniform vec3 bpMax; uniform vec3 bpPos; varying vec3 vBPWorld;
+vec3 bpParallax( vec3 v ) {
+  vec3 p = clamp( vBPWorld, bpMin + 0.01, bpMax - 0.01 );
+  vec3 tMax = ( bpMax - p ) / v, tMin = ( bpMin - p ) / v;
+  vec3 t = max( tMax, tMin );
+  float d = min( min( t.x, t.y ), t.z );
+  return d > 0.0 ? normalize( p + v * d - bpPos ) : v;
+}
+`;
+function boxProject(THREEmod, mat, box, probePos) {
+  const chunk = THREEmod.ShaderChunk.envmap_physical_pars_fragment;
+  const key = 'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );';
+  if (!chunk.includes(key)) return; // three changed its chunk: keep plain probes
+  const patched = chunk.replace(key, key + '\n\t\t\treflectVec = bpParallax( reflectVec );');
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.bpMin = { value: box.min }; sh.uniforms.bpMax = { value: box.max }; sh.uniforms.bpPos = { value: probePos };
+    sh.vertexShader = 'varying vec3 vBPWorld;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvBPWorld = worldPosition.xyz;');
+    sh.fragmentShader = BP_FUNC + sh.fragmentShader.replace('#include <envmap_physical_pars_fragment>', patched);
+  };
+  mat.customProgramCacheKey = () => 'bp1';
+}
+function roomBox(probe) {
+  const r = P.ROOMS[probe.room]; const [x0, z0, x1, z1] = r.rect; const y0 = P.LEVELS[r.level].floor;
+  const y1 = r.level === 0 ? P.LEVELS[0].ceil : P.LEVELS[1].plate + 1.2; // vaulted upper rooms rise above the plate
+  return new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+}
+
 export async function buildRoomProbes(ctx, { size = 128, passes = 2, intensity = 1.0, onStatus } = {}) {
   const { renderer, scene } = ctx; const t0 = performance.now();
   const probes = probePoints();
   scene.updateMatrixWorld(true);
   // 1. bind every interior mesh (or mesh face group) to its probe, cloning materials per probe
   const clones = new Map(); const bound = []; // {mesh, slot, probe}
-  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; clones.set(key, c); } return c; };
+  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; if (!mat.onBeforeCompile || mat.onBeforeCompile.toString().length < 30) boxProject(THREE, c, roomBox(probe), probe.pos); clones.set(key, c); } return c; };
   scene.traverse(o => {
     if (!o.isMesh || SKIP(o)) return;
     let p = o; while (p) { if (SKIP(p) || p.name === 'water' || p.name === 'avatar') return; p = p.parent; }
