@@ -14,7 +14,7 @@ const ICON = {
   moon: '<path d="M15.5 12.3A6 6 0 0 1 7.7 4.5a6 6 0 1 0 7.8 7.8z"/>',
 };
 const svg = (k, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
-const HINTS = [['CLICK', 'WALK'], ['WASD', 'MOVE'], ['SHIFT', 'RUN'], ['SPACE', 'JUMP'], ['E', 'DOOR'], ['V', 'CAMERA'], ['T', 'CHAT'], ['Q', 'SPEAKER'], ['Y', 'MUSIC'], ['R', 'RE-CREATE'], ['C', 'WATCH'], ['P', 'PHOTO'], ['F', 'FPS'], ['G', 'GRAPHICS'], ['M', 'MENU']];
+const HINTS = [['CLICK', 'WALK'], ['WASD', 'MOVE'], ['SHIFT', 'RUN'], ['SPACE', 'JUMP'], ['E', 'DOOR'], ['V', 'CAMERA'], ['T', 'CHAT'], ['Q', 'SPEAKER'], ['Y', 'MUSIC'], ['L', 'MAKE IT RAIN'], ['J', 'GAMES'], ['B', 'WAVE'], ['R', 'RE-CREATE'], ['C', 'WATCH'], ['P', 'PHOTO'], ['F', 'FPS'], ['G', 'GRAPHICS'], ['M', 'MENU']];
 
 export function themeToggle(cls = '') {
   const seg = document.createElement('div'); seg.className = 'theme-seg ' + cls; seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', 'Theme');

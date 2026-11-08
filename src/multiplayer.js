@@ -307,6 +307,8 @@ export async function start(ctx) {
   try { api.recreate = startRecreate(ctx, api); } catch (e) { console.warn('[recreate] not started:', e); }
   try { api.videos = startVideos(ctx, api); } catch (e) { console.warn('[videos] not started:', e); }
   try { api.speaker = startSpeaker(ctx, api); } catch (e) { console.warn('[speaker] not started:', e); }
+  try { const { startParty } = await import('./party/index.js'); api.party = startParty(ctx, api); } catch (e) { console.warn('[party] not started:', e); }
+  try { api.games = (await import('./games/index.js')).startGames(ctx, api); } catch (e) { console.warn('[games] not started:', e); }
   try { api.avatars = startAvatarSync(ctx, api); } catch (e) { console.warn('[avatars] not started:', e); }
   return api;
 }

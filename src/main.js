@@ -20,6 +20,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { buildRoomProbes, bindRoomProbes } from './lighting.js';
 import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics } from './perf.js';
+import { createCuller } from './cull.js';
 import * as P from './plan.js';
 import { PIECES } from './rooms/index.js';
 import { createPhysics } from './physics.js';
@@ -148,13 +149,13 @@ function applyQuality(tier, pr) {
   renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight, false);
   if (!composer) return;
   setAO(tier.ao); passes.bloom.enabled = tier.bloom;
-  passes.smaa.enabled = tier.aa === 'smaa'; passes.fxaa.enabled = tier.aa === 'fxaa';
+  passes.smaa.enabled = tier.aa === 'smaa' && pr < 1.5; passes.fxaa.enabled = tier.aa === 'fxaa'; // dense pixels: SMAA buys little
   composer.setPixelRatio(pr); composer.setSize(innerWidth, innerHeight);
 }
 
 // ---------------------------------------------------------------- boot
 const updates = [];
-let shadows = null;
+let shadows = null, cull = null, mirrorRooms = new Set();
 const T0 = performance.now(); window.__timing = {};
 const mark = (k) => { window.__timing[k] = Math.round(performance.now() - T0); };
 const ctxBase = {
@@ -209,9 +210,9 @@ async function main() {
   // walk mode: a small pool of real lights handed to the fixtures nearest the viewer (see perf.js)
   const pool = SHOT ? null : createLightPool(scene, { points: 3, spots: 2 });
   ctxBase.lightPool = pool;
-  if (!SHOT) guardMirrors(scene);
+  if (!SHOT) for (const m of guardMirrors(scene)) if (m.room) mirrorRooms.add(m.room);
   const probesJob = () => !bound ? Promise.resolve() : bound.bake({ intensity: LIGHT.probeIntensity, onStatus: SHOT ? status : null, background: !SHOT,
-    beforeCapture: pool ? (pos, draw) => pool.around(pos, draw) : null })
+    beforeCapture: pool ? (pos, draw) => (cull ? cull.without(() => pool.around(pos, draw)) : pool.around(pos, draw)) : null })
     .then(() => { shadows?.poke(); }).catch(e => { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); });
   if (bound && SHOT) await probesJob();
   setupPost();
@@ -251,6 +252,8 @@ async function main() {
   const quality = createQuality({ renderer, apply: applyQuality, initial: (params.get('quality') || 'auto').toLowerCase() });
   ctxBase.quality = quality; window.__quality = quality;
   shadows = createShadowScheduler(renderer);
+  // room/portal culling (src/cull.js): walk mode only; photo shots never cull
+  if (!params.get('nocull')) { cull = createCuller({ scene, camera, phys, doors: ctxBase.doors || [], mirrorRooms, onChange: () => shadows.poke() }); window.__cull = cull; }
   THREE.DefaultLoadingManager.onLoad = ((prev) => () => { prev?.(); shadows.poke(); })(THREE.DefaultLoadingManager.onLoad); // late model loads cast shadows too
   const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => useNearestDoor(pos), onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => { const b = document.body.classList; return b.contains('ui-open') || b.contains('menu-open') || b.contains('paused'); } }, { spawn: SPAWN, yaw: Math.PI });
   ctxBase.player = player;
@@ -291,7 +294,7 @@ async function main() {
   addEventListener('keydown', async (e) => {
     if (e.code !== 'KeyP' || (e.target && e.target.tagName === 'INPUT')) return;
     if (!photo) { const { createPhotoMode } = await import('./pathtrace.js'); photo = createPhotoMode(ctxBase); }
-    if (photo.active) { photo.exit(); status(''); } else { status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
+    if (photo.active) { photo.exit(); if (cull) cull.enabled = true; status(''); } else { if (cull) cull.enabled = false; status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
   });
   let last = performance.now(), t = 0;
   renderer.setAnimationLoop(() => {
@@ -307,7 +310,7 @@ async function main() {
     phys.step(dt);
     for (const u of updates) u(dt, t);
     pool?.update(dt, camera.position);
-    let moving = doorsMoving || (window.__mp?.peers?.size > 0);
+    let moving = doorsMoving || (window.__mp?.peers?.size > 0) || (player.state.thirdPerson && player.state.velOut?.lengthSq() > 1e-4); // own avatar casts too
     if (!moving) for (const d of phys.dynamics) if (!d.body.isSleeping()) { moving = true; break; }
     shadows.tick(moving);
     render();
@@ -370,7 +373,7 @@ function flyCam(dt) {
   if (k0 >= 1) { camTween = null; tw.then?.(); }
 }
 
-function render() { if (composer) composer.render(); else renderer.render(scene, camera); }
+function render() { cull?.update(); if (composer) composer.render(); else renderer.render(scene, camera); }
 // handles for tools/perf.mjs (frame-cost measurement); paused stops the walk loop so frames can be timed one by one
 window.__dbg = { renderer, scene, camera, sun, LIGHT, render: () => render(), get composer() { return composer; }, get n8() { return n8; }, paused: false };
 

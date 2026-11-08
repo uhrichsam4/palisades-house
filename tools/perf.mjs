@@ -46,7 +46,7 @@ const timing = await page.evaluate(() => window.__timing || null);
 await page.evaluate(([tier, scale]) => { const q = window.__quality; if (!q) return; q.set(tier); q.setScale(scale); }, [opt.tier || 'high', +(opt.scale || 0.75)]);
 
 // spots: [x, z, level, label]; four headings each
-const SPOTS = [[9.7, 9.0, 0, 'foyer'], [5.5, 17.0, 0, 'family'], [18.4, 16.0, 0, 'kitchen'], [12.0, 14.2, 1, 'primary'], [18.0, 24.0, 0, 'pool deck']];
+const SPOTS = [[9.7, 9.0, 0, 'foyer'], [5.5, 17.0, 0, 'family'], [18.4, 16.0, 0, 'kitchen'], [12.0, 14.2, 1, 'primary'], [18.0, 24.0, 0, 'pool deck'], [9.0, -5.0, 0, 'front'], [20.0, 3.2, 1, 'bedB'], [10.5, 5.2, 0, 'stairs']];
 const FR = +(opt.frames || 24);
 const out = await page.evaluate(async ({ SPOTS, FR }) => {
   const d = window.__dbg, R = d.renderer, gl = R.getContext(), px = new Uint8Array(4); const P = await import('/src/plan.js');
