@@ -43,3 +43,45 @@ body.locked #crosshair{opacity:.7}
 .mp-toast{background:rgba(255,255,255,.92);color:#0e141c;border-radius:9px;padding:6px 12px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,.18);animation:mp-in .25s ease-out;transition:opacity .5s,transform .5s}
 .mp-toast.out{opacity:0;transform:translateY(-6px)}
 @keyframes mp-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+/* ---- Re-create (#rc): bottom-centre scene button, seat count, countdown, progress */
+#rc{position:fixed;left:0;right:0;bottom:54px;z-index:6;display:none;flex-direction:column;align-items:center;gap:10px;font-size:13px;color:#fff;pointer-events:none}
+#rc.show{display:flex}
+body.shot #rc{display:none!important}
+.rc-card{pointer-events:auto;background:rgba(14,20,28,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);min-width:220px}
+.rc-row{display:flex;align-items:center;gap:8px;justify-content:center}
+#rc button{font:inherit;font-weight:600;color:#0e141c;background:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+#rc button:hover{background:#e6f4ff}
+#rc button:disabled{opacity:.55;cursor:default;background:#fff}
+#rc button.ghost{color:#fff;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2)}
+#rc button.ghost:hover{background:rgba(255,255,255,.24)}
+#rc button[hidden]{display:none}
+#rc kbd{font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.6;margin-left:4px;padding:1px 4px;border-radius:4px;border:1px solid currentColor}
+.rc-in{opacity:.8;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rc-msg{font-size:11px;opacity:.75;text-align:center}
+.rc-msg:empty{display:none}
+.rc-prog{height:3px;border-radius:2px;background:rgba(255,255,255,.18);overflow:hidden;display:none}
+.rc-prog.on{display:block}
+#rc-bar{height:100%;width:0;background:#7cc7ff}
+.rc-count{position:fixed;left:50%;top:50vh;transform:translate(-50%,-50%);font-size:120px;font-weight:700;color:#fff;text-shadow:0 4px 24px rgba(0,0,0,.45);opacity:0;transition:opacity .2s;pointer-events:none}
+.rc-count.on{opacity:.92;animation:rc-pop 1s ease-out infinite}
+@keyframes rc-pop{from{transform:translate(-50%,-50%) scale(1.25)}to{transform:translate(-50%,-50%) scale(1)}}
+/* ---- Video spots (#vs): "Watch" pill near a ▶ card, watch bar while a clip plays (src/videos.js) */
+#vs{position:fixed;left:0;right:0;bottom:118px;z-index:7;display:none;flex-direction:column;align-items:center;gap:8px;font-size:13px;color:#fff;pointer-events:none}
+#vs.near,#vs.on{display:flex}
+body.shot #vs{display:none!important}
+#vs button{pointer-events:auto;font:inherit;font-weight:600;color:#0e141c;background:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+#vs button:hover{background:#e6f4ff}
+#vs button.ghost{color:#fff;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2)}
+#vs button.ghost:hover{background:rgba(255,255,255,.24)}
+#vs button[hidden]{display:none}
+#vs kbd{font:600 10px ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.6;margin-left:4px;padding:1px 4px;border-radius:4px;border:1px solid currentColor}
+#vs .vs-pill{box-shadow:0 4px 18px rgba(0,0,0,.18)}
+#vs.on .vs-pill,#vs:not(.on) .vs-card{display:none}
+#vs.on{top:14px;bottom:auto}
+.vs-card{pointer-events:auto;background:rgba(14,20,28,.58);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 18px rgba(0,0,0,.18);align-items:center}
+.vs-title{font-weight:600;font-size:14px}
+.vs-row{display:flex;gap:8px;justify-content:center}
+.vs-help{font-size:11px;opacity:.7}
+.vs-msg{font-size:11px;color:#ffd28a}
+.vs-msg:empty{display:none}
+body.watching #crosshair,body.watching #help,body.watching #rc{display:none!important}

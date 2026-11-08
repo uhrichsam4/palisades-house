@@ -534,7 +534,7 @@ export async function build(ctx) {
     const sliderGlass = new THREE.MeshPhysicalMaterial({ color: 0xdde8e4, transparent: true, opacity: 0.16, roughness: 0.02, ior: 1.5, specularIntensity: 1, envMapIntensity: 2.2, depthWrite: false, side: THREE.DoubleSide });
     const sx0 = 15.39, sx1 = wx0, sh = 2.75; const sg = kit.group(bw, [0, 0, ZS], 0, 'slider');
     bx(sg, M.matteBlack, sx0, 0, -0.06, sx1 - sx0, 0.015, 0.12); // threshold track
-    try { const pl = kit.fitTo(await kit.loadModel('assets/ph/potted_plant_01/potted_plant_01_1k.gltf'), 1.25, 'y'); pl.position.set(16.0, 0.006, 20.6); bw.add(pl); } catch (e) { console.warn('[kitchen] terrace plant', e.message); }
+    try { const pl = kit.fitTo(await kit.loadModel('assets/ph/potted_plant_01/potted_plant_01_1k.gltf'), 1.25, 'y'); pl.position.set(17.3, 0.006, 20.95); bw.add(pl); /* corner by the bay wall: clear of the k-sw terrace door */ } catch (e) { console.warn('[kitchen] terrace plant', e.message); }
     bx(sg, wall, sx0, sh, -0.10, sx1 - sx0, CEIL - sh, 0.20);
     const n = 2, pw = (sx1 - sx0) / n;
     for (let i = 0; i < n; i++) {
@@ -554,7 +554,7 @@ export async function build(ctx) {
     kit.floorFinish(bw, [15.39, ZS + 0.07, wx0, 21.35], std({ map: paver, roughness: 0.85 }), null, 0.006);
   }
   {
-    // L banquette: along the rear wall (z 20.83–21.35) x 15.39–19.40, return along x=15.39 (z 19.30–20.83)
+    // L banquette: along the rear wall (z 20.83–21.35) x BAYX–20.40, return along the bay side wall (z 19.85–20.83)
     const seatH = 0.46, dep = 0.52;
     const bench = (x0, z0, w, d, axis) => {
       const g = kit.group(nook, [0, 0, 0], 0, 'banquette');
@@ -566,7 +566,7 @@ export async function build(ctx) {
       else { const n = Math.max(1, Math.round(d / 0.75)), dw = d / n; const fg = kit.group(g, [x0 + w, 0, z0 + d], PI / 2); for (let i = 0; i < n; i++) { front(fg, i * dw, 0.10, dw, 0.32, -0.002, lacquer); pull(fg, i * dw + dw / 2, 0.36, 0.02, 0.22); } }
       return g;
     };
-    const BX0 = BAYX, BX1 = 20.15;
+    const BX0 = BAYX, BX1 = 20.40; // v13/v04: the rear bench runs past the narrow window to x ≈ 20.4
     const b1 = bench(BX0, 21.35 - dep, BX1 - BX0, dep, 'x');
     // the rear bench's front faces −z, so build its fronts on a rotated frame instead
     b1.children.filter(c => c.isGroup).forEach(c => b1.remove(c));
@@ -622,7 +622,7 @@ export async function build(ctx) {
 
     // white coral "sputnik" chandelier (p09, p10)
     {
-      const SY = 1.92; const cg = kit.group(nook, [tx, SY, tz], 0, 'coralChandelier');
+      const SY = 1.92; const cg = kit.group(nook, [tx + 0.40, SY, tz], 0, 'coralChandelier'); // v13: hangs ~0.4 m further +x than the table centre
       const parts = []; const rr = kit.rng(31); const N = 52;
       for (let i = 0; i < N; i++) {
         const yy = 1 - 2 * (i + 0.5) / N, rad = Math.sqrt(1 - yy * yy), th = i * 2.399963;
@@ -651,7 +651,7 @@ export async function build(ctx) {
 
     // black roller-shade cassettes over the nook windows (p10)
     const cassette = (x0, z0, w, d) => bx(nook, M.matteBlack, x0, 2.55, z0, w, 0.12, d, 0.004);
-    cassette(18.27, 21.20, 1.56, 0.15); cassette(20.07, 21.20, 0.66, 0.15); cassette(BAYX, 19.91, 0.15, 0.68);
+    cassette(18.16, 21.20, 1.78, 0.15); cassette(20.07, 21.20, 0.66, 0.15); cassette(BAYX, 19.91, 0.15, 0.68);
   }
 
   // ================================================================== DECOR
@@ -804,7 +804,7 @@ export async function build(ctx) {
     };
     grid('z', 18.40, 13.58, 15.33, 0.06, 2.84, 1, 1, 0.12);   // last dining slider panel (p08 stools)
     grid('z', ZS, 15.45, 17.65, 0.06, 2.69, 4, 2, 0.09);       // our rear slider + its frames (p11 lower-left stripes)
-    grid('z', 21.35, 18.33, 19.78, 0.95, 2.55, 2, 2);          // nook rear window (p09 aisle, p10 floor)
+    grid('z', 21.35, 18.215, 19.885, 0.95, 2.55, 2, 2);          // nook rear window (p09 aisle, p10 floor)
     grid('z', 21.35, 20.13, 20.68, 0.95, 2.55, 1, 3);
     grid('x', BAYX, 19.95, 20.55, 0.95, 2.55, 1, 3);           // bay side window
     const panePts = (p) => { const [kind, pl, a0, a1, y0, y1] = p; return [[a0, y0], [a1, y0], [a1, y1], [a0, y1]].map(([a, y]) => kind === 'z' ? [a, pl, y] : [pl, a, y]); };
@@ -879,7 +879,7 @@ export async function build(ctx) {
       rect(SI.xa - 0.05, SI.z0 - 0.02, SI.xb + 0.05, SI.z1 + 0.02, 0.55, 5);
       rect(21.40 - D - 0.03, 13.68, 21.40, 21.35, 0.45, 6);               // range wall plinth line
       rect(FX0 - 0.03, 10.75, FX1 + 0.03, 10.75 + FD + 0.03, 0.45, 6);     // fridge column
-      rect(BAYX, 21.35 - 0.56, 20.18, 21.35, 0.4, 7); rect(BAYX, 19.83, BAYX + 0.56, 21.35, 0.4, 7); // banquette
+      rect(BAYX, 21.35 - 0.56, 20.43, 21.35, 0.4, 7); rect(BAYX, 19.83, BAYX + 0.56, 21.35, 0.4, 7); // banquette
       g.filter = 'blur(4px)'; g.fillStyle = 'rgba(0,0,0,0.42)';
       for (const [x, z] of stoolPts) for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const [u, v] = fp(x + sx * 0.19, z + sz * 0.19); g.beginPath(); g.arc(u, v, 0.035 * S, 0, PI * 2); g.fill(); }
       for (const [x, z] of chairPts) for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const [u, v] = fp(x + sx * 0.23, z + sz * 0.21); g.beginPath(); g.arc(u, v, 0.03 * S, 0, PI * 2); g.fill(); }

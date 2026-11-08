@@ -15,6 +15,7 @@
 // mesh objects get new geometry) so pieces that patch those meshes (bedB, bedC) keep working. Roof surfaces are
 // built as "min of planes" per convex-ish part (straight hip/gable geometry), with a 0.22 m heel so the soffit
 // underside meets the wall plate, black fascia skirts on every edge and ridge caps on hips/ridges.
+import { STREET_Y, FRONT } from './site/terrain.js';
 export const piece = { rooms: [], photos: ["p00", "p01", "p44"] };
 export const ownCeiling = [];
 export const views = {
@@ -23,9 +24,8 @@ export const views = {
   p44: { pos: [22.0, 10.5, 66.0], look: [21.0, 6.8, 11.0], fov: 52 },
 };
 
-// Front grade. The street/sidewalk must sit above the site's ground (y −0.31 placeholder). If the site piece
-// lowers the street, change STREET_Y: driveway slope and entry-step count follow automatically.
-const STREET_Y = -0.27;          // asphalt
+// Front grade: the street level lives in site/terrain.js (STREET_Y, ~0.95 m below the floor per videos v01/v08/v09;
+// the terrain is cut down to it). Driveway slope, entry steps and the front walls follow it.
 const WALK_Y = STREET_Y + 0.15;  // sidewalk top / curb top
 const HEEL = 0.22, TH = 0.22;    // roof heel above the plate at the wall line, roof (fascia) depth
 
@@ -123,7 +123,8 @@ export async function build(ctx) {
   for (const m of [M.shingles]) { // also patched below on the actual roof-mesh materials (others may have cloned)
     m.map = sh.map; m.normalMap = sh.normalMap; m.map.repeat.set(shingleRep, shingleRep); m.normalMap.repeat.set(shingleRep, shingleRep);
   }
-  const styleShingle = (m) => { m.map = sh.map; m.normalMap = sh.normalMap; m.normalScale = new THREE.Vector2(0.9, 0.9); m.color = new THREE.Color(0xffffff); m.roughness = 0.9; m.metalness = 0; m.needsUpdate = true; };
+  // dark charcoal shingles (v05/p41: the roof reads near-black even at grazing angles, so damp the sky reflection)
+  const styleShingle = (m) => { m.map = sh.map; m.normalMap = sh.normalMap; m.normalScale = new THREE.Vector2(0.9, 0.9); m.color = new THREE.Color(0xb4b4b4); m.roughness = 0.92; m.metalness = 0; m.envMapIntensity = 0.5; m.needsUpdate = true; };
   styleShingle(M.shingles);
   const styleSoffit = (m) => { m.color = new THREE.Color(0x26221f); m.roughness = 0.75; m.needsUpdate = true; };
   styleSoffit(M.soffit);
@@ -403,15 +404,27 @@ export async function build(ctx) {
     [10.25, 5.25, 17.0, [0, 1]], [11.45, 5.25, 17.0, [0, 1]],                  // primary rear (upper)
   ]) lantern(x, y, z, n);
 
-  // ================================================================ front grade: driveway, walk, steps, planters, street
-  const FRONT_Z = -6.8, CURB_Z = -8.45;
+  // ================================================================ front grade: driveway, entry, planters, street
+  // The street is ~0.95 m below the porch (videos v01/v08/v09; terrain.js cuts the ground to match).
+  // Entry (v01/v09): a flat landing of 60 cm grey tiles at door level reaching out to the garage-front line,
+  // a 0.45 m seat ledge running diagonally out from the turret's NE facet with grasses planted behind it,
+  // then two short flights (3 risers each) via a mid landing down to a paved apron at sidewalk level in front
+  // of the turret (v08: a truck parks there; no retaining wall at the curb).
+  const FRONT_Z = FRONT.walkZ, CURB_Z = FRONT.curbZ, BOT = STREET_Y - 0.15;
+  const tileTex = pixelTex(512, 512, (x, y) => { // 512 px = 1.2 m = 2 x 2 tiles of 0.6 m
+    const ti = Math.floor(x / 256) + 2 * Math.floor(y / 256), u = x % 256, v = y % 256;
+    const h = ((x * 73856093) ^ (y * 19349663)) >>> 0; const sp = ((h >>> 8) & 31) - 16;
+    const g = (u < 3 || v < 3) ? 118 : 171 + [0, 6, -5, 3][ti] + sp * 0.35;
+    return [g, g, g + 2]; });
+  const tileMat = std({ map: tileTex, roughness: 0.72 });
   const flatQuad = (parent, pts, y, mat, uvScale = 1) => { // pts [[x,z]...] CCW-agnostic polygon at height y (or fn)
     const shape = pts.map(p => V2(p[0], p[1])); const tris = THREE.ShapeUtils.triangulateShape(shape, []); const pos = [], uv = [];
     for (const t of tris) { let [a, b, c] = t; const cy = (shape[b].y - shape[a].y) * (shape[c].x - shape[a].x) - (shape[b].x - shape[a].x) * (shape[c].y - shape[a].y); if (cy < 0) [b, c] = [c, b];
       for (const k of [a, b, c]) { const p = shape[k]; pos.push(p.x, typeof y === 'function' ? y(p.x, p.y) : y, p.y); uv.push(p.x * uvScale, -p.y * uvScale); } }
     const m = new THREE.Mesh(geoFrom(pos, uv), mat); m.receiveShadow = true; parent.add(m); return m;
   };
-  // driveway: slabs with turf joints. Left edge flares out towards the street (p00/p01).
+  const surfCollider = (m) => { m.updateMatrixWorld(true); phys.trimesh(m.geometry.clone().applyMatrix4(m.matrixWorld)); };
+  // driveway: slabs with turf joints. Left edge flares out towards the street (p00/p01); falls to the sidewalk.
   const dX0 = 11.55, dLeft = (z) => 23.10 + (0.35 - z) * 0.47; const dY = (x, z) => -0.01 + (WALK_Y + 0.01) * (0.35 - z) / (0.35 - FRONT_Z);
   {
     const J = 0.17, rowsZ = [0.35, -3.0, FRONT_Z]; const k = 0.45, cols = [15.45, 19.35]; // joint lines x = c + k*(0.35 - z)
@@ -425,81 +438,100 @@ export async function build(ctx) {
         flatQuad(g, [[L(za) + lo, za], [R(za) - hi, za], [R(zb) - hi, zb], [L(zb) + lo, zb]], (x, z) => dY(x, z) + 0.012, concreteMat, 1);
       }
     }
-    flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) - 0.004, turfMat, 1);
-    // side skirts down to grade
+    const tm = flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) - 0.004, turfMat, 1);
+    surfCollider(tm);
+    // side skirt down below the street on the flared (court) side
     for (const [xa, za, xb, zb] of [[dLeft(0.35), 0.35, dLeft(FRONT_Z), FRONT_Z]]) {
-      const pos = [xa, dY(xa, za), za, xb, dY(xb, zb), zb, xb, -0.32, zb, xa, dY(xa, za), za, xb, -0.32, zb, xa, -0.32, za];
+      const pos = [xa, dY(xa, za), za, xb, dY(xb, zb), zb, xb, BOT, zb, xa, dY(xa, za), za, xb, BOT, zb, xa, BOT, za];
       const m = new THREE.Mesh(geoFrom(pos, [0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0]), new THREE.MeshStandardMaterial({ color: 0xbdb7ad, roughness: 0.95, side: THREE.DoubleSide })); g.add(m);
     }
-    phys.boxAABB([dX0, -0.4, FRONT_Z], [dLeft(FRONT_Z), -0.005, 0.35]);
   }
-  // sidewalk + curb + street (in front of the lot only)
+  // sidewalk + curb + street (in front of the lot only; site.js lays the long street plane under it)
   {
     const g = kit.group(root, [0, 0, 0], 0, 'street');
     const SX0 = -14, SX1 = 40;
     for (let x = SX0; x < SX1; x += 1.5) flatQuad(g, [[x + 0.006, FRONT_Z], [x + 1.494, FRONT_Z], [x + 1.494, CURB_Z + 0.15], [x + 0.006, CURB_Z + 0.15]], WALK_Y, concreteMat, 1);
     flatQuad(g, [[SX0, FRONT_Z], [SX1, FRONT_Z], [SX1, CURB_Z + 0.15], [SX0, CURB_Z + 0.15]], WALK_Y - 0.008, new THREE.MeshStandardMaterial({ color: 0x9a958d, roughness: 1 }));
     kit.boxAt(g, capStone, SX0, STREET_Y, CURB_Z, SX1 - SX0, WALK_Y - STREET_Y, 0.15);
-    kit.boxAt(g, concreteMat, SX0, -0.34, CURB_Z + 0.15, SX1 - SX0, WALK_Y + 0.34 - 0.004, -FRONT_Z + CURB_Z - 0.15 + 0.0);
-    flatQuad(g, [[SX0 - 30, CURB_Z], [SX1 + 30, CURB_Z], [SX1 + 30, CURB_Z - 11], [SX0 - 30, CURB_Z - 11]], STREET_Y, asphaltMat, 1);
+    kit.boxAt(g, concreteMat, SX0, BOT, CURB_Z + 0.15, SX1 - SX0, WALK_Y - BOT - 0.004, -FRONT_Z + CURB_Z - 0.15);
+    flatQuad(g, [[SX0 - 30, CURB_Z], [SX1 + 30, CURB_Z], [SX1 + 30, FRONT.farCurbZ], [SX0 - 30, FRONT.farCurbZ]], STREET_Y, asphaltMat, 1);
     // gutter line
     flatQuad(g, [[SX0 - 30, CURB_Z], [SX1 + 30, CURB_Z], [SX1 + 30, CURB_Z - 0.45], [SX0 - 30, CURB_Z - 0.45]], STREET_Y + 0.004, new THREE.MeshStandardMaterial({ color: 0xb4afa6, roughness: 1 }));
-    phys.boxAABB([SX0, -0.4, CURB_Z], [SX1, WALK_Y, FRONT_Z]);
+    phys.boxAABB([SX0, BOT, CURB_Z], [SX1, WALK_Y, FRONT_Z]);
   }
   // white stucco planter / retaining wall with a light cap (x0,z0)-(x1,z1) footprint, top y
   const planterWalls = kit.group(root, [0, 0, 0], 0, 'planterWalls');
-  const wallBox = (x0, z0, x1, z1, top, bot = -0.32) => {
+  const wallBox = (x0, z0, x1, z1, top, bot = BOT) => {
     kit.boxAt(planterWalls, stucco, x0, bot, z0, x1 - x0, top - bot, z1 - z0);
     kit.boxAt(planterWalls, capStone, x0 - 0.025, top, z0 - 0.025, x1 - x0 + 0.05, 0.05, z1 - z0 + 0.05);
     phys.boxAABB([x0, bot, z0], [x1, top + 0.05, z1]);
   };
-  // entry: broad stone stair (p00/p01) climbing from the sidewalk between stepped white stucco walls to a
-  // landing, then a gently falling walk to the porch (the house floor is fixed at y 0 by the plan).
-  const WX0 = 8.30, WX1 = 10.75;
-  const NR = 5, RH = 0.13, TR = 0.42, Z_ST = FRONT_Z, Y_TOP = WALK_Y + NR * RH, Z_LAND = Z_ST + NR * TR + 1.1, Z_PORCH = 2.4;
-  const wY = (z) => z < Z_ST ? WALK_Y : z < Z_ST + NR * TR ? WALK_Y + RH * (Math.floor((z - Z_ST) / TR) + 1) : z < Z_LAND ? Y_TOP : z < Z_PORCH ? Y_TOP * (Z_PORCH - z) / (Z_PORCH - Z_LAND) : 0;
+  // entry levels: landing 0 -> 2 treads -> mid landing -> 2 treads -> apron at sidewalk level (6 x 0.133 m risers)
+  const RISE = -WALK_Y / 6, TRD = 0.36;
+  const LZ = 0.35, LX = 9.45, RX = 10.95, WX = 7.2;          // landing front edge; flight-1 x range; west edge below
+  const MZ1 = LZ - 2 * TRD, MZ0 = -2.2, PZ = MZ0 - 2 * TRD;   // mid landing z range; apron starts at PZ
+  const LEDGE_S = [7.65, 3.98], LEDGE_B = [LX, 1.70], SEAT = 0.45;
+  const entryY = (z) => z >= LZ ? 0 : z >= LZ - TRD ? -RISE : z >= MZ1 ? -2 * RISE : z >= MZ0 ? -3 * RISE : z >= MZ0 - TRD ? -4 * RISE : z >= PZ ? -5 * RISE : WALK_Y;
   {
     const g = kit.group(root, [0, 0, 0], 0, 'entryWalk');
-    for (let i = 0; i < NR; i++) { const y = WALK_Y + RH * (i + 1); const z0 = Z_ST + TR * i;
-      kit.boxAt(g, capStone, WX0, -0.32, z0, WX1 - WX0, y + 0.32, TR + 0.005);
-      kit.boxAt(g, concreteMat, WX0 + 0.01, y - 0.012, z0 - 0.025, WX1 - WX0 - 0.02, 0.03, 0.04); // nosing shadow line
-      phys.boxAABB([WX0, -0.4, z0], [WX1, y, z0 + TR]); }
-    const zS = Z_ST + NR * TR;
-    kit.boxAt(g, capStone, WX0, -0.32, zS, WX1 - WX0, Y_TOP + 0.32, Z_LAND - zS); phys.boxAABB([WX0, -0.4, zS], [WX1, Y_TOP, Z_LAND]);
-    // sloped walk: pavers as one sheared slab
-    const top = flatQuad(g, [[WX0, Z_LAND], [WX1, Z_LAND], [WX1, Z_PORCH], [WX0, Z_PORCH]], (x, z) => wY(z), capStone, 1);
-    top.updateMatrixWorld(true); phys.trimesh(top.geometry.clone().applyMatrix4(top.matrixWorld));
-    for (const x of [WX0, WX1]) { const pos = [x, Y_TOP, Z_LAND, x, 0, Z_PORCH, x, -0.32, Z_PORCH, x, Y_TOP, Z_LAND, x, -0.32, Z_PORCH, x, -0.32, Z_LAND];
-      const m = new THREE.Mesh(geoFrom(pos, [0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0]), stuccoD); g.add(m); }
-    kit.boxAt(g, concreteMat, 8.30, -0.32, 2.4, 11.12 - 8.30, 0.318, 4.43 - 2.4); // porch apron
-    kit.boxAt(g, std({ color: 0x5a4a3c, roughness: 1 }), 9.25, 0, 3.55, 1.1, 0.012, 0.65); // coir door mat
-    phys.boxAABB([8.3, -0.4, 2.4], [11.12, 0, 4.43]);
+    // landing: tiles + solid body under the part that faces flight 1
+    const land = flatQuad(g, [[7.9, 4.43], [11.12, 4.43], [11.12, LZ], [LX, LZ], LEDGE_B, LEDGE_S], 0.003, tileMat, 1 / 1.2); surfCollider(land);
+    kit.boxAt(g, concreteMat, LX, BOT, LZ, 11.12 - LX, -BOT, 4.43 - LZ - 0.01);
+    phys.boxAABB([LX, BOT, LZ], [11.12, 0, 4.43]);
+    kit.boxAt(g, std({ color: 0x5a4a3c, roughness: 1 }), 9.25, 0, 3.55, 1.1, 0.014, 0.65); // coir door mat
+    const tread = (x0, x1, z0, z1, y) => {
+      kit.boxAt(g, capStone, x0, BOT, z0, x1 - x0, y - BOT, z1 - z0);
+      kit.boxAt(g, concreteMat, x0 + 0.01, y - 0.012, z0 - 0.025, x1 - x0 - 0.02, 0.03, 0.04); // nosing shadow line
+      phys.boxAABB([x0, BOT, z0], [x1, y, z1]);
+    };
+    tread(LX, RX, LZ - TRD, LZ, -RISE); tread(LX, RX, MZ1, LZ - TRD, -2 * RISE);
+    // mid landing (tiled)
+    kit.boxAt(g, concreteMat, WX, BOT, MZ0, RX - WX, -3 * RISE - BOT, MZ1 - MZ0); phys.boxAABB([WX, BOT, MZ0], [RX, -3 * RISE, MZ1]);
+    flatQuad(g, [[WX, MZ1], [RX, MZ1], [RX, MZ0], [WX, MZ0]], -3 * RISE + 0.003, tileMat, 1 / 1.2);
+    tread(WX, RX, MZ0 - TRD, MZ0, -4 * RISE); tread(WX, RX, PZ, MZ0 - TRD, -5 * RISE);
+    // paved apron at sidewalk level in front of the turret and the stairs, out to the sidewalk (v08)
+    const apron = (x0, z0, x1, z1) => {
+      kit.boxAt(g, concreteMat, x0, BOT, z0, x1 - x0, WALK_Y - BOT, z1 - z0); phys.boxAABB([x0, BOT, z0], [x1, WALK_Y, z1]);
+      for (let x = x0 + 1.5; x < x1 - 0.3; x += 1.5) kit.boxAt(g, M.matteBlack, x - 0.006, WALK_Y - 0.004, z0, 0.012, 0.006, z1 - z0); // saw cuts
+    };
+    apron(3.2, FRONT_Z, WX, -3.3); apron(WX, FRONT_Z, RX, PZ);
+    // seat ledge: stucco with a light concrete cap, diagonal from the turret's NE facet (rotated box + trimesh collider)
+    const dx = LEDGE_B[0] - LEDGE_S[0], dz = LEDGE_B[1] - LEDGE_S[1], L = Math.hypot(dx, dz) + 0.12, ux = dx / Math.hypot(dx, dz), uz = dz / Math.hypot(dx, dz);
+    const nx = -uz, nz = ux; const sgn = (nx * -1 + nz * -1) > 0 ? 1 : -1; // normal towards the planter (-x/-z)
+    const W = 0.42, cx = (LEDGE_S[0] + LEDGE_B[0]) / 2 + ux * 0.06 + sgn * nx * W / 2, cz = (LEDGE_S[1] + LEDGE_B[1]) / 2 + uz * 0.06 + sgn * nz * W / 2, ry = Math.atan2(-uz, ux);
+    const body = kit.add(g, new THREE.BoxGeometry(L, SEAT - BOT, W), stucco, [cx, (SEAT + BOT) / 2, cz], [0, ry, 0]); surfCollider(body);
+    kit.add(g, new THREE.BoxGeometry(L + 0.04, 0.05, W + 0.05), capStone, [cx, SEAT + 0.025, cz], [0, ry, 0]);
   }
-  // stepped flanking walls: inner wall (x 10.75–10.95) + planter + outer wall (x 11.35–11.55) along the driveway
-  for (let z = FRONT_Z; z < 2.39; ) {
-    const len = z < Z_ST + NR * TR ? TR : 0.9; const z1 = Math.min(2.4, z + len); const t = wY(Math.min(z1 - 0.01, z + len * 0.5)) + 0.48;
-    wallBox(WX1, z, WX1 + 0.2, z1, t); wallBox(11.35, z, 11.55, z1, Math.max(0.42, t - 0.12));
-    flatQuad(root, [[WX1 + 0.2, z], [11.35, z], [11.35, z1], [WX1 + 0.2, z1]], Math.max(0.36, t - 0.18), soilMat);
+  // planter behind the ledge (grasses, rosemary, a small olive) bounded by the turret, the ledge, the flight-1 cheek,
+  // a wall facing the mid landing and a low wall to the yard
+  const SOIL = 0.38;
+  wallBox(9.25, MZ1, LX, LEDGE_B[1], SEAT);                     // cheek beside flight 1
+  wallBox(WX, MZ1, 9.25, MZ1 + 0.2, SEAT);                      // faces the mid landing
+  wallBox(7.0, MZ1, WX, 2.55, SEAT); wallBox(5.30, 2.35, 7.0, 2.55, SEAT); wallBox(5.30, 2.55, 5.50, 4.43, SEAT);
+  flatQuad(root, [[5.5, 4.43], [5.6, 4.43], [6.1, 3.53], [7.4, 3.53], LEDGE_S, LEDGE_B, [9.25, LEDGE_B[1]], [9.25, MZ1 + 0.2], [WX, MZ1 + 0.2], [WX, 2.55], [5.5, 2.55]], SOIL, soilMat);
+  phys.boxAABB([WX, BOT, MZ1 + 0.2], [9.25, SOIL, 1.7]); phys.boxAABB([WX, BOT, 1.7], [8.2, SOIL, 3.2]); phys.boxAABB([5.5, -0.4, 2.55], [7.4, SOIL, 3.53]);
+  // low walls between the yard and the stairs / apron
+  wallBox(7.0, -3.3, WX, MZ1, -0.02); wallBox(3.2, -3.3, 7.0, -3.1, -0.02); wallBox(3.0, FRONT_Z, 3.2, -3.1, -0.02);
+  // planter strip between the stairs/apron and the driveway (stepped walls follow whichever side is higher)
+  const stripTop = (z) => Math.max(entryY(z), dY(11.4, z)) + 0.42;
+  for (let z = FRONT_Z; z < LZ - 0.01; ) {
+    const z1 = Math.min(LZ, z + 0.9); const t = Math.max(stripTop(z), stripTop(z1 - 0.01));
+    wallBox(RX, z, RX + 0.2, z1, t); wallBox(11.35, z, 11.55, z1, Math.max(dY(11.4, z) + 0.3, t - 0.1));
+    flatQuad(root, [[RX + 0.2, z], [11.35, z], [11.35, z1], [RX + 0.2, z1]], t - 0.07, soilMat);
     z = z1;
   }
-  wallBox(WX1 + 0.2, FRONT_Z, 11.35, FRONT_Z + 0.2, 0.62);
-  wallBox(10.95, 2.4, 11.12, 2.6, 0.42); flatQuad(root, [[10.95, 0.35], [11.12, 0.35], [11.12, 2.4], [10.95, 2.4]], 0.36, soilMat);
-  // turret planter (p01: grasses + olive in front of the bay) and SW-block front bed
-  wallBox(5.30, 2.35, 8.30, 2.55, 0.46); wallBox(5.30, 2.55, 5.50, 4.43, 0.46); wallBox(8.30, 2.35, 8.50, 4.43, 0.46);
-  flatQuad(root, [[5.5, 2.55], [8.3, 2.55], [8.3, 4.43], [5.5, 4.43]], 0.40, soilMat);
-  // front yard: two terraces (wall along the sidewalk, second wall behind), DG gravel yard, curved lawn
-  wallBox(-6.0, FRONT_Z, WX0, FRONT_Z + 0.22, 0.85);
-  wallBox(-6.0, -4.75, WX0 - 0.2, -4.53, 1.15);
-  wallBox(WX0 - 0.2, FRONT_Z, WX0, -4.75, 0.95); wallBox(WX0 - 0.2, -4.75, WX0, 2.35, 1.15);
-  wallBox(-6.2, FRONT_Z, -6.0, 7.07, 0.42);
-  flatQuad(root, [[-6, FRONT_Z + 0.22], [WX0 - 0.2, FRONT_Z + 0.22], [WX0 - 0.2, -4.75], [-6, -4.75]], 0.78, gravelMat);
-  flatQuad(root, [[-6, -4.53], [WX0 - 0.2, -4.53], [WX0 - 0.2, 7.07], [0.35, 7.07], [0.35, 16.0], [-6, 16.0]], (x, z) => 0.90 - 0.84 * Math.max(0, Math.min(1, (z + 4.53) / 9)), gravelMat, 1);
-  { // curved lawn (artificial turf) towards the SW, white curb edge
+  wallBox(RX + 0.2, FRONT_Z, 11.35, FRONT_Z + 0.2, stripTop(FRONT_Z));
+  // front yard (SW of the stairs): DG gravel at yard level, low white wall along the sidewalk, curved lawn
+  const YARD_Y = -0.27;
+  wallBox(-6.0, FRONT_Z, 3.0, FRONT_Z + 0.22, -0.02);
+  wallBox(-6.2, FRONT_Z, -6.0, 7.07, -0.1);
+  flatQuad(root, [[-6, FRONT_Z + 0.22], [3.0, FRONT_Z + 0.22], [3.0, -3.1], [7.0, -3.1], [7.0, 2.35], [5.3, 2.35], [5.3, 4.43], [5.01, 4.43], [5.01, 7.07], [0.35, 7.07], [0.35, 16.0], [-6, 16.0]], YARD_Y, gravelMat, 1);
+  { // curved lawn (artificial turf) towards the SW
     const pts = []; for (let i = 0; i <= 24; i++) { const a = Math.PI * 0.5 * i / 24; pts.push([-6 + 5.2 * Math.cos(a) * 1.0, -4.3 + 7.5 * Math.sin(a)]); }
     pts.push([-6, -4.3]);
-    flatQuad(root, pts, (x, z) => 0.93 - 0.84 * Math.max(0, Math.min(1, (z + 4.53) / 9)), turfMat);
+    flatQuad(root, pts, YARD_Y + 0.02, turfMat);
   }
-  // house-number pillar "17609" at the foot of the steps (p01)
+  // house-number pillar "17609" at the foot of the steps by the sidewalk (p01)
   {
     const g = kit.group(root, [11.25, 0, FRONT_Z - 0.05], 0, 'numberPillar');
     kit.add(g, new THREE.BoxGeometry(0.62, 1.15, 0.62), stucco, [0, WALK_Y + 0.575, 0.2]);
@@ -509,7 +541,8 @@ export async function build(ctx) {
     phys.solidGroup(g);
   }
   // left of the driveway (p00/p01): white stucco retaining wall along the curb, three tiers of stacked
-  // weathered timber sleepers behind it (0.2 m boards), white pillar at the driveway corner
+  // weathered timber sleepers behind it (0.2 m boards), white pillar at the driveway corner.
+  // (kept outside the tennis enclosure, which starts at z -3.4: v05/p41 look straight at its street end)
   const SLX1 = dLeft(FRONT_Z) + 6.5, SL_TOP = (i) => WALK_Y + 0.5 + 0.3 * (i + 1);
   {
     const g = kit.group(root, [0, 0, 0], 0, 'sleepers');
@@ -518,13 +551,13 @@ export async function build(ctx) {
     wallBox(dLeft(FRONT_Z) + 0.05, FRONT_Z, SLX1, FRONT_Z + 0.25, WALK_Y + 0.5);
     for (let i = 0; i < 3; i++) {
       const z0 = FRONT_Z + 0.25 + i * 0.85, x0 = dLeft(z0) + 0.15 + 0.05, top = SL_TOP(i);
-      kit.boxAt(g, gapMat, x0, -0.32, z0, SLX1 - x0, top + 0.31, 0.2);
-      for (let y = top - 0.15; y > -0.3; y -= 0.15) kit.boxAt(g, sleeper, x0, y + 0.02, z0 - 0.015, SLX1 - x0, 0.13, 0.2);
-      const dep = 0.85 - 0.2 + (i === 2 ? 2.0 : 0);
-      kit.boxAt(g, gravelMat, x0 + 0.2, -0.32, z0 + 0.2, SLX1 - x0 - 0.2, top + 0.32 - 0.04, dep);
-      kit.boxAt(g, gapMat, x0, -0.32, z0 + 0.2, 0.2, top + 0.31, dep); // driveway-side end: stacked sleepers too
-      for (let y = top - 0.15; y > -0.3; y -= 0.15) kit.boxAt(g, sleeper, x0 - 0.015, y + 0.02, z0 + 0.2, 0.2, 0.13, dep);
-      phys.boxAABB([x0, -0.4, z0], [SLX1, top, z0 + 0.85 + (i === 2 ? 2.0 : 0)]);
+      kit.boxAt(g, gapMat, x0, BOT, z0, SLX1 - x0, top - BOT - 0.01, 0.2);
+      for (let y = top - 0.15; y > BOT; y -= 0.15) kit.boxAt(g, sleeper, x0, y + 0.02, z0 - 0.015, SLX1 - x0, 0.13, 0.2);
+      const dep = 0.85 - 0.2 + (i === 2 ? 0.5 : 0);
+      kit.boxAt(g, gravelMat, x0 + 0.2, BOT, z0 + 0.2, SLX1 - x0 - 0.2, top - BOT - 0.04, dep);
+      kit.boxAt(g, gapMat, x0, BOT, z0 + 0.2, 0.2, top - BOT - 0.01, dep); // driveway-side end: stacked sleepers too
+      for (let y = top - 0.15; y > BOT; y -= 0.15) kit.boxAt(g, sleeper, x0 - 0.015, y + 0.02, z0 + 0.2, 0.2, 0.13, dep);
+      phys.boxAABB([x0, BOT, z0], [SLX1, top, z0 + 0.2 + dep]);
     }
     wallBox(dLeft(FRONT_Z) + 0.05, FRONT_Z - 0.05, dLeft(FRONT_Z) + 0.75, FRONT_Z + 0.55, WALK_Y + 1.0);
   }
@@ -537,7 +570,7 @@ export async function build(ctx) {
     const leaf = speckleTex(256, [205, 210, 196], [26, 30, 80], 71, { pebbles: 0.25, pebbleAmp: -70, nStrength: 4 }); leaf.map.repeat.set(3, 3); leaf.normalMap.repeat.set(3, 3);
     const leafMat = std({ map: leaf.map, normalMap: leaf.normalMap, normalScale: new THREE.Vector2(1.6, 1.6), roughness: 0.85 });
     const inst = [], tufts = []; const r = kit.rng(5150);
-    const yardY = (z) => 0.90 - 0.84 * Math.max(0, Math.min(1, (z + 4.53) / 9));
+    const yardY = (z) => YARD_Y;
     const COL = { olive: 0x8d9a7c, lav: 0x7d876c, box: 0x4a6532, hedge: 0x41592c, grass: 0xa49c72, dark: 0x34492a, sage: 0x9aa58a };
     // plant(x, z, yBase, height, width, type)
     const plant = (x, z, y, h, w, type) => {
@@ -554,21 +587,22 @@ export async function build(ctx) {
     const stemMat = std({ color: 0x5b5148, roughness: 0.9 });
     const olive = (x, z, y, h) => { plant(x, z, y + h * 0.18, h * 0.82, h * 0.5, 'olive'); for (let i = 0; i < 3; i++) { const a = r() * 6.28; kit.add(root, kit.cyl(0.018, 0.025, h * 0.45, 6), stemMat, [x + Math.cos(a) * 0.06, y + h * 0.22, z + Math.sin(a) * 0.06], [Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12]); } };
     // walk / driveway strip planter (soil follows the stepped walls)
-    for (let z = -6.2; z < 0.2; z += 0.85) { const y = Math.max(0.36, wY(z) + 0.30); if (r() < 0.5) plant(11.15, z, y, 0.5, 0.4, 'box'); else tuft(11.15, z, y, 0.7, 0.35, 'grass'); }
-    plant(11.04, 1.0, 0.36, 2.6, 0.55, 'dark'); plant(11.04, 1.9, 0.36, 2.3, 0.5, 'dark');
-    // turret planter
-    olive(6.0, 3.0, 0.40, 1.9); olive(7.5, 2.9, 0.40, 1.6);
-    for (let x = 5.7; x < 8.2; x += 0.5) tuft(x, 3.9 + (r() - 0.5) * 0.3, 0.40, 0.6 + r() * 0.3, 0.5, r() < 0.5 ? 'grass' : 'sage');
+    for (let z = -6.2; z < 0.2; z += 0.85) { const y = stripTop(z) - 0.07; if (r() < 0.5) plant(11.25, z, y, 0.5, 0.4, 'box'); else tuft(11.25, z, y, 0.7, 0.35, 'grass'); }
+    // turret / ledge planter (v01/v09: ornamental grasses + rosemary behind the seat ledge, a small tree near the cheek)
+    olive(6.0, 3.0, SOIL, 1.9); olive(7.7, 0.4, SOIL, 1.5);
+    for (let t = 0.08; t < 0.95; t += 0.12) { const x = LEDGE_S[0] + (LEDGE_B[0] - LEDGE_S[0]) * t - 0.55, z = LEDGE_S[1] + (LEDGE_B[1] - LEDGE_S[1]) * t - 0.4;
+      tuft(x, z, SOIL, 0.55 + r() * 0.3, 0.5, r() < 0.5 ? 'grass' : 'sage'); }
+    for (const [x, z] of [[7.6, 1.6], [8.0, 1.0], [7.5, 0.2], [8.8, 0.1], [7.3, 2.3], [6.5, 2.85]]) plant(x, z, SOIL, 0.65 + r() * 0.2, 0.75, 'sage');
     // SW block front bed + DG yard: sparse, varied (p00: olives, grasses, a few dark shrubs on warm gravel)
-    for (let x = 0.9; x < 5.0; x += 1.3) tuft(x, 6.2 + (r() - 0.5) * 0.4, 0.06, 0.7, 0.55, r() < 0.5 ? 'grass' : 'sage');
+    for (let x = 0.9; x < 5.0; x += 1.3) tuft(x, 6.2 + (r() - 0.5) * 0.4, YARD_Y, 0.7, 0.55, r() < 0.5 ? 'grass' : 'sage');
     for (const [x, z, h] of [[1.2, 1.5, 1.5], [4.2, -0.8, 1.3], [6.4, 1.6, 1.6], [2.2, -2.6, 1.2], [-1.6, 2.4, 1.4], [3.6, 4.4, 1.1]]) olive(x, z, yardY(z), h * 1.35);
     for (const [x, z, w] of [[0.0, -1.2, 1.1], [5.6, -2.9, 0.9], [-3.4, 0.4, 1.0], [6.9, 4.6, 0.8]]) plant(x, z, yardY(z), w * 1.1, w * 1.3, 'dark');
-    for (const [x, z] of [[2.9, 0.6], [-0.8, 4.0], [5.2, 0.9], [-4.2, -2.6], [7.4, -1.2], [0.8, -3.6], [3.4, -3.8]]) tuft(x, z, yardY(z), 1.0 + r() * 0.4, 1.0, r() < 0.6 ? 'grass' : 'sage');
+    for (const [x, z] of [[2.9, 0.6], [-0.8, 4.0], [5.2, 0.9], [-4.2, -2.6], [7.4, -1.2], [0.8, -3.6], [3.4, -3.8]].map(([x, z]) => x > 6.6 ? [6.4, z] : z < -3.1 && x > 2.8 ? [2.4, z] : [x, z])) tuft(x, z, yardY(z), 1.0 + r() * 0.4, 1.0, r() < 0.6 ? 'grass' : 'sage');
     // terrace bed along the sidewalk: row of upright silver-green shrubs/grasses (p00)
-    for (let x = -5.6; x < WX0 - 0.4; x += 0.85) { const xx = x + (r() - 0.5) * 0.2, zz = -5.8 + (r() - 0.5) * 0.3;
-      if (r() < 0.7) plant(xx, zz, 0.78, 1.2 + r() * 0.5, 0.75, 'sage'); else tuft(xx, zz, 0.78, 1.0 + r() * 0.3, 0.8, 'grass'); }
+    for (let x = -5.6; x < 2.6; x += 0.85) { const xx = x + (r() - 0.5) * 0.2, zz = -5.8 + (r() - 0.5) * 0.3;
+      if (r() < 0.7) plant(xx, zz, YARD_Y, 1.2 + r() * 0.5, 0.75, 'sage'); else tuft(xx, zz, YARD_Y, 1.0 + r() * 0.3, 0.8, 'grass'); }
     // left of the driveway: upright green shrubs ~2 m on the sleeper terraces (p01)
-    for (let i = 0; i < 6; i++) { const x = dLeft(-2.5) + 0.7 + i * 0.95 + (r() - 0.5) * 0.3, z = -2.6 + (r() - 0.5) * 1.2; plant(x, z, SL_TOP(2), 1.6 + r() * 0.6, 0.6, r() < 0.5 ? 'hedge' : 'box'); }
+    for (let i = 0; i < 6; i++) { const x = dLeft(-4.1) + 1.0 + i * 0.95 + (r() - 0.5) * 0.3, z = -4.1 + (r() - 0.5) * 0.7; plant(x, z, SL_TOP(2), 1.6 + r() * 0.6, 0.6, r() < 0.5 ? 'hedge' : 'box'); }
     for (let i = 0; i < 10; i++) { const k = i % 2; const x = dLeft(-5.0) + 0.6 + i * 0.55 + (r() - 0.5) * 0.2, z = -6.2 + k * 0.85 + 0.3;
       if (r() < 0.5) plant(x, z, SL_TOP(k), 0.9 + r() * 0.5, 0.7, 'box'); else tuft(x, z, SL_TOP(k), 0.8, 0.6, 'sage'); }
     // grass tufts: bundles of thin blades
@@ -598,7 +632,7 @@ export async function build(ctx) {
       phys.dynamic(pot, { mass: 18, shape: 'box' });
     }
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 24, 16), std({ color: 0xd9d4c4, roughness: 0.5 }));
-    ball.position.set(-3.5, 0.82, -1.0); ball.castShadow = true; root.add(ball); phys.dynamic(ball, { mass: 0.4, shape: 'ball', restitution: 0.5 });
+    ball.position.set(-3.5, YARD_Y + 0.2, -1.0); ball.castShadow = true; root.add(ball); phys.dynamic(ball, { mass: 0.4, shape: 'ball', restitution: 0.5 });
   }
 
   kit.mergeStatic(root);

@@ -5,8 +5,8 @@
 // (-z); the far canyon wall with its hilltop neighbourhoods. The pool deck rect is cut out of the ground
 // mesh AND its collider (pool.js owns the deck, its hole and the basin colliders) so people can swim.
 import * as THREE from 'three';
-import { G, CENTER, buildTerrain, padDist, fbm, vnoise, ridged, gully, ss } from './site/terrain.js';
-import { blobGeo, foliageMaterial, instances, palm } from './site/flora.js';
+import { G, CENTER, STREET_Y, buildTerrain, padDist, fbm, vnoise, ridged, gully, ss } from './site/terrain.js';
+import { blobGeo, foliageMaterial, instances, palm, updateFloraLOD } from './site/flora.js';
 import { COURT, courtMaterials, buildCourt, fenceLine } from './site/court.js';
 import { addHaze, skyDome, farRidges } from './site/sky.js';
 
@@ -33,6 +33,7 @@ export async function build(ctx) {
     // x, z, w, d, ry, floors, roof, wall
     [33, -24, 15, 11, 0.06, 2, 0x6a4a3c, 0xddd2bf, 'turret'],
     [59, -21, 17, 9, 0.04, 1, 0x5a5d62, 0xe2e0da, 'garage'],
+    [13.5, -24.6, 10, 9, 0.0, 1, 0x55575b, 0xeeece6, 'garageN'],   // v01/v09: across the street from the porch
     [-27, 31, 14, 10, 0.32, 1, 0x7a4a38, 0xd6ccbb],
     [-33, 8, 12, 12, 0.28, 2, 0x744836, 0xd2c7b4],
     [-30, -27, 12, 10, 0.1, 2, 0x4c4e52, 0xcfc8ba],
@@ -160,9 +161,9 @@ export async function build(ctx) {
   // ---------------------------------------------------------------- the street (Camino De Yatasto) behind the lots
   { const asph = O(new THREE.MeshStandardMaterial({ ...kit.pbrMaps('asphalt_floor', '1k', { repeat: [1, 1] }), color: 0x9a9a98, roughness: 0.9 }));
     const g = new THREE.PlaneGeometry(170, 8).rotateX(-Math.PI / 2); const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 170 / 4, uv.getY(i) * 2);
-    const st = kit.add(root, g, asph, [5, G + 0.008, -12.5], [0, 0, 0], { shadow: false }); st.receiveShadow = true;
+    const st = kit.add(root, g, asph, [5, STREET_Y - 0.012, -12.5], [0, 0, 0], { shadow: false }); st.receiveShadow = true;
     const curb = O(new THREE.MeshStandardMaterial({ color: 0xc9c5bc, roughness: 0.85 }));
-    for (const zz of [-16.6, -8.4]) kit.add(root, kit.box(170, 0.12, 0.2), curb, [5, G + 0.06, zz], [0, 0, 0], { shadow: false }); }
+    for (const zz of [-16.6, -8.4]) kit.add(root, kit.box(170, 0.2, 0.2), curb, [5, STREET_Y + 0.05, zz], [0, 0, 0], { shadow: false }); }
 
   // ---------------------------------------------------------------- iron picket fence + hedge on the canyon edge (p42)
   const iron = O(new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.5, metalness: 0.5 }));
@@ -200,6 +201,7 @@ export async function build(ctx) {
   const near = [[], [], []], far = [], trees = [], trunks = [];
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const yardOk = (x, z) => x < -6 || x > 52 || (z < -20 && z > -60);
+  const acrossView = (x, z) => x > -6 && x < 24 && z < -16 && z > -55;   // porch view across the street: no forest
   const okSpot = (x, z) => (padDist(x, z) > 0.4 || yardOk(x, z)) && !onHouse(x, z) && !inTurf(x, z) && !onStreet(x, z);
   // chaparral: dense on the canyon bank, thinner further out
   for (let k = 0; k < 14000; k++) {
@@ -230,6 +232,7 @@ export async function build(ctx) {
     const x = -160 + rnd() * 360, z = -150 + rnd() * 520;
     if (!okSpot(x, z) || (padDist(x, z) < 7 && !yardOk(x, z))) continue;
     const r = Math.hypot(x - CENTER[0], z - CENTER[1]);
+    if (acrossView(x, z)) continue;
     const cl = vnoise(x / 40, z / 40, 17); if (cl < 0.05 || rnd() > (r < 120 ? 0.55 : 0.3) || z < -75) continue;
     const s = 1.8 + rnd() * 2.2, ht = 4 + rnd() * 5;
     const y = H(x, z);
@@ -254,6 +257,7 @@ export async function build(ctx) {
     const x = -40 + rnd() * 110, z = -45 + rnd() * 120;
     if (!okSpot(x, z) || (padDist(x, z) < 1.2 && !yardOk(x, z))) continue;
     if (!(x < -3 || z < -18 || (z > 41.5 && x > 24.5))) continue;   // keep the court surroundings open (p41)
+    if (acrossView(x, z)) continue;
     if (rnd() > 0.35 + 0.4 * ss(-0.2, 0.4, vnoise(x / 18, z / 18, 5))) continue;
     const ht = z > 31 ? bankHt(x, z, 4, 14) : 5 + rnd() * 7; tree(x, z, Math.min(4.5, ht * (0.32 + rnd() * 0.13)), ht, pick(rnd() < 0.15 ? [0x2c3f2a, 0x26382a] : TREE));
   }
@@ -296,15 +300,18 @@ export async function build(ctx) {
     const s = 2.0 + rnd() * 3.2;
     farC.push({ x, y: H(x, z) - 0.35 * s, z, s: [s, s * (0.5 + rnd() * 0.3), s], ry: rnd() * 6.3, color: pick([0x46522f, 0x55623a, 0x6a7250, 0x7a7a5c, 0x6a5c48, 0x3a4630, 0x5e6a40, 0x8a8468]) });
   }
-  const meshes = [instances(lowG, fol, farC)];
-  near.forEach((list, i) => meshes.push(instances(shrubG[i], fol, list, { shadow: true })));
-  meshes.push(instances(lowG, fol, far));
-  meshes.push(instances(crownG, fol, trees, { shadow: true }));
-  meshes.push(instances(shrubG[1], fol, hedge, { shadow: true }));
+  // low-poly stand-ins (same shapes at icosphere detail 0) for tiles away from the camera
+  const shrubLo = [blobGeo(kit, 3, 6, 0), blobGeo(kit, 8, 7, 0, 0.8), blobGeo(kit, 15, 5, 0, 1.1)], crownLo = blobGeo(kit, 21, 8, 0, 0.8), lowLo = blobGeo(kit, 30, 1, 0, 0.9);
+  const meshes = [instances(lowG, fol, farC, { lod: lowLo, lodDist: 220 })];
+  near.forEach((list, i) => meshes.push(instances(shrubG[i], fol, list, { shadow: true, lod: shrubLo[i], lodDist: 30 })));
+  meshes.push(instances(lowG, fol, far, { lod: lowLo, lodDist: 120 }));
+  meshes.push(instances(crownG, fol, trees, { shadow: true, lod: crownLo, lodDist: 45 }));
+  meshes.push(instances(shrubG[1], fol, hedge, { shadow: true, lod: shrubLo[1], lodDist: 30 }));
   const bark = O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
   const trunkG = kit.cyl(0.7, 1, 1, 7); trunkG.translate(0, 0.5, 0);
   meshes.push(instances(trunkG, bark, trunks, { shadow: true }));
   for (const m of meshes) { m.userData.keep = true; root.add(m); }
+  ctx.onUpdate(() => updateFloraLOD(ctx.camera.position));
   // tree trunks are solid near the lot
   for (const t of trunks) if (Math.hypot(t.x - CENTER[0], t.z - CENTER[1]) < 90) phys.boxAABB([t.x - 0.2, t.y, t.z - 0.2], [t.x + 0.2, t.y + 3, t.z + 0.2]);
 
@@ -322,6 +329,7 @@ export async function build(ctx) {
   const glassDark = O(new THREE.MeshStandardMaterial({ color: 0x1f262d, roughness: 0.15, metalness: 0.3 }));
   const trimDark = O(new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.6 }));
   const garageWhite = O(new THREE.MeshStandardMaterial({ color: 0xf2f2ef, roughness: 0.5 }));
+  const grooveMat = O(new THREE.MeshStandardMaterial({ color: 0xb8b8b4, roughness: 0.6 }));
   const hipRoof = (w, d, h, o) => { // hip roof over w (x) by d (z), eave overhang o
     const W = w / 2 + o, D = d / 2 + o, rx = Math.max(0, (w - d) / 2), rz = Math.max(0, (d - w) / 2);
     const A = [-W, 0, -D], B = [W, 0, -D], Cc = [W, 0, D], Dd = [-W, 0, D], R1 = [-rx, h, -rz], R2 = [rx, h, rz];
@@ -339,9 +347,11 @@ export async function build(ctx) {
     // windows on both long faces
     for (let f = 0; f < floors; f++) for (const side of [-1, 1]) {
       const n = Math.max(2, Math.floor(w / 3.2));
-      for (let i = 0; i < n; i++) { if (rr() < 0.25) continue; const wx = -w / 2 + (i + 0.5) * w / n, ww = 0.8 + rr() * 0.8, hh = f === 0 && rr() < 0.3 ? 2.3 : 1.4;
+      for (let i = 0; i < n; i++) { if (rr() < 0.25) continue; if (kind === 'garageN' && side > 0 && f === 0 && i < n - 1) continue; const wx = -w / 2 + (i + 0.5) * w / n, ww = 0.8 + rr() * 0.8, hh = f === 0 && rr() < 0.3 ? 2.3 : 1.4;
         kit.add(g, kit.box(ww, hh, 0.06), glassDark, [wx, f * 3 + (hh > 2 ? 1.2 : 1.6), side * (d / 2 + 0.02)]); }
     }
+    if (kind === 'garageN') { kit.add(g, kit.box(5.2, 2.3, 0.08), garageWhite, [-w / 2 + 3.4, 1.15, d / 2 + 0.03]);
+      for (let i = 0; i < 7; i++) kit.add(g, kit.box(5.0, 0.014, 0.02), grooveMat, [-w / 2 + 3.4, 0.3 + i * 0.3, d / 2 + 0.075]); }
     if (kind === 'garage') for (let i = 0; i < 2; i++) kit.add(g, kit.box(4.6, 2.3, 0.08), garageWhite, [-w / 4 + i * w / 2, 1.15, -d / 2 - 0.03]);
     if (kind === 'turret') {
       kit.add(g, kit.cyl(1.9, 1.9, HH + 1.5, 20), wm, [w / 2 - 2, (HH + 1.5) / 2, -d / 2 + 0.5]);
@@ -349,6 +359,23 @@ export async function build(ctx) {
     }
     if (Math.hypot(hx - CENTER[0], hz - CENTER[1]) < 120) phys.solidGroup(g);
   }
+  // across the street from the porch (v01/v09): two tall Italian cypresses left of the neighbour's garage,
+  // a black screened fence along the far curb and a street lamp
+  { const cyp = addHaze(O(new THREE.MeshStandardMaterial({ color: 0x24331f, roughness: 0.95, normalMap: kit.noiseNormal(128, 3, 32, 8), normalScale: new THREE.Vector2(1.2, 1.2) })));
+    const prof = [[0, 0], [0.32, 0.03], [0.5, 0.12], [0.62, 0.3], [0.6, 0.55], [0.48, 0.78], [0.28, 0.93], [0.06, 1.0], [0, 1.0]];
+    for (const [x, z, h, r] of [[6.4, -21.3, 9.5, 0.75], [8.6, -23.4, 10.5, 0.8]]) {
+      const geo = kit.lathe(prof.map(([pr, py]) => [pr * r * 1.1, py * h]), 10); const y = H(x, z) - 0.2;
+      kit.add(root, geo, cyp, [x, y, z]);
+      phys.boxAABB([x - 0.3, y, z - 0.3], [x + 0.3, y + 3, z + 0.3]);
+    }
+    fenceLine(kit, root, phys, CM, [-3.5, -17.4], [9.0, -17.4], 1.8, 'screen', { spacing: 2.5, base: H(3, -17.4) });
+    const pole = O(new THREE.MeshStandardMaterial({ color: 0x3a3c3e, roughness: 0.6, metalness: 0.4 }));
+    const ly = H(4.6, -17.1);
+    kit.add(root, kit.cyl(0.06, 0.09, 4.2, 10), pole, [4.6, ly + 2.1, -17.1]);
+    kit.add(root, kit.cyl(0.16, 0.09, 0.45, 10), pole, [4.6, ly + 4.4, -17.1]);
+    kit.add(root, kit.cyl(0.02, 0.2, 0.18, 10), pole, [4.6, ly + 4.72, -17.1]);
+    phys.boxAABB([4.5, ly, -17.2], [4.7, ly + 4.2, -17.0]); }
+
   // street-side parked car by the neighbour's garage (p45) — simple massing
   { const car = kit.group(root, [52, G, -14], 1.45); const paint = O(new THREE.MeshStandardMaterial({ color: 0xe8e9ea, roughness: 0.3, metalness: 0.4 }));
     kit.add(car, kit.rbox(4.8, 0.9, 1.9, 0.25), paint, [0, 0.75, 0]); kit.add(car, kit.rbox(2.8, 0.7, 1.7, 0.25), glassDark, [-0.2, 1.45, 0]);

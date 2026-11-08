@@ -4,6 +4,8 @@
 // Swimming: inside a water body below its surface the creature floats (buoyancy), swims slowly in 3D
 // (look direction + Space up / C down), dissolves into the pool and re-forms when it climbs out.
 // Walking into dynamic props shoves them (KCC applies impulses).
+// Seats (Re-create scenes, src/recreate.js): setSeat({pos, yaw, pose}) / setSeat(null); state.pose / state.seat.
+// state.frozen = true stops walking/jumping (video spots, src/videos.js, then drive the camera after update()).
 import * as THREE from 'three';
 import { createAvatar } from './avatar.js';
 import { waterBodies } from './water/index.js';
@@ -24,9 +26,10 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     yaw, pitch: -0.05, facing: yaw, vy: 0, grounded: false, thirdPerson: false, keys: new Set(), locked: false, speed: 0,
     pos: new THREE.Vector3(spawn[0], spawn[1], spawn[2]), vel: new THREE.Vector3(), swimming: false, inWater: false, water: null, waterY: 0,
     camDist: 2.9, camWant: 2.9, jumpQueued: false, autopilot: null,
+    pose: 'stand', seat: null, // seat = { pos:[x,y,z], yaw, pose } while sitting (see setSeat); pose goes out over the network
   };
   const me = identity();
-  const creature = createAvatar(ctx, { hue: me.hue, name: me.name, local: true, seed: 11 }); // person avatar (seen in third-person / by others)
+  let creature = createAvatar(ctx, { hue: me.hue, name: me.name, local: true, seed: 11 }); // person avatar (seen in third-person / by others)
   const splashFns = [];
   const emitSplash = (x, y, z, s) => { for (const f of splashFns) { try { f(x, y, z, s); } catch (e) { console.warn(e); } } };
 
@@ -38,12 +41,14 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     if (down && k === 'KeyV') state.thirdPerson = !state.thirdPerson;
     if (down && k === 'KeyE') ctx.useNearest?.(state.pos);
     if (down && k === 'Space') state.jumpQueued = true;
+    if (down && state.seat && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) standUpReq = true;
   };
+  let standUpReq = false;
   addEventListener('keydown', e => onKey(e, true)); addEventListener('keyup', e => onKey(e, false));
   addEventListener('blur', () => state.keys.clear());
   dom.addEventListener('click', () => { if (!state.locked && !ctx.uiBlocking?.()) dom.requestPointerLock?.(); });
   document.addEventListener('pointerlockchange', () => { state.locked = document.pointerLockElement === dom; ctx.onLockChange?.(state.locked); });
-  addEventListener('mousemove', e => { if (!state.locked) return; state.yaw -= e.movementX * 0.0022; state.pitch = THREE.MathUtils.clamp(state.pitch - e.movementY * 0.0022, -1.45, 1.45); });
+  addEventListener('mousemove', e => { if (!state.locked) return; const k = 0.0022 * (state.sens || 1); state.yaw -= e.movementX * k; state.pitch = THREE.MathUtils.clamp(state.pitch - e.movementY * k, -1.45, 1.45); }); // state.sens: mouse sensitivity (settings)
   dom.addEventListener('wheel', e => { state.camWant = THREE.MathUtils.clamp(state.camWant * (1 + Math.sign(e.deltaY) * 0.12), 1.4, 6); }, { passive: true });
   // touch: left half = move stick, right half = look
   let touchMove = null, touchLook = null; const tm = new THREE.Vector2();
@@ -66,12 +71,15 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   function update(dt) {
     const t0 = performance.now();
     dt = Math.min(dt, 0.05); if (dt <= 0) return;
+    if (standUpReq) { standUpReq = false; if (state.seat) setSeat(null); }
+    if (state.seat) { seatedUpdate(dt); frameMs = performance.now() - t0; return; }
     const k = state.keys; let mx = 0, mz = 0;
     if (k.has('KeyW') || k.has('ArrowUp')) mz += 1; if (k.has('KeyS') || k.has('ArrowDown')) mz -= 1;
     if (k.has('KeyD') || k.has('ArrowRight')) mx += 1; if (k.has('KeyA') || k.has('ArrowLeft')) mx -= 1;
     if (ctx.uiBlocking?.()) { mx = 0; mz = 0; k.clear(); }
     mx += tm.x; mz -= tm.y;
     if (state.autopilot) { const a = state.autopilot(dt, state); if (a) { mx = a.mx ?? mx; mz = a.mz ?? mz; if (a.run !== undefined) k[a.run ? 'add' : 'delete']('ShiftLeft'); if (a.jump) state.jumpQueued = true; } }
+    if (state.frozen) { mx = 0; mz = 0; state.jumpQueued = false; } // video spots (src/videos.js) own the camera
     const run = k.has('ShiftLeft') || k.has('ShiftRight');
     fwd.set(-Math.sin(state.yaw), 0, -Math.cos(state.yaw)); right.set(-fwd.z, 0, fwd.x);
     wish.set(0, 0, 0).addScaledVector(fwd, mz).addScaledVector(right, mx); if (wish.lengthSq() > 1) wish.normalize();
@@ -135,7 +143,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
 
     // ---- creature
     creature.setVisible(state.thirdPerson && state.camDist > 0.8);
-    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: state.facing, grounded: state.grounded, swimming: state.swimming });
+    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: state.facing, grounded: state.grounded, swimming: state.swimming, pose: 'stand' });
 
     // ---- camera
     euler.set(state.pitch, state.yaw, 0, 'YXZ');
@@ -162,13 +170,86 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     frameMs = performance.now() - t0;
   }
   const _v = new THREE.Vector3();
+
+  // ---------------------------------------------------------------- seats (Re-create scenes)
+  // setSeat({ pos, yaw, pose, bounds? }) freezes physics movement at the seat (collider off, so the sofa's
+  // box doesn't fight the capsule), camera at seated eye height looking along yaw (mouse-look still works).
+  // setSeat(null) stands up: teleports to a free, collider-clear spot in front of the seat (or back where
+  // the player was). WASD/Space while seated stand up too. onSeatChange(fn(seat|null)) is notified.
+  const SEAT_EYE = { sit: 1.0, lie: 0.3, lean: 1.58, stand: EYE_FP };
+  const seatFns = []; let preSeat = null;
+  const capQ = new R.Capsule(halfH, radius);
+  function spotFree(x, floorY, z) {
+    let hit = false;
+    world.intersectionsWithShape({ x, y: floorY + 0.06 + radius + halfH, z }, ROT0, capQ, (c) => {
+      if (c.handle === collider.handle) return true;
+      const b = c.parent(); if (b && !b.isFixed()) return true; // ignore props, other players
+      hit = true; return false;
+    });
+    return !hit;
+  }
+  function freeSpotNear(seat) {
+    const [sx, sy, sz] = seat.pos; const fx = -Math.sin(seat.yaw), fz = -Math.cos(seat.yaw);
+    const floorY = preSeat ? preSeat.y : (seat.pose === 'stand' || seat.pose === 'lean' ? sy : Math.max(0, sy - 0.45));
+    const b = seat.bounds; const inB = (x, z) => !b || (x >= b[0] + 0.3 && x <= b[2] - 0.3 && z >= b[1] + 0.3 && z <= b[3] - 0.3);
+    try { world.updateSceneQueries?.(); } catch {}
+    // candidates in front of the seat, nearest first; a spot must be clear AND have a clear neighbour 0.4 m
+    // further out (front or sideways) so the player isn't left wedged in a pocket between furniture
+    const cands = [];
+    for (const d of [0.55, 0.75, 0.95, 1.2, 1.5, 1.9]) for (const l of [0, 0.35, -0.35, 0.7, -0.7, 1.1, -1.1]) cands.push([d, l, d + Math.abs(l) * 0.7]);
+    cands.sort((a, b) => a[2] - b[2]);
+    const at = (d, l) => [sx + fx * d + fz * l, sz + fz * d - fx * l]; // l: sideways (right-hand perpendicular)
+    const ok = (d, l) => { const [x, z] = at(d, l); return inB(x, z) && spotFree(x, floorY, z); };
+    for (const [d, l] of cands) {
+      if (!ok(d, l)) continue;
+      if (ok(d + 0.4, l) || ok(d, l + 0.4) || ok(d, l - 0.4)) { const [x, z] = at(d, l); return [x, floorY, z]; }
+    }
+    if (preSeat && spotFree(preSeat.x, preSeat.y, preSeat.z)) return [preSeat.x, preSeat.y, preSeat.z];
+    return preSeat ? [preSeat.x, preSeat.y, preSeat.z] : [sx + fx, floorY, sz + fz];
+  }
+  function setSeat(seat) {
+    if (seat) {
+      if (!state.seat) preSeat = state.pos.clone();
+      state.seat = { pos: [...seat.pos], yaw: seat.yaw, pose: seat.pose || 'sit', bounds: seat.bounds };
+      state.pose = state.seat.pose; collider.setEnabled(false);
+      state.pos.set(...seat.pos); state.vel.set(0, 0, 0); state.vy = 0; state.yaw = seat.yaw; state.facing = seat.yaw; state.pitch = -0.08;
+      state.swimming = false; state.inWater = false; state.grounded = true; pivotInit = false;
+      body.setTranslation({ x: seat.pos[0], y: seat.pos[1] + halfH + radius, z: seat.pos[2] }, true);
+    } else if (state.seat) {
+      const old = state.seat; state.seat = null; state.pose = 'stand'; collider.setEnabled(true);
+      const [x, y, z] = freeSpotNear(old); preSeat = null;
+      teleport(x, y, z);
+    } else return;
+    for (const f of seatFns) { try { f(state.seat); } catch (e) { console.warn(e); } }
+  }
+  function seatedUpdate(dt) {
+    const s = state.seat; state.pos.set(...s.pos); state.vel.set(0, 0, 0); state.speed = 0; state.facing = s.yaw;
+    state.velOut = state.velOut || new THREE.Vector3(); state.velOut.set(0, 0, 0);
+    body.setNextKinematicTranslation({ x: s.pos[0], y: s.pos[1] + halfH + radius, z: s.pos[2] });
+    creature.setVisible(state.thirdPerson && state.camDist > 0.8);
+    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: s.yaw, grounded: true, swimming: false, pose: s.pose });
+    const eye = SEAT_EYE[s.pose] ?? EYE_FP;
+    euler.set(state.pitch, state.yaw, 0, 'YXZ'); camera.quaternion.setFromEuler(euler);
+    camera.position.set(s.pos[0], s.pos[1] + eye, s.pos[2]);
+    if (state.thirdPerson) {
+      back.set(0, 0, 1).applyEuler(euler); const piv = _v.copy(camera.position);
+      let d = state.camWant; const hit = world.castShape({ x: piv.x, y: piv.y, z: piv.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, undefined, collider);
+      if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04); state.camDist = d;
+      camera.position.addScaledVector(back, d);
+    }
+  }
   function teleport(x, y, z, yaw2) {
+    if (state.seat) { state.seat = null; state.pose = 'stand'; preSeat = null; collider.setEnabled(true); for (const f of seatFns) { try { f(null); } catch {} } }
     body.setTranslation({ x, y: y + halfH + radius, z }, true); body.setNextKinematicTranslation({ x, y: y + halfH + radius, z });
     state.pos.set(x, y, z); state.vel.set(0, 0, 0); state.vy = 0; pivotInit = false;
     if (yaw2 !== undefined) { state.yaw = yaw2; state.facing = yaw2; }
   }
   return {
-    update, state, body, collider, creature, teleport,
+    update, state, body, collider, teleport, setSeat,
+    get creature() { return creature; },
+    // swap the avatar (custom models, src/avatars/sync.js); the old one is disposed
+    setCreature(av) { if (!av || av === creature) return; const old = creature; creature = av; av.setPose?.(state.pose || 'stand'); try { old.dispose(); } catch {} },
+    onSeatChange(fn) { seatFns.push(fn); },
     onSplash(fn) { splashFns.push(fn); },
     get position() { return state.pos; }, get velocity() { return state.velOut || state.vel; },
     get frameMs() { return frameMs; },

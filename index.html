@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>17609 Camino De Yatasto — walk-through</title>
 <link rel="stylesheet" href="src/ui.css">
+<link rel="stylesheet" href="src/menu.css">
 <script type="importmap">
 { "imports": {
   "three": "./vendor/three.module.js",
@@ -19,13 +20,15 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="loading"><div class="card"><h1>17609 Camino De Yatasto</h1><p>Pacific Palisades · to-scale walk-through</p><div class="track"><div id="bar"></div></div><p id="status">Starting…</p></div></div>
+<div id="loading"><div class="card"><div class="ld-kicker">No01 / PALISADES · 2026</div><h1>17609 Camino De Yatasto</h1><p class="ld-sub">Pacific Palisades · to-scale walk-through</p><div class="track"><div id="bar"></div></div><div class="ld-row"><span class="chip"><i>LOADING::</i><b id="loadpct">0%</b></span><span class="chip ld-status"><i>STATUS::</i><b id="status">Starting…</b></span></div></div></div>
 <div id="hud">
   <div id="where"></div>
-  <div id="help">Click to walk · WASD move · Shift run · Space jump · E open door · V camera · Wheel zoom · T chat · P path-traced photo · Esc release mouse</div>
+  <div id="help">Click to walk · WASD move · Shift run · Space jump · E open door · V camera · Wheel zoom · T chat · M menu · R re-create (in marked spots) · C watch video (at ▶ cards) · P path-traced photo · Esc release mouse</div>
   <div id="mp"></div>
 </div>
 <div id="crosshair"></div>
+<div id="rc"></div>
+<div id="vs"></div>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

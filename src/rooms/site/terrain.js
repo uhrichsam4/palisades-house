@@ -48,6 +48,7 @@ export function padDist(x, z) {
 }
 
 // Landscape without the pad.
+const MTN = 0.37;   // height scale of the mountain behind the street
 export function macro(x, z) {
   const r = Math.hypot(x - CENTER[0], z - CENTER[1]);
   let h = G;
@@ -59,20 +60,40 @@ export function macro(x, z) {
   h += 215 * ss(700, 2300, z + 220 * Math.sin(x / 650 + 1.2)) + 30 * ss(1200, 2600, z) * fbm(x / 700, z / 500, 3, 91);
   // Santa Monica Mountains spur behind the street (-z): the big ridge in the aerial (p45)
   const zb = -z - 48 - 25 * Math.sin((x - 18) / 160);
-  if (zb > 0) h += (600 * Math.pow(ss(0, 750, zb), 0.65) + 300 * ss(0, 350, zb) * (ridged(x / 110, z / 150, 5, 23) - 0.3)) * (0.85 + 0.15 * Math.sin(x / 400));
+  // (scaled so its crest stays ~19° above the horizon seen from the house: v01/v09 porch and v05 court videos)
+  if (zb > 0) h += MTN * (600 * Math.pow(ss(0, 750, zb), 0.65) + 300 * ss(0, 350, zb) * (1 - 0.75 * ss(200, 500, zb)) * (ridged(x / 110, z / 150, 5, 23) - 0.3)) * (0.85 + 0.15 * Math.sin(x / 400));
   // drainage gullies running down the mountain face (p45: spurs + deep ravines)
-  if (zb > 0) h -= 85 * ss(20, 260, zb) * gully(x, z) + 22 * ss(10, 120, zb) * Math.pow(1 - Math.abs(Math.sin(x / 17 + 0.6 * vnoise(x / 40, z / 40, 77))), 4);
+  if (zb > 0) h -= MTN * (85 * ss(20, 260, zb) * gully(x, z) + 22 * ss(10, 120, zb) * Math.pow(1 - Math.abs(Math.sin(x / 17 + 0.6 * vnoise(x / 40, z / 40, 77))), 4));
   // lots fall away to the south-west
   const xs = -x - 16; if (xs > 0) h -= 14 * ss(0, 170, xs) * ss(-40, 60, z);
   const amp = Math.min(45, 0.8 + 0.05 * r) * (z > 300 ? 1 - 0.55 * ss(300, 1500, z) : 1);
   h += amp * (0.8 * fbm(x / 150, z / 150, 5, 3) + 0.9 * (ridged(x / 460, z / 460, 5, 11) - 0.35));
   return h;
 }
+// Front grade (videos v01/v08/v09): Camino De Yatasto sits ~1 m below the porch (floor y 0). The street band
+// (sidewalk at z -6.8 .. far curb -16.6) is cut down to STREET_Y; under the entry stairs / paving apron and the
+// sloping driveway (exterior.js builds them as solid boxes from below street level) the ground is cut too.
+export const STREET_Y = -0.95;                 // asphalt (exterior.js builds the street, curb and sidewalk on it)
+export const FRONT = { walkZ: -6.8, curbZ: -8.45, farCurbZ: -16.6, drvX0: 11.0, drvZ0: 0.35 };
+const drivewayY = (z) => (STREET_Y + 0.15) * Math.max(0, Math.min(1, (FRONT.drvZ0 - z) / (FRONT.drvZ0 - FRONT.walkZ)));
+export function frontCap(x, z) {
+  if (z > FRONT.drvZ0 || z < FRONT.curbZ) return Infinity;           // lot frontage only (street band handled below)
+  let c = Infinity;
+  if (x > 7.1 && x < 11.6) c = STREET_Y - 0.05;                               // entry stairs, mid landing, planter
+  if (x > 3.1 && x <= 7.1 && z < -3.2) c = STREET_Y - 0.05;                  // paving apron in front of the turret
+  if ((x > FRONT.drvX0 && x < 23.6) || (x >= 23.6 && x < 27.0 && z < -3.45)) c = Math.min(c, drivewayY(z) - 0.05); // driveway
+  return c;
+}
+export const FRONT_KEYS_X = [3.0, 3.2, 7.0, 7.2, 11.6], FRONT_KEYS_Z = [0.35, -3.1, -3.3, -6.4, -7.0, -16.9, -18.6]; // cut edges sit under walls
 export function height(x, z) {
-  const d = padDist(x, z); if (d <= 0) return G;
-  const m = macro(x, z);
-  // where the land falls away, the pad ends in a real bank (not a slow smoothstep)
-  return G + (m - G) * (m < G ? Math.max(ss(0, 30, d), Math.min(1, d / 10)) : ss(0, 30, d));
+  const d = padDist(x, z); let h;
+  if (d <= 0) h = G;
+  else { const m = macro(x, z);
+    // where the land falls away, the pad ends in a real bank (not a slow smoothstep)
+    h = G + (m - G) * (m < G ? Math.max(ss(0, 30, d), Math.min(1, d / 10)) : ss(0, 30, d)); }
+  const k = ss(-6.4, -7.0, z) * ss(-18.6, -16.9, z);       // street band (sidewalk + road), back up across the road
+  if (k > 0) h += (STREET_Y - 0.03 - h) * k;
+  return Math.min(h, frontCap(x, z));
 }
 
 // ---------------------------------------------------------------- grid
@@ -84,7 +105,7 @@ function axis(c, keys) {
 }
 
 export function buildTerrain(kit, colorAt) {
-  const xs = axis(CENTER[0], [CUT[0], CUT[2]]), zs = axis(CENTER[1], [CUT[1], CUT[3]]);
+  const xs = axis(CENTER[0], [CUT[0], CUT[2], ...FRONT_KEYS_X]), zs = axis(CENTER[1], [CUT[1], CUT[3], ...FRONT_KEYS_Z]);
   const nx = xs.length, nz = zs.length, N = nx * nz;
   const pos = new Float32Array(N * 3), uv = new Float32Array(N * 2), hgt = new Float32Array(N);
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {

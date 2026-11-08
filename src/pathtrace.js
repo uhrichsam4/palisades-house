@@ -14,7 +14,7 @@ export function createPhotoMode(ctx) {
     saved = { env: scene.environment, envRot: scene.environmentRotation.clone(), envInt: scene.environmentIntensity, exposure: renderer.toneMappingExposure };
     renderer.toneMappingExposure = exposure; // real-estate photographers expose interiors ~+1.5 stops
     // Hide things the path tracer can't shade (custom shaders: water surface, fluid creatures, sprites).
-    hidden = [];
+    hidden = []; ctx.propBatch?.plain(true);
     scene.traverse(o => {
       if (!o.visible) return;
       if (o.isSprite || o.isPoints || o.isLine) { o.visible = false; hidden.push(o); return; }
@@ -33,7 +33,7 @@ export function createPhotoMode(ctx) {
   }
   function exit() {
     if (!active) return; active = false;
-    for (const o of hidden) o.visible = true; hidden = [];
+    for (const o of hidden) o.visible = true; hidden = []; ctx.propBatch?.plain(false);
     scene.environment = saved.env; scene.environmentRotation.copy(saved.envRot); scene.environmentIntensity = saved.envInt; renderer.toneMappingExposure = saved.exposure;
   }
   return {

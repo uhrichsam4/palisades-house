@@ -45,10 +45,6 @@ export function makeMaterials(kit) {
     pavers: std({ map: paverMap, roughness: 0.8, normalMap: stoneN, normalScale: new THREE.Vector2(0.25, 0.25) }),
     coping: std({ map: speck('#ab9f89', 3), color: 0xffffff, roughness: 0.72, normalMap: stoneN, normalScale: new THREE.Vector2(0.3, 0.3) }),
     plaster,
-    spaTile: std({ map: canvasTex(256, 64, (g, w, h) => {
-      const rr = rng(9); g.fillStyle = '#6f6c66'; g.fillRect(0, 0, w, h);
-      for (let y = 0; y < h; y += 16) for (let x = 0; x < w; x += 32) { const v = (rr() - 0.5) * 36; g.fillStyle = `rgb(${150 + v},${146 + v},${138 + v})`; g.fillRect(x + 1, y + 1, 30, 14); }
-    }, { repeat: [6, 1] }), roughness: 0.35 }),
     wicker: std({ map: weave('#7a6a58', 2), color: 0xffffff, roughness: 0.85 }),
     cushion: std({ color: 0x5f5e5a, roughness: 0.95 }),
     cushionLight: std({ color: 0x8a8984, roughness: 0.95 }),
@@ -66,9 +62,78 @@ export function makeMaterials(kit) {
     leaf: std({ color: 0x55703a, roughness: 0.9 }),
     leafLight: std({ color: 0x7d9a4a, roughness: 0.9 }),
     planter: std({ color: 0x3c3b39, roughness: 0.8 }),
-    spill: new THREE.MeshStandardMaterial({ color: 0xcff3f5, roughness: 0.05, transparent: true, opacity: 0.45, depthWrite: false }),
+    spill: new THREE.MeshStandardMaterial({ color: 0xcff3f5, roughness: 0.05, transparent: true, opacity: 0.55, depthWrite: false, alphaMap: spillStreaks(kit) }),
   };
+  // stacked-stone (ledgestone) veneer for the raised spa; 1 texture tile = 0.6 x 0.6 m
+  const ls = ledgestone(kit);
+  M.ledgestone = std({ map: ls.map, normalMap: ls.normalMap, normalScale: new THREE.Vector2(1.2, 1.2), roughness: 0.9 });
+  // spa interior plaster with an emissive underwater-light glow (colour animated by the pool piece; no real lights)
+  M.spaGlow = std({ color: 0xe4e9e8, roughness: 0.82, normalMap: plaster.normalMap, normalScale: new THREE.Vector2(0.25, 0.25), emissive: 0x6a3cff, emissiveIntensity: 0, side: THREE.DoubleSide });
+  M.spaLens = new THREE.MeshBasicMaterial({ color: 0xb9a6ff });
   return M;
+}
+
+// Vertical streaks (alpha) for the spill-over sheet; scrolled in v by the pool piece.
+function spillStreaks(kit) {
+  const r = kit.rng(17);
+  const t = kit.canvasTex(128, 256, (g, w, h) => {
+    g.fillStyle = 'rgb(150,150,150)'; g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 90; k++) {
+      const x = r() * w, y = r() * h, len = 30 + r() * 120, v = 120 + r() * 135;
+      g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, y, 1 + r() * 2, len); g.fillRect(x, y - h, 1 + r() * 2, len);
+    }
+  }, { srgb: false, repeat: [3, 1] });
+  return t;
+}
+
+// Procedural tileable ledgestone: thin horizontal courses of split-face stone, dark recessed joints.
+// Returns { map, normalMap } (512 px = 0.6 m).
+export function ledgestone(kit) {
+  const S = 512, r = kit.rng(4242);
+  const rows = []; let y = 0;
+  while (y < S) { let h = Math.round(20 + r() * 40); if (S - (y + h) < 20) h = S - y; rows.push({ y0: y, h }); y += h; }
+  const pal = [[132, 124, 112], [120, 114, 106], [142, 132, 116], [108, 102, 96], [128, 118, 104], [148, 138, 122], [98, 94, 90]];
+  for (const row of rows) {
+    row.pieces = []; let x = Math.floor(r() * S); const x0 = x;
+    while (x < x0 + S) {
+      const len = Math.round(80 + r() * 260); const c = pal[Math.floor(r() * pal.length)]; const v = (r() - 0.5) * 18;
+      row.pieces.push({ x, len: Math.min(len, x0 + S - x), col: [c[0] + v, c[1] + v, c[2] + v], tilt: (r() - 0.5) * 0.5, bulge: 0.4 + r() * 0.6, ph: r() * 6.28, fq: 0.25 + r() * 0.5 });
+      x += len;
+    }
+  }
+  const hash = (a, b) => { let n = (a * 374761393 + b * 668265263) >>> 0; n = ((n ^ (n >>> 13)) * 1274126177) >>> 0; return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+  const H = new Float32Array(S * S), C = new Float32Array(S * S * 3);
+  for (const row of rows) for (let yy = row.y0; yy < row.y0 + row.h; yy++) for (let xx = 0; xx < S; xx++) {
+    const k = yy * S + xx;
+    let p = null, dx = 0;
+    for (const pc of row.pieces) { const d = ((xx - pc.x) % S + S) % S; if (d < pc.len) { p = pc; dx = d; break; } }
+    const dy = yy - row.y0; const jw = 2.5;
+    const edge = Math.min(dy, row.h - 1 - dy, dx, p ? p.len - 1 - dx : 0);
+    const n = hash(xx, yy) - 0.5;
+    if (!p || edge < jw) { H[k] = 0.05 * hash(xx + 7, yy); C[k * 3] = 46 + n * 10; C[k * 3 + 1] = 43 + n * 10; C[k * 3 + 2] = 40 + n * 10; continue; }
+    const fall = Math.min(1, (edge - jw) / 7);
+    const strat = 0.12 * Math.sin(dy * p.fq + p.ph + dx * 0.02) + 0.08 * Math.sin(dy * 1.7 + p.ph * 3);
+    const h = fall * (0.55 + 0.35 * p.bulge + p.tilt * (dy / row.h - 0.5) + strat) + n * 0.06;
+    H[k] = h;
+    const shade = 0.82 + 0.28 * Math.min(1, h) + n * 0.12 + strat * 0.4;
+    C[k * 3] = p.col[0] * shade; C[k * 3 + 1] = p.col[1] * shade; C[k * 3 + 2] = p.col[2] * shade;
+  }
+  const map = kit.canvasTex(S, S, (g) => {
+    const img = g.createImageData(S, S);
+    for (let k = 0; k < S * S; k++) { img.data[k * 4] = C[k * 3]; img.data[k * 4 + 1] = C[k * 3 + 1]; img.data[k * 4 + 2] = C[k * 3 + 2]; img.data[k * 4 + 3] = 255; }
+    g.putImageData(img, 0, 0);
+  });
+  const normalMap = kit.canvasTex(S, S, (g) => {
+    const img = g.createImageData(S, S); const st = 3.0;
+    for (let yy = 0; yy < S; yy++) for (let xx = 0; xx < S; xx++) {
+      const dx = (H[yy * S + (xx + 1) % S] - H[yy * S + (xx - 1 + S) % S]) * st;
+      const dy = (H[((yy + 1) % S) * S + xx] - H[((yy - 1 + S) % S) * S + xx]) * st;
+      const nz = 1 / Math.hypot(dx, dy, 1); const i = (yy * S + xx) * 4;
+      img.data[i] = (-dx * nz * 0.5 + 0.5) * 255; img.data[i + 1] = (dy * nz * 0.5 + 0.5) * 255; img.data[i + 2] = (nz * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+  }, { srgb: false });
+  return { map, normalMap };
 }
 
 // Wicker lounge module: seat w (x) by d (z), optional arms/back. Front faces +z.

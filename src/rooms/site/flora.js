@@ -61,8 +61,11 @@ float ln(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mat;
 }
 
-// InstancedMesh from a list of {x,y,z,s:[sx,sy,sz],ry,color}
-export function instances(geo, mat, list, { shadow = false } = {}) {
+// Instanced vegetation from a list of {x,y,z,s:[sx,sy,sz],ry,color}. Big lists are split into spatial tiles so
+// frustum culling works (one giant InstancedMesh spanning the canyon was drawn whole every frame), and tiles
+// can carry a low-poly `lod` geometry used beyond `lodDist` metres from the camera (updateFloraLOD).
+const LOD_TILES = [];
+function oneMesh(geo, mat, list, shadow) {
   const m = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); m.count = list.length;
   const o = new THREE.Object3D(), c = new THREE.Color();
   list.forEach((it, i) => {
@@ -71,6 +74,25 @@ export function instances(geo, mat, list, { shadow = false } = {}) {
   });
   m.castShadow = shadow; m.receiveShadow = true; m.computeBoundingSphere(); m.frustumCulled = list.length > 0;
   return m;
+}
+export function instances(geo, mat, list, { shadow = false, lod = null, lodDist = 45, tile = 0 } = {}) {
+  if (list.length < 150 && !lod) return oneMesh(geo, mat, list, shadow);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const it of list) { x0 = Math.min(x0, it.x); x1 = Math.max(x1, it.x); z0 = Math.min(z0, it.z); z1 = Math.max(z1, it.z); }
+  const cell = tile || Math.max(12, Math.max(x1 - x0, z1 - z0) / 6);
+  const cells = new Map();
+  for (const it of list) { const k = Math.floor((it.x - x0) / cell) + ',' + Math.floor((it.z - z0) / cell); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(it); }
+  const g = new THREE.Group(); g.name = 'flora';
+  for (const items of cells.values()) {
+    const hi = oneMesh(geo, mat, items, shadow); g.add(hi);
+    if (lod) { const lo = oneMesh(lod, mat, items, shadow); lo.visible = false; g.add(lo); const c = hi.boundingSphere.center.clone();
+      LOD_TILES.push({ hi, lo, c, r: hi.boundingSphere.radius, d: lodDist }); }
+  }
+  return g;
+}
+// swap tiles between full and low-poly by distance from the camera (call every frame; cheap)
+export function updateFloraLOD(cam) {
+  for (const t of LOD_TILES) { const far = cam.distanceTo(t.c) - t.r > t.d; if (t.hi.visible === far) { t.hi.visible = !far; t.lo.visible = far; } }
 }
 
 // Canary/queen palm: curved ringed trunk + drooping fronds.

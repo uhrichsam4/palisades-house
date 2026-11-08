@@ -1,12 +1,28 @@
 // Simple person avatar for players (replaces the water creature): rounded mannequin with a tinted
 // shirt, walk cycle (legs/arms swing with speed), treading-water pose in the pool, name tag for
-// remote players. Same interface the creature had: { setVisible, update, setName, setHue, dispose }.
+// remote players. Same interface the creature had: { setVisible, update, setName, setHue, dispose },
+// plus setPose('stand'|'sit'|'lie'|'lean') (0.3 s blend; update() also accepts { pose }).
 import * as THREE from 'three';
+import { makeNameTag } from './avatars/nametag.js';
+
+// Joint vectors for the static poses (shared with the custom-model avatars in src/avatars/):
+// [hipsY, hipsRx, then per limb (armL, armR, legL, legR): pivot rx, ry, rz, knee rx].
+export const POSES = {
+  // seated: pelvis 0.12 above the seat point, torso leaning back a touch, thighs forward, shins down,
+  // forearms resting on the thighs
+  sit: [0.12, 0.22, 0.23, 0, 0.15, 0.23, 0.23, 0, -0.15, 0.23, 1.28, 0, -0.05, -1.4, 1.28, 0, 0.05, -1.4],
+  // lying on the back: whole body rotated, head points behind (+z local), arms at the sides
+  lie: [0.12, 1.57, 0.05, 0, -0.18, -0.1, 0.05, 0, 0.18, -0.1, 0.02, 0, -0.04, 0, 0.02, 0, 0.04, 0],
+  // leaning back against something: hips forward, one ankle crossed, arms folded
+  lean: [0.9, 0.1, 0.3, -0.9, 0.1, 1.17, 0.3, 0.9, -0.1, 1.17, -0.1, 0, 0.1, 0, 0.12, 0, -0.14, 0.08],
+};
 
 const skinTones = [0xe8c1a0, 0xd9a47e, 0xb67a52, 0x8d5a3b, 0xf1d2b6];
 export function createAvatar(ctx, { hue = 0.55, name = '', local = false, seed = 1 } = {}) {
   const { scene } = ctx;
   const root = new THREE.Group(); root.name = 'avatar'; root.userData.keep = true; scene.add(root);
+  // local avatars start hidden: player.js shows them each frame (third-person only); until then (title menu) they'd stand at the origin
+  root.visible = !local;
   const shirt = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.45, 0.5), roughness: 0.85 });
   const pants = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.9 });
   const skin = new THREE.MeshStandardMaterial({ color: skinTones[seed % skinTones.length], roughness: 0.7 });
@@ -31,40 +47,69 @@ export function createAvatar(ctx, { hue = 0.55, name = '', local = false, seed =
   };
   const L = { armL: limb(-1, true), armR: limb(1, true), legL: limb(-1, false), legR: limb(1, false) };
 
-  let tag = null, visible = true, phase = 0;
+  let tag = null, visible = !local, phase = 0;
   function setName(n) {
     name = n || ''; if (local) return;
-    if (!tag) { tag = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, toneMapped: false })); tag.renderOrder = 20; root.add(tag); tag.position.y = 2.05; }
-    const c = document.createElement('canvas'); c.width = 512; c.height = 112; const g = c.getContext('2d');
-    g.font = '600 52px -apple-system, Segoe UI, sans-serif'; const w = Math.min(500, g.measureText(name).width + 48);
-    g.fillStyle = 'rgba(20,22,26,0.62)'; g.beginPath(); g.roundRect((512 - w) / 2, 16, w, 80, 40); g.fill();
-    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(name, 256, 57);
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-    tag.material.map?.dispose(); tag.material.map = t; tag.material.needsUpdate = true; tag.scale.set(0.9, 0.9 * 112 / 512, 1);
+    if (!tag) { tag = makeNameTag(name); root.add(tag); } else tag.setText(name);
   }
   function setHue(h) { shirt.color.setHSL(h, 0.45, 0.5); }
   setName(name);
 
-  function update(dt, { pos, vel, yaw = 0, grounded = true, swimming = false }) {
+  // ---- poses: 'stand' (walk cycle / swim, default), 'sit', 'lie', 'lean'. Joint vector J:
+  // [hipsY, hipsRx, then per limb (armL, armR, legL, legR): pivot rx, ry, rz, knee rx]. Switching pose
+  // blends from the current joints to the new pose over BLEND seconds (smoothstep).
+  const LIMBS = [L.armL, L.armR, L.legL, L.legR];
+  const BLEND = 0.3;
+  let pose = 'stand', blendT = 1, from = null; const cur = new Float32Array(18), tgt = new Float32Array(18);
+  const write = (j) => {
+    hips.position.y = j[0]; hips.rotation.x = j[1];
+    LIMBS.forEach((l, i) => { const o = 2 + i * 4; l.pivot.rotation.set(j[o], j[o + 1], j[o + 2]); l.knee.rotation.x = j[o + 3]; });
+  };
+  const read = (j) => {
+    j[0] = hips.position.y; j[1] = hips.rotation.x;
+    LIMBS.forEach((l, i) => { const o = 2 + i * 4; j[o] = l.pivot.rotation.x; j[o + 1] = l.pivot.rotation.y; j[o + 2] = l.pivot.rotation.z; j[o + 3] = l.knee.rotation.x; });
+  };
+  function setPose(name) {
+    name = POSES[name] ? name : 'stand'; if (name === pose) return;
+    from = new Float32Array(18); read(from); pose = name; blendT = 0;
+  }
+
+  function update(dt, { pos, vel, yaw = 0, grounded = true, swimming = false, pose: p } = {}) {
+    if (p !== undefined) setPose(p);
     root.visible = visible; if (!visible) return;
     root.position.copy(pos); root.rotation.y = yaw; // model faces -z, same as yaw 0
-    const speed = vel ? Math.hypot(vel.x, vel.z) : 0;
-    const amp = swimming ? 0.5 : Math.min(0.75, speed * 0.22);
-    phase += dt * (swimming ? 3.2 : 2.2 + speed * 2.1);
-    const s = Math.sin(phase);
-    if (swimming) { // treading water: arms sweep, legs kick, body upright and lower
-      L.armL.pivot.rotation.set(0, 0, -0.9 + s * 0.4); L.armR.pivot.rotation.set(0, 0, 0.9 - s * 0.4);
-      L.legL.pivot.rotation.x = s * 0.5; L.legR.pivot.rotation.x = -s * 0.5; L.legL.knee.rotation.x = 0.4; L.legR.knee.rotation.x = 0.4;
+    if (pose === 'stand') {
+      const speed = vel ? Math.hypot(vel.x, vel.z) : 0;
+      const amp = swimming ? 0.5 : Math.min(0.75, speed * 0.22);
+      phase += dt * (swimming ? 3.2 : 2.2 + speed * 2.1);
+      const s = Math.sin(phase);
+      hips.rotation.x = 0;
+      if (swimming) { // treading water: arms sweep, legs kick, body upright and lower
+        L.armL.pivot.rotation.set(0, 0, -0.9 + s * 0.4); L.armR.pivot.rotation.set(0, 0, 0.9 - s * 0.4);
+        L.legL.pivot.rotation.set(s * 0.5, 0, 0); L.legR.pivot.rotation.set(-s * 0.5, 0, 0); L.legL.knee.rotation.x = 0.4; L.legR.knee.rotation.x = 0.4;
+      } else {
+        L.legL.pivot.rotation.set(s * amp, 0, 0); L.legR.pivot.rotation.set(-s * amp, 0, 0);
+        L.legL.knee.rotation.x = Math.max(0, -s) * amp * 1.2; L.legR.knee.rotation.x = Math.max(0, s) * amp * 1.2;
+        L.armL.pivot.rotation.set(-s * amp * 0.8, 0, -0.08); L.armR.pivot.rotation.set(s * amp * 0.8, 0, 0.08);
+        L.armL.knee.rotation.x = 0.25 + amp * 0.3; L.armR.knee.rotation.x = 0.25 + amp * 0.3; // +x: forearm forward
+        if (!grounded) { L.legL.pivot.rotation.x = -0.5; L.legR.pivot.rotation.x = 0.2; L.legL.knee.rotation.x = 0.6; }
+      }
+      hips.position.y = 0.92 + (swimming ? 0 : Math.abs(Math.cos(phase)) * amp * 0.04);
+      read(tgt);
     } else {
-      L.legL.pivot.rotation.x = s * amp; L.legR.pivot.rotation.x = -s * amp;
-      L.legL.knee.rotation.x = Math.max(0, -s) * amp * 1.2; L.legR.knee.rotation.x = Math.max(0, s) * amp * 1.2;
-      L.armL.pivot.rotation.set(-s * amp * 0.8, 0, -0.08); L.armR.pivot.rotation.set(s * amp * 0.8, 0, 0.08);
-      L.armL.knee.rotation.x = -0.25 - amp * 0.3; L.armR.knee.rotation.x = -0.25 - amp * 0.3;
-      if (!grounded) { L.legL.pivot.rotation.x = -0.5; L.legR.pivot.rotation.x = 0.2; L.legL.knee.rotation.x = 0.6; }
+      tgt.set(POSES[pose]);
+      if (pose === 'lean') tgt[0] = 0.92;
+      // idle breathing so seated people don't look frozen
+      phase += dt * 1.6; tgt[1] += Math.sin(phase) * 0.012;
     }
-    hips.position.y = 0.92 + (swimming ? 0 : Math.abs(Math.cos(phase)) * amp * 0.04);
+    if (blendT < 1 && from) {
+      blendT = Math.min(1, blendT + dt / BLEND); const f = blendT * blendT * (3 - 2 * blendT);
+      for (let i = 0; i < 18; i++) cur[i] = from[i] + (tgt[i] - from[i]) * f;
+      write(cur);
+    } else write(tgt);
+    if (tag) tag.position.y = hips.position.y + 1.13 - (pose === 'lie' ? 0.75 : 0);
   }
   function setVisible(v) { visible = v; root.visible = v; }
-  function dispose() { scene.remove(root); root.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); [shirt, pants, skin, shoe, hair].forEach(m => m.dispose()); tag?.material.map?.dispose(); }
-  return { root, setVisible, update, setName, setHue, dispose };
+  function dispose() { scene.remove(root); root.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); [shirt, pants, skin, shoe, hair].forEach(m => m.dispose()); tag?.disposeTag(); }
+  return { root, setVisible, update, setName, setHue, setPose, get pose() { return pose; }, dispose };
 }

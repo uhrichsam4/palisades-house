@@ -253,7 +253,8 @@ export async function build(ctx) {
     gl.userData.noCollide = true;
 
     // TV (framed, wood bezel) with a dim recreated "bar interior" frame on screen
-    const tvW = 1.72, tvH = 0.98, tvY = 2.08, tvZ = (MZ0 + MZ1) / 2;
+    // v03: the TV in the videos is bigger (≈2.0 m wide, 0.13 m marble margins) and hangs lower (bottom ≈1.30 m)
+    const tvW = 2.04, tvH = 1.15, tvY = 1.87, tvZ = (MZ0 + MZ1) / 2;
     const scr = kit.canvasTex(1024, 584, (c, w, h) => {
       const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#1d1a17'); gr.addColorStop(1, '#0a0908'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
       // back bar shelves with warm bottles
@@ -311,10 +312,10 @@ export async function build(ctx) {
     phys.boxLocal(g, w / 2, 0.49, D / 2, w / 2, 0.49, D / 2);
     return g;
   }
-  const RS0 = 14.15, RS1 = MZ0, LS0 = MZ1, LS1 = 19.0;
+  const RS0 = 14.15, RS1 = MZ0, LS0 = MZ1, LS1 = 19.30; // v03: left bay ≈0.3 m wider than 1.04 m (fam-sw moved to clear it)
   const SHELF_H = 2.96;   // ceilY(14.15) = 3.06: keep the top board level and clear of the slope
   shelving(RS1, RS1 - RS0, SHELF_H, 0.42, 2);
-  shelving(LS1, LS1 - LS0, SHELF_H, 0.42, 1);
+  shelving(LS1, LS1 - LS0, SHELF_H, 0.42, 2);
   // dark grasscloth return between the right shelving and the living wall
   kit.wallPanel(root, [X0, Z0], [X0, RS0], 0.09, SHELF_H, [1, 0], grass, 0.004);
   // a thin oak edge strip where the grasscloth meets the shelving
@@ -390,7 +391,7 @@ export async function build(ctx) {
   for (const [dx, dz, dy] of [[0, 0, 0], [0.05, 0.04, 0.005], [-0.04, 0.05, 0.004], [0.03, -0.05, 0.006], [-0.05, -0.03, 0.003]]) place(new THREE.Mesh(new THREE.SphereGeometry(0.032, 16, 12), coralMat), shelfX() + dx, SH.c + 0.045 + dy, 14.98 + dz);
   place(coral(0.045), shelfX(), SH.c, 14.72);
   { const m = new THREE.Mesh(vaseGeo.cloche, glassClear); place(m, shelfX(), SH.c, 14.40); mesh(m, new THREE.SphereGeometry(0.012, 12, 8), brassMat, [0, 0.21, 0]); }
-  // left unit (z 17.96..19.0): top shelf = planter row (photo p04 top-left)
+  // left unit (z 17.96..19.30): top shelf = planter row (photo p04 top-left)
   place(tinyPlants(0.86), shelfX(), SH.s3, 18.48, HZ);
   place(vase(vaseGeo.jar, ceramicCream, 0.9), shelfX(), SH.s2, 18.82);
   { const b = bookStack(3, 0.2, 0.15, ['#2d2a26', '#d9d2c4', '#8b8475']); place(b, shelfX(), SH.s2, 18.48); place(coral(0.04), shelfX(), SH.s2 + b.userData.h, 18.48); }

@@ -1,0 +1,75 @@
+<!doctype html>
+<!-- Dev only: custom-avatar lab. Loads test models from shots/avatar_models/ (local, never committed)
+     and shows each one idle / walk / sit / lie, with the mannequin as the first row.
+     ?panel=1 opens the avatar modal instead. Results in window.__lab. -->
+<html><head><meta charset="utf-8"><title>Avatar lab</title><link rel="icon" href="data:,">
+<style>html,body{margin:0;height:100%;background:#1c2128;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/three-addons/" } }
+</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { createAvatar } from './src/avatar.js';
+import { parseAvatar, createCustomAvatar, openAvatarPanel } from './src/avatars/index.js';
+
+const lab = window.__lab = { ready: false, models: [], errors: [] };
+const q = new URLSearchParams(location.search);
+if (q.get('panel')) { openAvatarPanel({ onChange: (d) => console.log('avatar', JSON.stringify(d)) }); lab.ready = true; }
+else {
+const FILES = (q.get('files') || 'Xbot.glb,Soldier.glb,Michelle.glb,Samba Dancing.fbx,VRM1_Constraint_Twist_Sample.vrm').split(',');
+const POSES = [['idle', 'stand', 0], ['walk', 'stand', 1.6], ['sit', 'sit', 0], ['lie', 'lie', 0]];
+const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(1); renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true; renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x2a313b);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.5));
+const sun = new THREE.DirectionalLight(0xffffff, 2.4); sun.position.set(-6, 12, -8); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, far: 40 }); scene.add(sun);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x77808c, roughness: 0.95 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+// seats for the sit column
+const rows = FILES.length + 1, DX = 1.6, DZ = 3.0;
+// orthographic, from the front (models face −z) and a little to the side, ~25° down; ?side=1 for a side view
+const cz = (rows - 1) * DZ / 2, cx = DX * 1.5, span = 6.2;
+const asp = innerWidth / innerHeight; const cam = new THREE.OrthographicCamera(-span * asp, span * asp, span, -span, 0.1, 100);
+const yawC = q.get('side') ? -Math.PI / 2 + 0.2 : 0.35;
+cam.position.set(cx - Math.sin(yawC) * 30, 10 + 0.9, cz - Math.cos(yawC) * 30); cam.lookAt(cx, 0.9, cz);
+const ctx = { scene };
+const avs = [];
+const place = (make, row, label) => {
+  POSES.forEach(([nm, pose, speed], col) => {
+    const av = make(`${label} · ${nm}`);
+    const pos = new THREE.Vector3(col * DX, 0, row * DZ);
+    if (pose === 'sit') { const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), new THREE.MeshStandardMaterial({ color: 0x9a7b5a })); seat.position.set(pos.x, 0.225, pos.z + 0.08); seat.castShadow = seat.receiveShadow = true; scene.add(seat); pos.y = 0.45; }
+    avs.push({ av, pos, pose, speed });
+  });
+};
+place((n) => createAvatar(ctx, { hue: 0.55, name: n }), 0, 'mannequin');
+for (let i = 0; i < FILES.length; i++) {
+  const f = FILES[i]; const fmt = f.split('.').pop().toLowerCase();
+  const info = { file: f };
+  try {
+    const t = performance.now();
+    const buf = await (await fetch('shots/avatar_models/' + encodeURIComponent(f))).arrayBuffer();
+    const asset = await parseAvatar(buf, fmt);
+    Object.assign(info, { ms: Math.round(performance.now() - t), humanoid: asset.rig.humanoid, source: asset.rig.source, bones: asset.rig.bones, missing: asset.rig.missing, broken: asset.rig.broken, stats: asset.stats, warnings: asset.warnings, srcHeight: +asset.height.toFixed(3) });
+    place((n) => createCustomAvatar(ctx, asset, { name: n, height: 1.75 }), i + 1, f.replace(/\.\w+$/, ''));
+  } catch (e) { info.error = String(e?.stack || e); lab.errors.push(f + ': ' + e.message); }
+  lab.models.push(info);
+}
+const clock = new THREE.Clock(); let frames = 0;
+const tick = () => {
+  const dt = Math.min(0.05, clock.getDelta());
+  for (const a of avs) a.av.update(dt, { pos: a.pos, vel: { x: 0, z: a.speed }, yaw: 0, grounded: true, pose: a.pose });
+  renderer.render(scene, cam); frames++;
+  if (frames === 60) {
+    // facing check: head (or top) should be in front (−z) of nothing in particular; report hand x for L/R sanity + feet height
+    lab.check = avs.filter((_, i) => i % 4 === 0).map(a => { const b = new THREE.Box3().setFromObject(a.av.root, true); return { minY: +b.min.y.toFixed(3), maxY: +b.max.y.toFixed(3) }; });
+    lab.ready = true;
+  }
+  requestAnimationFrame(tick);
+};
+tick();
+}
+</script>
+</body></html>

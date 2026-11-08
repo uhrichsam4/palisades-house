@@ -170,7 +170,7 @@ export function buildShell(ctx) {
           const lever = box(0.13, 0.018, 0.018, lw - 0.13, 1.0, 0.045, M.blackMetal); leaf.add(lever);
           const lever2 = lever.clone(); lever2.position.z = -0.045; leaf.add(lever2);
         }
-        hinge.add(leaf); g.add(hinge);
+        hinge.add(leaf); g.add(hinge); hinge.userData.keep = true; // swings: never merged
         leafs.push({ hinge, sign: i === 0 ? 1 : -1 });
       }
       const door = { o, g, leafs, w, h, open: o.open ?? (o.type === 'door' ? 1 : 0), target: 0, colliders: [] };

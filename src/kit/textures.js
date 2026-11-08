@@ -39,12 +39,56 @@ export function pbrMaps(id, res = '1k', opt = {}) {
   return o;
 }
 
+// Canvas 2D applies a filter to EVERY draw call. Pieces paint thousands of small shapes under
+// g.filter = 'blur(..)', which on a CPU canvas took ~25 s for one rug. This wrapper collects everything drawn
+// under a blur filter on a scratch layer and blurs that layer once when the filter changes (same look: blur
+// is linear, shapes composite source-over inside the layer; a non-default composite op gets its own layer).
+const STATE = ['fillStyle', 'strokeStyle', 'lineWidth', 'lineCap', 'lineJoin', 'miterLimit', 'globalAlpha', 'globalCompositeOperation', 'font', 'textAlign', 'textBaseline', 'direction', 'shadowBlur', 'shadowColor', 'shadowOffsetX', 'shadowOffsetY', 'imageSmoothingEnabled', 'imageSmoothingQuality', 'lineDashOffset'];
+function copyState(from, to) { for (const k of STATE) { try { to[k] = from[k]; } catch {} } to.setTransform(from.getTransform()); to.setLineDash(from.getLineDash()); }
+export function deferredBlur(real, w, h) {
+  let cur = real, layer = null, lf = 'none', lop = 'source-over', depth = 0;
+  const flush = () => {
+    if (!layer) return;
+    const lc = cur; const op = lop; copyState(lc, real); // state set while drawing in the layer carries on
+    real.save(); real.setTransform(1, 0, 0, 1, 0, 0); real.globalAlpha = 1; real.globalCompositeOperation = op; real.shadowColor = 'rgba(0,0,0,0)'; real.filter = lf;
+    real.drawImage(layer, 0, 0); real.restore();
+    layer = null; cur = real; depth = 0;
+  };
+  const start = (f) => {
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const lc = c.getContext('2d', { willReadFrequently: true });
+    copyState(real, lc); lop = real.globalCompositeOperation; lc.globalCompositeOperation = 'source-over';
+    layer = c; lf = f; cur = lc; depth = 0;
+  };
+  const isBlur = (v) => typeof v === 'string' && /blur\(/.test(v) && !/blur\(\s*0(px)?\s*\)/.test(v);
+  return new Proxy(real, {
+    get(t, k) {
+      if (k === '__flush') return flush;
+      if (k === 'filter') return layer ? lf : real.filter;
+      if (k === 'canvas') return real.canvas;
+      if (k === 'globalCompositeOperation' && layer) return lop;
+      const v = cur[k];
+      if (typeof v !== 'function') return v;
+      if (k === 'save') return () => { depth++; cur.save(); };
+      if (k === 'restore') return () => { if (layer && depth === 0) { flush(); real.restore(); } else { depth = Math.max(0, depth - 1); cur.restore(); } };
+      if (k === 'getImageData' || k === 'putImageData') return (...a) => { const f = layer ? lf : null; flush(); const r = real[k](...a); if (f) start(f); return r; };
+      if (k === 'drawImage') return (img, ...a) => { if (layer && img === real.canvas) { const f = lf; flush(); start(f); } return cur.drawImage(img, ...a); };
+      return v.bind(cur);
+    },
+    set(t, k, v) {
+      if (k === 'filter') { if (layer) flush(); if (isBlur(v)) start(v); else real.filter = v; return true; }
+      if (k === 'globalCompositeOperation' && layer) { if (v !== lop) { const f = lf; flush(); real.globalCompositeOperation = v; start(f); } return true; }
+      cur[k] = v; return true;
+    },
+  });
+}
+
 // Canvas texture: canvasTex(512, 512, (g, w, h) => { ...draw... }, { srgb:true, repeat })
 export function canvasTex(w, h, draw, opt = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   // CPU-backed 2D canvas: blur filters/heavy painting run on the CPU and can't hang Chrome's GPU process
   // (a GPU-canvas blur per stroke used to drop the WebGL context for the whole house).
-  const g = c.getContext('2d', { willReadFrequently: true }); draw(g, w, h);
+  const real = c.getContext('2d', { willReadFrequently: true });
+  const g = deferredBlur(real, w, h); draw(g, w, h); g.__flush(); real.filter = 'none';
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = opt.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;

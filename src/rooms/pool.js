@@ -27,7 +27,9 @@ export const views = {
 };
 
 // ---- geometry constants (world metres)
-const DECK = -0.10, WATER = -0.30, PLAT_TOP = -0.20, SPA_WATER = -0.13, GROUND = -0.31;
+// Spa (v07 night video): raised 0.25 m above the deck, ledgestone outer face, flat coping, spillway to the pool.
+const SPA_TOP = 0.15, SPA_WATER = 0.02;   // coping top (DECK + 0.25) / spa water surface
+const DECK = -0.10, WATER = -0.30, PLAT_TOP = -0.20, GROUND = -0.31;
 const P = { x0: 3.6, x1: 16.0, z0: 23.0, z1: 27.6 };          // pool water rect (before notches)
 const SPA = { x0: 3.6, x1: 6.4, z0: 25.0, z1: 27.6, t: 0.25 }; // raised spa block (canyon/SW corner)
 const PLAT = { x0: 7.6, x1: 11.6, z0: 25.0, z1: 27.6 };        // in-pool lounge platform
@@ -46,7 +48,8 @@ export function poolFloorY(x, z) {
   return y;
 }
 const SPA_IN = { x0: SPA.x0 + SPA.t, x1: SPA.x1 - SPA.t, z0: SPA.z0 + SPA.t, z1: SPA.z1 - SPA.t };
-const SPA_FLOOR = -1.10, SPA_BENCH = -0.62, BENCH_W = 0.40;
+const SPA_FLOOR = -0.90, SPA_BENCH = -0.42, BENCH_W = 0.40;
+const SPILL = { x0: 4.40, x1: 5.60, y: SPA_WATER - 0.012 };     // spillway lip in the house-facing spa wall
 export function spaFloorY(x, z) { return (z >= SPA_IN.z1 - BENCH_W || x <= SPA_IN.x0 + BENCH_W) ? SPA_BENCH : SPA_FLOOR; }
 
 export const POOL_OUTLINE = [
@@ -105,31 +108,84 @@ export async function build(ctx) {
   AABB(PLAT.x0, WBOT, PLAT.z0, PLAT.x1, PLAT_TOP, P.z1);
   slab(M.coping, PLAT.x0 - OV, PLAT_TOP - 0.05, PLAT.z0 - OV, PLAT.x1 + OV, PLAT_TOP, P.z1 - OV, { r: 0.012, col: false });
   slab(M.coping, PLAT.x0, GROUND, P.z1 - OV, PLAT.x1, DECK - 0.05, P.z1 + 0.01, { col: false });
-  // raised spa: four walls, tile band on the pool-facing sides, interior floor + L bench, rim coping
-  const SB = SHALLOW - 0.05;
-  slab(M.plaster, SPA.x0, SB, SPA.z0, SPA.x1, DECK - 0.05, SPA.z0 + SPA.t, { col: false });
-  AABB(SPA.x0, SB, SPA.z0, SPA.x1, DECK, SPA.z0 + SPA.t);
-  slab(M.plaster, SPA.x0, SB, SPA.z1 - SPA.t, SPA.x1, DECK - 0.05, SPA.z1);
-  slab(M.plaster, SPA.x0, SB, SPA.z0 + SPA.t, SPA.x0 + SPA.t, DECK - 0.05, SPA.z1 - SPA.t);
-  slab(M.plaster, SPA.x1 - SPA.t, SB, SPA.z0 + SPA.t, SPA.x1, DECK - 0.05, SPA.z1 - SPA.t);
-  const band0 = DECK - 0.05, band1 = WATER - 0.08;
-  slab(M.spaTile, SPA.x0, band1, SPA.z0 - 0.006, SPA.x1 + 0.006, band0, SPA.z0, { col: false, shadow: false });
-  slab(M.spaTile, SPA.x1, band1, SPA.z0, SPA.x1 + 0.006, band0, SPA.z1, { col: false, shadow: false });
-  slab(M.plaster, SPA_IN.x0, SB, SPA_IN.z0, SPA_IN.x1, SPA_FLOOR, SPA_IN.z1);
-  slab(M.plaster, SPA_IN.x0, SPA_FLOOR - 0.01, SPA_IN.z1 - BENCH_W, SPA_IN.x1, SPA_BENCH, SPA_IN.z1);
-  slab(M.plaster, SPA_IN.x0, SPA_FLOOR - 0.01, SPA_IN.z0, SPA_IN.x0 + BENCH_W, SPA_BENCH, SPA_IN.z1 - BENCH_W);
-  const cy0 = DECK - 0.05;
-  slab(M.coping, SPA.x0 + OV, cy0, SPA.z0 - OV, SPA.x1 + OV, DECK, SPA_IN.z0 + OV, { r: 0.012, col: false });
-  slab(M.coping, SPA.x0 + OV, cy0, SPA_IN.z1 - OV, SPA.x1 + OV, DECK, SPA.z1 - OV, { r: 0.012, col: false });
-  slab(M.coping, SPA.x0 + OV, cy0, SPA_IN.z0 + OV, SPA_IN.x0 + OV, DECK, SPA_IN.z1 - OV, { r: 0.012, col: false });
-  slab(M.coping, SPA_IN.x1 - OV, cy0, SPA_IN.z0 + OV, SPA.x1 + OV, DECK, SPA_IN.z1 - OV, { r: 0.012, col: false });
-  AABB(SPA.x0, SB, SPA.z1 - SPA.t, SPA.x1, DECK, SPA.z1);
-  AABB(SPA.x0, SB, SPA.z0, SPA.x0 + SPA.t, DECK, SPA.z1); AABB(SPA.x1 - SPA.t, SB, SPA.z0, SPA.x1, DECK, SPA.z1);
-  // spillover sheet: spa water slipping over the house-facing wall into the pool
-  const sheet = kit.add(root, new THREE.PlaneGeometry(1.8, SPA_WATER - WATER), M.spill, [(SPA.x0 + SPA.x1) / 2, (SPA_WATER + WATER) / 2 - 0.02, SPA.z0 - OV - 0.004], [0, Math.PI, 0], { shadow: false });
-  sheet.userData.keep = true;
+  // raised spa (0.25 m above the deck): four plaster walls, ledgestone veneer on every outer face above the
+  // pool waterline / deck, glowing plaster interior (floor, L bench, inner walls), ledgestone band at the
+  // waterline, flat coping overhanging inside and out, and a spillway lip over the pool on the house side.
+  const SB = SHALLOW - 0.05, CT = SPA_TOP - 0.05, E = 0.03;   // wall bottom, coping underside, coping outer overhang
+  slab(M.plaster, SPA.x0, SB, SPA.z0, SPA.x1, SPILL.y - 0.05, SPA.z0 + SPA.t, { col: false });   // house side, up to the lip
+  slab(M.plaster, SPA.x0, SPILL.y - 0.05, SPA.z0, SPILL.x0, CT, SPA.z0 + SPA.t, { col: false });
+  slab(M.plaster, SPILL.x1, SPILL.y - 0.05, SPA.z0, SPA.x1, CT, SPA.z0 + SPA.t, { col: false });
+  slab(M.plaster, SPA.x0, SB, SPA.z1 - SPA.t, SPA.x1, CT, SPA.z1, { col: false });
+  slab(M.plaster, SPA.x0, SB, SPA.z0 + SPA.t, SPA.x0 + SPA.t, CT, SPA.z1 - SPA.t, { col: false });
+  slab(M.plaster, SPA.x1 - SPA.t, SB, SPA.z0 + SPA.t, SPA.x1, CT, SPA.z1 - SPA.t, { col: false });
+  AABB(SPA.x0, SB, SPA.z0, SPA.x1, SPA_TOP, SPA.z0 + SPA.t);
+  AABB(SPA.x0, SB, SPA.z1 - SPA.t, SPA.x1, SPA_TOP, SPA.z1);
+  AABB(SPA.x0, SB, SPA.z0, SPA.x0 + SPA.t, SPA_TOP, SPA.z1); AABB(SPA.x1 - SPA.t, SB, SPA.z0, SPA.x1, SPA_TOP, SPA.z1);
+  // face quad on line a->b facing n, world-scaled UVs (ledgestone tile = 0.6 m)
+  const face = (mat, a, b, y0, y1, n, off = 0.004, tile = 0.6) => {
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const g = new THREE.PlaneGeometry(L, y1 - y0);
+    const uv = g.attributes.uv; const u0 = (a[0] + a[1]) / tile;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + uv.getX(i) * L / tile, (y0 + uv.getY(i) * (y1 - y0)) / tile);
+    g.rotateY(Math.atan2(n[0], n[1]));
+    g.translate((a[0] + b[0]) / 2 + n[0] * off, (y0 + y1) / 2, (a[1] + b[1]) / 2 + n[1] * off);
+    return kit.add(root, g, mat, [0, 0, 0], [0, 0, 0], { shadow: false });
+  };
+  const VB = WATER - 0.08;   // veneer bottom on the pool-facing sides (just under the pool waterline)
+  face(M.ledgestone, [SPA.x0, SPA.z0], [SPILL.x0, SPA.z0], VB, CT, [0, -1]);           // house side (pool)
+  face(M.ledgestone, [SPILL.x0, SPA.z0], [SPILL.x1, SPA.z0], VB, SPILL.y - 0.05, [0, -1]);
+  face(M.ledgestone, [SPILL.x1, SPA.z0], [SPA.x1, SPA.z0], VB, CT, [0, -1]);
+  face(M.ledgestone, [SPA.x1, SPA.z0], [SPA.x1, SPA.z1], VB, CT, [1, 0]);              // NE side (pool / gap)
+  face(M.ledgestone, [SPA.x0, SPA.z1], [SPA.x1, SPA.z1], DECK, CT, [0, 1]);            // canyon side (deck)
+  face(M.ledgestone, [SPA.x0, SPA.z0], [SPA.x0, SPA.z1], DECK, CT, [-1, 0]);           // SW end (deck)
+  // interior: glowing plaster below the waterline band, ledgestone band from just under the water to the coping
+  const BAND = SPA_WATER - 0.07;
+  face(M.spaGlow, [SPA_IN.x0, SPA_IN.z0], [SPA_IN.x1, SPA_IN.z0], SPA_FLOOR, BAND, [0, 1]);
+  face(M.spaGlow, [SPA_IN.x0, SPA_IN.z1], [SPA_IN.x1, SPA_IN.z1], SPA_FLOOR, BAND, [0, -1]);
+  face(M.spaGlow, [SPA_IN.x0, SPA_IN.z0], [SPA_IN.x0, SPA_IN.z1], SPA_FLOOR, BAND, [1, 0]);
+  face(M.spaGlow, [SPA_IN.x1, SPA_IN.z0], [SPA_IN.x1, SPA_IN.z1], SPA_FLOOR, BAND, [-1, 0]);
+  face(M.ledgestone, [SPA_IN.x0, SPA_IN.z0], [SPILL.x0, SPA_IN.z0], BAND, CT, [0, 1]);
+  face(M.ledgestone, [SPILL.x0, SPA_IN.z0], [SPILL.x1, SPA_IN.z0], BAND, SPILL.y - 0.05, [0, 1]);
+  face(M.ledgestone, [SPILL.x1, SPA_IN.z0], [SPA_IN.x1, SPA_IN.z0], BAND, CT, [0, 1]);
+  face(M.ledgestone, [SPA_IN.x0, SPA_IN.z1], [SPA_IN.x1, SPA_IN.z1], BAND, CT, [0, -1]);
+  face(M.ledgestone, [SPA_IN.x0, SPA_IN.z0], [SPA_IN.x0, SPA_IN.z1], BAND, CT, [1, 0]);
+  face(M.ledgestone, [SPA_IN.x1, SPA_IN.z0], [SPA_IN.x1, SPA_IN.z1], BAND, CT, [-1, 0]);
+  slab(M.spaGlow, SPA_IN.x0, SB, SPA_IN.z0, SPA_IN.x1, SPA_FLOOR, SPA_IN.z1, { shadow: false });
+  slab(M.spaGlow, SPA_IN.x0, SPA_FLOOR - 0.01, SPA_IN.z1 - BENCH_W, SPA_IN.x1, SPA_BENCH, SPA_IN.z1, { shadow: false });
+  slab(M.spaGlow, SPA_IN.x0, SPA_FLOOR - 0.01, SPA_IN.z0, SPA_IN.x0 + BENCH_W, SPA_BENCH, SPA_IN.z1 - BENCH_W, { shadow: false });
+  // underwater light lens on the NE inner wall (emissive only)
+  kit.add(root, new THREE.CircleGeometry(0.075, 24).rotateY(-Math.PI / 2), M.spaLens, [SPA_IN.x1 - 0.008, SPA_WATER - 0.42, (SPA_IN.z0 + SPA_IN.z1) / 2 - 0.25], [0, 0, 0], { shadow: false });
+  // coping: flat slabs overhanging the water (OV) and the stone veneer (E); lowered over the spillway
+  const cp = (x0, z0, x1, z1, y1 = SPA_TOP) => slab(M.coping, x0, y1 - 0.05, z0, x1, y1, z1, { r: 0.012, col: false });
+  cp(SPA.x0 - E, SPA.z0 - E, SPILL.x0, SPA_IN.z0 + OV);
+  cp(SPILL.x0, SPA.z0 - E, SPILL.x1, SPA_IN.z0 + OV, SPILL.y);
+  cp(SPILL.x1, SPA.z0 - E, SPA.x1 + E, SPA_IN.z0 + OV);
+  cp(SPA.x0 - E, SPA_IN.z1 - OV, SPA.x1 + E, SPA.z1 + E);
+  cp(SPA.x0 - E, SPA_IN.z0 + OV, SPA_IN.x0 + OV, SPA_IN.z1 - OV);
+  cp(SPA_IN.x1 - OV, SPA_IN.z0 + OV, SPA.x1 + E, SPA_IN.z1 - OV);
+  // spill-over: a thin film across the lowered lip, then a sheet down the stone face into the pool
+  const SW = SPILL.x1 - SPILL.x0 - 0.02, SX = (SPILL.x0 + SPILL.x1) / 2;
+  const film = kit.add(root, new THREE.PlaneGeometry(SW, SPA_IN.z0 + OV - (SPA.z0 - E)).rotateX(-Math.PI / 2), M.spill, [SX, SPILL.y + 0.004, (SPA_IN.z0 + OV + SPA.z0 - E) / 2], [0, 0, 0], { shadow: false });
+  const sheet = kit.add(root, new THREE.PlaneGeometry(SW, SPILL.y - WATER), M.spill, [SX, (SPILL.y + WATER) / 2, SPA.z0 - E - 0.006], [0, Math.PI, 0], { shadow: false });
+  film.userData.keep = sheet.userData.keep = true;
+  // spa lights: slow colour cycle purple -> blue -> cyan -> back on the interior plaster + lens (off for the
+  // daytime listing-photo views, where the lights are off)
+  const view = new URLSearchParams(globalThis.location?.search || '').get('view');
+  const lightsOn = !piece.photos.includes(view);
+  const HUES = [0.76, 0.66, 0.52], spaCol = new THREE.Color();
+  const setSpa = (t) => {
+    const p = (t / 7) % HUES.length, i = Math.floor(p), f = p - i, s = f * f * (3 - 2 * f);
+    const h = HUES[i] + (HUES[(i + 1) % HUES.length] - HUES[i]) * s;
+    spaCol.setHSL(h, 0.95, 0.55);
+    M.spaGlow.emissive.copy(spaCol); M.spaLens.color.copy(spaCol).lerp(new THREE.Color(1, 1, 1), 0.35).multiplyScalar(3);
+  };
+  M.spaGlow.emissiveIntensity = lightsOn ? 1.2 : 0;
+  if (!lightsOn) M.spaLens.color.set(0xd8dcdc);
+  else { setSpa(0); ctx.onUpdate((dt, t) => setSpa(t)); }
+  ctx.onUpdate((dt, t) => { M.spill.alphaMap.offset.y = (t * 0.9) % 1; });
 
   // pool perimeter coping (limestone, 30 cm, overhangs the water 2.5 cm)
+  const cy0 = DECK - 0.05;
   const cope = (x0, z0, x1, z1) => slab(M.coping, x0, cy0, z0, x1, DECK, z1, { r: 0.012, col: false });
   cope(HOLE[0], HOLE[1], HOLE[2], P.z0 + OV);
   cope(HOLE[0], P.z1 - OV, HOLE[2], HOLE[3]);

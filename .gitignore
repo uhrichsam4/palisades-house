@@ -2,3 +2,5 @@ node_modules/
 shots
 *.part*
 .DS_Store
+
+.claude/

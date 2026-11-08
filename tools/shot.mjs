@@ -46,7 +46,8 @@ const server = http.createServer((req, res) => {
 await new Promise(r => server.listen(0, '127.0.0.1', r)); const port = server.address().port;
 
 // Persistent profile per slot: Chrome keeps its compiled-shader cache between runs (far less Metal compiling).
-const browser = await chromium.launchPersistentContext(path.join(ROOT, 'shots', '.chrome-' + path.basename(mySlot)), { channel: 'chrome', headless: true, viewport: { width: 1080, height: 720 }, deviceScaleFactor: 1, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+const [SW, SH] = (opt.size || '1080x720').split('x').map(Number);
+const browser = await chromium.launchPersistentContext(path.join(ROOT, 'shots', '.chrome-' + path.basename(mySlot)), { channel: 'chrome', headless: true, viewport: { width: Math.max(SW, 400), height: Math.max(SH, 300) }, deviceScaleFactor: 1, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
 const jobs = [];
 for (const id of ids) jobs.push({ id, q: `view=${id}` });
 if (opt.cam) jobs.push({ id: opt.name || 'cam', q: `cam=${opt.cam}` });
@@ -57,7 +58,7 @@ for (const job of jobs) {
   const logs = [];
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') logs.push(m.type() + ': ' + m.text()); });
   page.on('pageerror', e => logs.push('pageerror: ' + e.message));
-  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1'; if (opt.pt) q += `&pt=${opt.pt}`; if (opt.stats) q += '&stats=1'; if (opt.audit) q += '&noprobes=1';
+  let q = job.q; if (opt.only) q += `&only=${opt.only}`; if (opt.noroof) q += '&noroof=1'; if (opt.nopost) q += '&nopost=1'; if (opt.pt) q += `&pt=${opt.pt}`; if (opt.stats) q += '&stats=1'; if (opt.audit) q += '&noprobes=1'; if (opt.size) q += `&sw=${SW}&sh=${SH}`;
   const t0 = Date.now();
   await page.goto(`http://127.0.0.1:${port}/index.html?${q}`, { waitUntil: 'load', timeout: 60000 });
   try { await page.waitForFunction(() => window.__ready === true, null, { timeout: Number(opt.timeout || 120000), polling: 250 }); }
@@ -79,6 +80,10 @@ for (const job of jobs) {
       const out = execFileSync('python3', ['-I', path.join(ROOT, 'tools/compose.py'), 'ab', photo, png, ab, String(opt.blind)]).toString().trim();
       fs.writeFileSync(path.join(outDir, `${job.id}_AB.json`), out); rec.ab = path.relative(ROOT, ab);
     }
+  }
+  if (opt.ref) { // any reference frame (e.g. a phone-video still): REF | OURS | 50% overlay with edges
+    const m = path.join(outDir, `${job.id}_match.jpg`);
+    execFileSync('python3', ['-I', path.join(ROOT, 'tools/match_compose.py'), path.resolve(opt.ref), png, m]); rec.match = path.relative(ROOT, m);
   }
   if (stats) rec.stats = stats; if (audit) rec.audit = audit;
   if (rec.errors.length) bad = true;

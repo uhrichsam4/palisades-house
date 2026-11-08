@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { ROOMS, LEVELS } from '../plan.js';
 
 export { RoundedBoxGeometry, mergeGeometries, mergeVertices };
 
@@ -62,24 +63,116 @@ export function shakerFront(w, h, frame = 0.06, depth = 0.02, inset = 0.006) {
 
 // Merge every static mesh under `root` that shares a material into one mesh per material.
 // Call at the END of a piece's build for big draw-call savings. Keeps meshes with userData.keep.
-export function mergeStatic(root) {
+// Merge static meshes that share a material into one draw — per room (or per 12 m cell outside), so merged
+// meshes stay small enough for frustum culling and each lands in the right room's light probe.
+const _bb = new THREE.Box3(), _bc = new THREE.Vector3();
+function cellOf(o) {
+  _bb.setFromObject(o); if (_bb.isEmpty()) return 'x'; _bb.getCenter(_bc);
+  const lv = _bc.y < LEVELS[1].floor - 0.2 ? 0 : 1; let best = null, ba = Infinity;
+  for (const [id, r] of Object.entries(ROOMS)) { if (r.level !== lv) continue; const [x0, z0, x1, z1] = r.rect, m = 0.2;
+    if (_bc.x > x0 - m && _bc.x < x1 + m && _bc.z > z0 - m && _bc.z < z1 + m) { const a = (x1 - x0) * (z1 - z0); if (a < ba) { ba = a; best = id; } } }
+  return best || ('c' + Math.floor(_bc.x / 12) + ',' + Math.floor(_bc.z / 12) + ',' + lv);
+}
+// Identical-looking materials made separately (std({...}) inline per object) can share one instance so their
+// meshes merge. Conservative: no emissive (often animated), no custom shaders, no per-object textures differ.
+const DEFAULT_OBC = THREE.Material.prototype.onBeforeCompile.toString();
+const hasCustomShader = (m) => (m.onBeforeCompile && m.onBeforeCompile.toString() !== DEFAULT_OBC) || m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey;
+const SIG_SKIP = new Set(['uuid', 'name', 'id', 'version', 'userData', '_listeners', 'needsUpdate', '_cacheKey']);
+function matSig(m) {
+  const parts = [m.type];
+  for (const k of Object.keys(m).sort()) {
+    if (SIG_SKIP.has(k) || k.startsWith('_') && k !== '_sheen' && k !== '_clearcoat' && k !== '_transmission' && k !== '_iridescence' && k !== '_anisotropy' && k !== '_dispersion') continue;
+    const v = m[k];
+    if (v === null || v === undefined || typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') parts.push(k + '=' + v);
+    else if (v.isColor) parts.push(k + '=' + v.getHexString());
+    else if (v.isVector2 || v.isVector3 || v.isEuler) parts.push(k + '=' + v.toArray().join(','));
+    else if (v.isTexture) parts.push(k + '=' + v.uuid);
+    else if (typeof v === 'function') continue;
+    else if (Array.isArray(v) && v.every(x => x === null || typeof x !== 'object')) parts.push(k + '=[' + v.join(',') + ']');
+    else if (v.constructor === Object) { try { parts.push(k + '=' + JSON.stringify(v)); } catch { return null; } }
+    else return null; // something we can't compare safely
+  }
+  return parts.join('|');
+}
+export function canonicalMaterials() {
+  const bySig = new Map();
+  return (m) => {
+    if (!m || hasCustomShader(m) || (m.emissive && m.emissive.getHex() !== 0 && m.emissiveIntensity > 0) || m.userData.noDedupe) return m;
+    const sig = matSig(m); if (!sig) return m;
+    const c = bySig.get(sig); if (c) return c; bySig.set(sig, m); return m;
+  };
+}
+// split a multi-material mesh's geometry into one compact geometry per group
+function splitGroups(geo) {
+  const out = []; const idx = geo.index; const total = idx ? idx.count : geo.attributes.position.count;
+  for (const grp of geo.groups) {
+    const start = grp.start, count = Math.min(grp.count, total - start); if (count <= 0) continue;
+    const sub = new THREE.BufferGeometry();
+    if (idx) {
+      const map = new Map(); const ni = new Array(count);
+      for (let i = 0; i < count; i++) { const v = idx.getX(start + i); let n = map.get(v); if (n === undefined) { n = map.size; map.set(v, n); } ni[i] = n; }
+      for (const [name, at] of Object.entries(geo.attributes)) { const arr = new at.array.constructor(map.size * at.itemSize); for (const [v, n] of map) for (let k = 0; k < at.itemSize; k++) arr[n * at.itemSize + k] = at.array[v * at.itemSize + k]; sub.setAttribute(name, new THREE.BufferAttribute(arr, at.itemSize, at.normalized)); }
+      sub.setIndex(ni);
+    } else for (const [name, at] of Object.entries(geo.attributes)) sub.setAttribute(name, new THREE.BufferAttribute(at.array.slice(start * at.itemSize, (start + count) * at.itemSize), at.itemSize, at.normalized));
+    out.push({ mi: grp.materialIndex, geo: sub });
+  }
+  return out;
+}
+const KEEP_ATTRS = ['position', 'normal', 'uv', 'uv1', 'color'];
+// thin, faint glass merges fine without per-object sorting; anything heavier stays separate
+const mergeableTransparent = (m) => m.transparent && (m.depthWrite === false || m.opacity <= 0.35) && !m.transmission;
+export function mergeStatic(root, { dedupe = null, skip = null } = {}) {
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
-  const buckets = new Map(); const remove = [];
+  const buckets = new Map(); const _m = new THREE.Matrix4();
+  const put = (o, mat, geo, cell) => {
+    if (dedupe) mat = dedupe(mat);
+    const key = mat.uuid + '|' + o.castShadow + '|' + o.receiveShadow + '|' + Object.keys(geo.attributes).sort().join(',') + '|' + (geo.index ? 'i' : 'n') + '|' + cell + '|' + (mat.transparent ? o.renderOrder : 0);
+    if (!buckets.has(key)) buckets.set(key, { mat, cast: o.castShadow, recv: o.receiveShadow, ro: mat.transparent ? o.renderOrder : 0, entries: [] });
+    buckets.get(key).entries.push({ o, geo });
+  };
+  const candidates = [];
   root.traverse(o => {
-    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.userData.keep || o.userData.dynamic || Array.isArray(o.material) || o.material.transparent || o.morphTargetInfluences) return;
-    let p = o.parent; while (p && p !== root) { if (p.userData.keep || p.userData.dynamic) return; p = p.parent; }
-    const key = o.material.uuid + '|' + o.castShadow + '|' + Object.keys(o.geometry.attributes).sort().join(',') + '|' + (o.geometry.index ? 'i' : 'n');
-    if (!buckets.has(key)) buckets.set(key, { mat: o.material, cast: o.castShadow, geos: [] });
-    const g = o.geometry.clone(); g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld));
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'uv1', 'color'].includes(k)) g.deleteAttribute(k);
-    if (g.groups.length) g.clearGroups();
-    buckets.get(key).geos.push(g); remove.push(o);
+    if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.isBatchedMesh || o.userData.keep || o.userData.dynamic || o.morphTargetInfluences || o.isReflector || !o.visible) return;
+    if (skip && skip(o)) return;
+    let p = o.parent; while (p && p !== root) { if (p.userData.keep || p.userData.dynamic || !p.visible) return; p = p.parent; }
+    const g = o.geometry; if (!g?.attributes?.position || Object.values(g.attributes).some(a => a.isInterleavedBufferAttribute)) return;
+    const mats = [].concat(o.material);
+    if (mats.some(m => !m || (m.transparent && !mergeableTransparent(m)) || (hasCustomShader(m) && !m.userData.probe))) return;
+    if (o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender || o.onAfterRender !== THREE.Object3D.prototype.onAfterRender) return;
+    candidates.push(o);
   });
-  for (const o of remove) o.parent.remove(o);
-  for (const { mat, cast, geos } of buckets.values()) {
-    let merged; try { merged = mergeGeometries(geos, false); } catch (e) { merged = null; }
-    if (!merged) { continue; }
-    const m = new THREE.Mesh(merged, mat); m.castShadow = cast; m.receiveShadow = true; m.name = 'merged'; root.add(m);
+  for (const o of candidates) {
+    const cell = cellOf(o);
+    _m.multiplyMatrices(inv, o.matrixWorld);
+    if (Array.isArray(o.material)) {
+      if (!o.geometry.groups.length) continue;
+      for (const { mi, geo } of splitGroups(o.geometry)) { const mat = o.material[mi]; if (!mat) continue; geo.applyMatrix4(_m); for (const k of Object.keys(geo.attributes)) if (!KEEP_ATTRS.includes(k)) geo.deleteAttribute(k); put(o, mat, geo, cell); }
+    } else {
+      const g = o.geometry.clone(); g.applyMatrix4(_m);
+      for (const k of Object.keys(g.attributes)) if (!KEEP_ATTRS.includes(k)) g.deleteAttribute(k);
+      for (const k of Object.keys(g.morphAttributes)) delete g.morphAttributes[k];
+      if (g.groups.length) g.clearGroups();
+      put(o, o.material, g, cell);
+    }
   }
+  // an object leaves (replaced by merged meshes) if it is multi-material or shares a bucket with another part
+  const stay = new Set();
+  for (const b of buckets.values()) if (b.entries.length < 2) for (const { o } of b.entries) if (!Array.isArray(o.material)) stay.add(o);
+  const multiBucket = new Set(); for (const b of buckets.values()) if (b.entries.length >= 2) for (const { o } of b.entries) multiBucket.add(o);
+  for (const o of stay) if (multiBucket.has(o)) stay.delete(o);
+  let made = [];
+  for (let iter = 0; iter < 4; iter++) {
+    made.forEach(m => m.geometry.dispose()); made = []; let failed = false;
+    for (const b of buckets.values()) {
+      const geos = b.entries.filter(e => !stay.has(e.o)).map(e => e.geo); if (!geos.length) continue;
+      let merged = null; try { merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false); } catch (e) { merged = null; }
+      if (!merged) { for (const e of b.entries) stay.add(e.o); failed = true; break; }
+      const m = new THREE.Mesh(merged, b.mat); m.castShadow = b.cast; m.receiveShadow = b.recv; m.renderOrder = b.ro; m.name = 'merged'; made.push(m);
+    }
+    if (!failed) break;
+  }
+  for (const m of made) root.add(m);
+  for (const o of candidates) if (!stay.has(o) && o.parent) o.parent.remove(o);
+  return { merged: made.length, removed: candidates.filter(o => !stay.has(o)).length };
 }

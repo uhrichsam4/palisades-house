@@ -191,13 +191,6 @@ export async function build(ctx) {
       });
     };
     apply(); ctx.onUpdate(apply);
-    // DEBUG (temporary): report meshes still crossing the vault volume
-    let dbgN = 0; ctx.onUpdate(() => { if (++dbgN !== 5) return; ctx.scene.updateMatrixWorld(); const hits = [];
-      ctx.scene.traverse(o => { if (!o.isMesh) return; let p = o; while (p) { if (p === root) return; p = p.parent; }
-        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); const bb = new THREE.Box3().copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
-        if (!bb.intersectsBox(box)) return; let q = o, path = []; while (q) { path.push(q.name || q.type); q = q.parent; }
-        hits.push(`${path.slice(0, 4).join('<')} inst=${!!o.isInstancedMesh} arr=${Array.isArray(o.material)} dyn=${!!o.userData.dynamic} done=${done.has(o.geometry)} y=${bb.min.y.toFixed(2)}..${bb.max.y.toFixed(2)} x=${bb.min.x.toFixed(1)}..${bb.max.x.toFixed(1)} z=${bb.min.z.toFixed(1)}..${bb.max.z.toFixed(1)}`); });
-      console.warn('[primary-dbg] ' + hits.join(' || ')); });
   }
   // ridge beam (single rough-sawn oak beam on the ridge)
   const BW = 0.25, BH = 0.30;
