@@ -20,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // ... and through a machine-wide queue: at most SHOT_SLOTS (default 1) headless Chromes render at once,
 // however many agents call this tool.
 const LOCKS = path.join(ROOT, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursive: true });
-const SLOTS = Number(process.env.SHOT_SLOTS || 2); let mySlot = null;
+const SLOTS = Number(process.env.SHOT_SLOTS || 3); let mySlot = null;
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 for (let waited = 0; mySlot === null; waited++) {
   for (let i = 0; i < SLOTS && mySlot === null; i++) {
