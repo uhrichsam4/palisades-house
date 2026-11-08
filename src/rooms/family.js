@@ -11,13 +11,15 @@
 //    black wire-brushed coffee table, black open-frame side table, flat-weave cream rug with dark flecks,
 //    rustic console under the rear window, fiddle-leaf fig, small plants, shelf decor.
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const piece = { rooms: ["family"], photos: ["p04", "p05"] };
 export const ownCeiling = ['family'];
 export const views = {
-  // solved from photo correspondences (window/door edges, chimney, TV, shelving ends, skull, fig)
-  p04: { pos: [8.95, 1.42, 14.43], look: [5.38, 1.09, 16.80], fov: 64 },
-  p05: { pos: [3.15, 1.60, 13.90], look: [5.97, 1.25, 17.00], fov: 75 },
+  // least-squares solved from photo correspondences (TV/firebox corners, shelving ends, door + window jambs,
+  // skull); p05 is held just inside the living wall (the free solve lands 0.9 m behind it).
+  p04: { pos: [8.72, 1.42, 14.68], look: [4.98, 1.10, 17.05], fov: 62.5 },   // r2: pulled back ~0.45 m + up (critic: too close/low)
+  p05: { pos: [3.26, 1.66, 13.72], look: [5.96, 1.42, 16.70], fov: 74.2 },   // r2: yaw right ~3 deg, pitch up (more ceiling/beam)   // just proud of the chimney face: TV/firebox read as a sliver
 };
 
 // ---- room constants
@@ -59,6 +61,23 @@ export async function build(ctx) {
     return mesh(parent, g, mat, [x0 + w / 2, y0 + h / 2, z0 + d / 2]);
   };
   const paintDS = M.paintWhite.clone(); paintDS.side = THREE.DoubleSide;
+  // Sun boost for this room's own materials: scales only the (shadowed) directional sun term, so the light that
+  // already passes the rear glazing lands as hard, bright patches on floor/rug/sofa (photos p04/p05) without
+  // touching the ambient/probe fill or any shared material.
+  const SUN_K = 3.2;
+  const sunBoost = (mat, k = SUN_K) => {
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh, r) => {
+      if (prev) prev.call(mat, sh, r);
+      sh.uniforms.uFamSun = { value: k };
+      const chunk = THREE.ShaderChunk.lights_fragment_begin
+        .replace(/getDirectionalLightInfo\( directionalLight, directLight \);/g, '$& directLight.color *= uFamSun;')
+        .replace(/getSunLightInfo\( sunLight, directLight \);/g, '$& directLight.color *= uFamSun;');
+      sh.fragmentShader = 'uniform float uFamSun;\n' + sh.fragmentShader.replace('#include <lights_fragment_begin>', chunk);
+    };
+    const key = 'famSun' + k; const pk = mat.customProgramCacheKey.bind(mat);
+    mat.customProgramCacheKey = () => pk() + key; mat.needsUpdate = true; return mat;
+  };
 
   // ------------------------------------------------------------------ materials
   const oakMaps = kit.pbrMaps('white_oak_veneer', '1k');
@@ -66,8 +85,8 @@ export async function build(ctx) {
   oak.color.setRGB(1.42, 1.22, 1.0);            // rift white oak, natural matte (photo ≈ #cfa57a)
   const oakBeam = new THREE.MeshStandardMaterial({ ...kit.pbrMaps('white_oak_veneer', '1k'), roughness: 0.66, normalScale: new THREE.Vector2(0.6, 0.6) });
   oakBeam.color.setRGB(1.38, 0.98, 0.62);       // warmer, stained beams
-  const blackWood = new THREE.MeshStandardMaterial({ ...kit.pbrMaps('white_oak_veneer', '1k'), roughness: 0.72, normalScale: new THREE.Vector2(0.9, 0.9) });
-  blackWood.color.setRGB(0.13, 0.17, 0.26);    // wire-brushed black oak (grain still reads)
+  const blackWood = new THREE.MeshStandardMaterial({ ...kit.pbrMaps('white_oak_veneer', '1k'), roughness: 0.58, normalScale: new THREE.Vector2(1.5, 1.5) });
+  blackWood.color.setRGB(0.16, 0.22, 0.38);    // r2: deep navy-black wire-brushed oak, grain + sheen reads (photo p05)
   const rusticWood = new THREE.MeshStandardMaterial({ ...kit.pbrMaps('white_oak_veneer', '1k'), roughness: 0.85, normalScale: new THREE.Vector2(1.2, 1.2) });
   rusticWood.color.setRGB(1.2, 0.98, 0.78);
   const tvWood = new THREE.MeshStandardMaterial({ ...kit.pbrMaps('white_oak_veneer', '1k'), roughness: 0.5 });
@@ -75,7 +94,7 @@ export async function build(ctx) {
 
   // black marble with white veins (tileable canvas, 2.4 m per tile)
   const marbleMap = kit.canvasTex(1024, 1024, (g, w, h) => {
-    g.fillStyle = '#0c0c0d'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#1f1f20'; g.fillRect(0, 0, w, h);   // Nero Marquina: deep charcoal, never pure black
     for (let i = 0; i < 70; i++) { // soft clouding
       const x = R() * w, y = R() * h, r = 40 + R() * 160; const v = 18 + R() * 16;
       for (const [ox, oy] of [[0, 0], [w, 0], [-w, 0], [0, h], [0, -h]]) {
@@ -89,7 +108,7 @@ export async function build(ctx) {
       const pts = [[x, y]]; let a = ang;
       for (let s = 0; s < len; s += 4) {
         a += (R() - 0.5) * 0.55 + (ang - a) * 0.3; const st = 3 + R() * 3; x += Math.cos(a) * st; y += Math.sin(a) * st; pts.push([x, y]);
-        if (depth < 1 && R() < 0.0035) vein(x, y, a + (R() < 0.5 ? 1 : -1) * (0.5 + R() * 0.7), len * (0.15 + R() * 0.25), width * 0.6, alpha * 0.8, depth + 1);
+        if (depth < 1 && R() < 0.004) vein(x, y, a + (R() < 0.5 ? 1 : -1) * (0.5 + R() * 0.7), len * (0.15 + R() * 0.25), width * 0.6, alpha * 0.8, depth + 1);
       }
       for (const [ox, oy] of [[0, 0], [w, 0], [-w, 0], [0, h], [0, -h], [w, h], [-w, -h], [w, -h], [-w, h]]) {
         g.beginPath(); g.moveTo(pts[0][0] + ox, pts[0][1] + oy); for (const p of pts) g.lineTo(p[0] + ox, p[1] + oy);
@@ -97,8 +116,10 @@ export async function build(ctx) {
         g.strokeStyle = `rgba(240,240,236,${alpha})`; g.lineWidth = width; g.stroke();
       }
     };
-    for (let i = 0; i < 3; i++) vein((i + R() * 0.5) * w / 3, R() * h, -0.65 + (R() - 0.5) * 0.25, 1200 + R() * 500, 1.6 + R() * 1.2, 0.9);
-    for (let i = 0; i < 2; i++) vein(R() * w, R() * h, -0.65 + (R() - 0.5) * 1.0, 200 + R() * 250, 1 + R() * 0.6, 0.4, 1);
+    // r2: denser, bolder, less regular network (photo: 4-6 strong crossing veins per face + hairline branches)
+    for (let i = 0; i < 5; i++) vein((i + R() * 0.7) * w / 5, R() * h, -0.65 + (R() - 0.5) * 0.5, 900 + R() * 900, 2.2 + R() * 2.6, 0.95);
+    vein(R() * w, R() * h, 0.55 + (R() - 0.5) * 0.6, 500 + R() * 400, 1.8 + R() * 1.2, 0.85);   // one crossing vein
+    for (let i = 0; i < 5; i++) vein(R() * w, R() * h, -0.65 + (R() - 0.5) * 1.6, 120 + R() * 300, 0.8 + R() * 0.8, 0.45 + R() * 0.3, 1);
   });
   const marble = new THREE.MeshPhysicalMaterial({ map: marbleMap, roughness: 0.34, clearcoat: 0.25, clearcoatRoughness: 0.35, normalMap: kit.noiseNormal(256, 0.4, 32, 9), normalScale: new THREE.Vector2(0.05, 0.05) });
 
@@ -111,8 +132,8 @@ export async function build(ctx) {
   const grass = new THREE.MeshStandardMaterial({ map: grassMap, roughness: 0.95, normalMap: kit.noiseNormal(256, 2, 64, 5), normalScale: new THREE.Vector2(0.3, 0.3) });
 
   // upholstery: warm beige woven linen (hessian weave normal, matte; metre-based UVs via uvBox)
-  const weave = kit.pbrMaps('hessian_380', '1k');
-  const linen = new THREE.MeshStandardMaterial({ color: 0xc6b8a5, normalMap: weave.normalMap, roughnessMap: weave.roughnessMap, roughness: 1, normalScale: new THREE.Vector2(0.45, 0.45) });
+  const linen = kit.fabric.linen('#e6dccd', { scale: 2.6 });   // cream/greige performance linen (metre UVs -> ~0.38 m per tile)
+  linen.color.multiplyScalar(1.5);                              // the neutral weave map averages ~0.57: lift back to cream
   const ceramicWhite = new THREE.MeshStandardMaterial({ color: 0xf1ede6, roughness: 0.55 });
   const ceramicCream = new THREE.MeshStandardMaterial({ color: 0xe6dccb, roughness: 0.7 });
   const ceramicBlack = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5 });
@@ -121,6 +142,7 @@ export async function build(ctx) {
   const leafGreen = new THREE.MeshStandardMaterial({ color: 0x3d5a2c, roughness: 0.5, side: THREE.DoubleSide });
   const brassMat = M.brass;
   const glassClear = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.05, transmission: 0, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false });
+  for (const m of [oak, blackWood, linen, rusticWood]) sunBoost(m);
 
   // ------------------------------------------------------------------ ceiling: vault + beams
   {
@@ -167,7 +189,7 @@ export async function build(ctx) {
     }
     // recessed cans on the slopes + flat top, a ceiling speaker
     const disc = new THREE.CircleGeometry(0.045, 24), ring = new THREE.RingGeometry(0.045, 0.062, 24);
-    const lit = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3e0, emissiveIntensity: 1.1 });
+    const lit = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3e0, emissiveIntensity: 5 });
     const ringMat = new THREE.MeshStandardMaterial({ color: 0xeceae5, roughness: 0.6 });
     const speakerMat = new THREE.MeshStandardMaterial({ color: 0xe9e8e4, roughness: 0.8, normalMap: kit.noiseNormal(128, 6, 64, 2), normalScale: new THREE.Vector2(0.6, 0.6) });
     const onCeil = (x, z, geo, mat, off = 0.004) => {
@@ -212,15 +234,21 @@ export async function build(ctx) {
         c.fillStyle = gr; c.beginPath(); c.moveTo(x - fw, h); c.quadraticCurveTo(x - fw * 0.3, h - fh * 0.6, x + (R() - 0.5) * 8, h - fh); c.quadraticCurveTo(x + fw * 0.3, h - fh * 0.6, x + fw, h); c.fill();
       }
     });
-    const flameMat = new THREE.MeshBasicMaterial({ map: flameTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0x3a1c0c });   // faint ember line only
-    const fl = mesh(wallGrp, new THREE.PlaneGeometry(FZ1 - FZ0 - 0.1, 0.06), flameMat, [xin + 0.17, FY0 + 0.05, (FZ0 + FZ1) / 2], [0, Math.PI / 2, 0], { shadow: false });
-    fl.userData.noCollide = true;
+    // r2: a real lit flame row (photo p04 shows orange flame through the glass), two layers for depth
+    const flameMat = new THREE.MeshBasicMaterial({ map: flameTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0x8a5232 });
+    for (const [dx, hh, k] of [[0.15, 0.13, 1], [0.21, 0.09, 0.55]]) {
+      const fm = k === 1 ? flameMat : flameMat.clone(); if (k !== 1) fm.color.multiplyScalar(k);
+      const fl = mesh(wallGrp, new THREE.PlaneGeometry(FZ1 - FZ0 - 0.12, hh), fm, [xin + dx, FY0 + 0.03 + hh / 2, (FZ0 + FZ1) / 2], [0, Math.PI / 2, 0], { shadow: false });
+      fl.userData.noCollide = true; fl.userData.keep = true;
+    }
+    // warm ember glow on the firebox floor (emissive, no light)
+    mesh(wallGrp, new THREE.PlaneGeometry(depth - 0.06, FZ1 - FZ0 - 0.1), new THREE.MeshBasicMaterial({ color: 0x8a3a10, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }), [xin + depth / 2, FY0 + 0.017, (FZ0 + FZ1) / 2], [-Math.PI / 2, 0, 0], { shadow: false }).userData.noCollide = true;
     const trim = M.blackMetal;
     boxMin(wallGrp, trim, xf - 0.004, FY0 - 0.02, FZ0 - 0.02, 0.012, 0.02, FZ1 - FZ0 + 0.04);
     boxMin(wallGrp, trim, xf - 0.004, FY1, FZ0 - 0.02, 0.012, 0.02, FZ1 - FZ0 + 0.04);
     boxMin(wallGrp, trim, xf - 0.004, FY0, FZ0 - 0.02, 0.012, FY1 - FY0, 0.02);
     boxMin(wallGrp, trim, xf - 0.004, FY0, FZ1, 0.012, FY1 - FY0, 0.02);
-    const darkGlass = new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.6, clearcoat: 1, depthWrite: false });
+    const darkGlass = new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.22, specularIntensity: 1, ior: 1.5, depthWrite: false });
     const gl = mesh(wallGrp, new THREE.PlaneGeometry(FZ1 - FZ0, FY1 - FY0), darkGlass,[xf - 0.01, (FY0 + FY1) / 2, (FZ0 + FZ1) / 2], [0, Math.PI / 2, 0], { shadow: false });
     gl.userData.noCollide = true;
 
@@ -230,15 +258,20 @@ export async function build(ctx) {
       const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#1d1a17'); gr.addColorStop(1, '#0a0908'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
       // back bar shelves with warm bottles
       for (let s = 0; s < 4; s++) { const y = 70 + s * 70; c.fillStyle = '#2e2620'; c.fillRect(560, y + 46, 420, 6);
-        for (let b = 0; b < 16; b++) { const x = 570 + b * 25 + R() * 6, bh = 26 + R() * 18; c.fillStyle = `rgba(${150 + R() * 90},${90 + R() * 60},${30 + R() * 40},0.85)`; c.fillRect(x, y + 46 - bh, 10, bh); } }
+        for (let b = 0; b < 16; b++) { const x = 570 + b * 25 + R() * 6, bh = 26 + R() * 18, v = 50 + R() * 50; c.fillStyle = `rgba(${v + 20},${v + 8},${v - 6},0.7)`; c.fillRect(x, y + 46 - bh, 10, bh); } }
       const gl2 = c.createRadialGradient(760, 140, 10, 760, 140, 300); gl2.addColorStop(0, 'rgba(255,190,110,0.35)'); gl2.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gl2; c.fillRect(400, 0, 624, 400);
       c.fillStyle = '#3a2a1e'; c.fillRect(380, 360, 644, 40); c.fillStyle = '#17110d'; c.fillRect(380, 400, 644, 184); // counter
       for (const x of [470, 600, 730, 860]) { c.fillStyle = '#0d0b0a'; c.beginPath(); c.ellipse(x, 470, 34, 10, 0, 0, Math.PI * 2); c.fill(); c.fillRect(x - 4, 470, 8, 110); }
       c.fillStyle = '#0e0c0b'; c.beginPath(); c.ellipse(230, 270, 75, 95, 0, 0, Math.PI * 2); c.fill(); c.fillRect(150, 300, 170, 290); // figure
       c.beginPath(); c.ellipse(235, 150, 40, 48, 0, 0, Math.PI * 2); c.fill();
       c.fillStyle = 'rgba(210,180,150,0.25)'; c.beginPath(); c.ellipse(700, 300, 24, 28, 0, 0, Math.PI * 2); c.fill();
+      // soften (film grain + lens blur) so nothing reads as a dot grid
+      c.filter = 'blur(3px)'; c.drawImage(c.canvas, 0, 0); c.filter = 'none';
+      for (let i = 0; i < 6000; i++) { const v = R() * 40; c.fillStyle = `rgba(${v},${v},${v},0.25)`; c.fillRect(R() * w, R() * h, 2, 2); }
+      // the photo's frame is a dim black-and-white film still: desaturate + slight warm tone
+      const id = c.getImageData(0, 0, w, h), D = id.data; for (let i = 0; i < D.length; i += 4) { const l = 0.3 * D[i] + 0.59 * D[i + 1] + 0.11 * D[i + 2]; D[i] = l * 1.02; D[i + 1] = l; D[i + 2] = l * 0.95; } c.putImageData(id, 0, 0);
     });
-    const screen = new THREE.MeshStandardMaterial({ map: scr, emissiveMap: scr, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.12, metalness: 0.1 });
+    const screen = new THREE.MeshStandardMaterial({ map: scr, emissiveMap: scr, emissive: 0xffffff, emissiveIntensity: 0.55, roughness: 0.1, metalness: 0.0, color: 0x777777 });
     const tvg = kit.group(wallGrp, [xf, tvY, tvZ], Math.PI / 2, 'tv'); // local x -> world -z, local z -> +x
     boxMin(tvg, M.matteBlack, -tvW / 2, -tvH / 2, 0, tvW, tvH, 0.035);
     const bz = 0.028; const f = (w, h, x, y) => mesh(tvg, rb(w, h, 0.05, 0.004), tvWood, [x, y, 0.025]);
@@ -279,12 +312,13 @@ export async function build(ctx) {
     return g;
   }
   const RS0 = 14.15, RS1 = MZ0, LS0 = MZ1, LS1 = 19.0;
-  shelving(RS1, RS1 - RS0, 3.15, 0.42, 2);
-  shelving(LS1, LS1 - LS0, 3.15, 0.42, 1);
+  const SHELF_H = 2.96;   // ceilY(14.15) = 3.06: keep the top board level and clear of the slope
+  shelving(RS1, RS1 - RS0, SHELF_H, 0.42, 2);
+  shelving(LS1, LS1 - LS0, SHELF_H, 0.42, 1);
   // dark grasscloth return between the right shelving and the living wall
-  kit.wallPanel(root, [X0, Z0], [X0, RS0], 0.09, 3.15, [1, 0], grass, 0.004);
+  kit.wallPanel(root, [X0, Z0], [X0, RS0], 0.09, SHELF_H, [1, 0], grass, 0.004);
   // a thin oak edge strip where the grasscloth meets the shelving
-  boxMin(root, oak, X0, 0, RS0 - 0.03, 0.42, 3.15, 0.03, 0.9);
+  boxMin(root, oak, X0, 0, RS0 - 0.03, 0.42, SHELF_H, 0.03, 0.9);
 
   // ------------------------------------------------------------------ shelf decor
   const lathe = (pts, seg = 40) => kit.lathe(pts, seg);
@@ -315,36 +349,53 @@ export async function build(ctx) {
     for (let i = 0; i < cp.count; i++) { v.set(cp.getX(i), cp.getY(i), cp.getZ(i)); n.copy(v).normalize(); let b = 0; for (const d of dirs) b = Math.max(b, Math.pow(Math.max(0, n.dot(d)), 60)); v.multiplyScalar(1 + 0.22 * b - 0.05); cp.setXYZ(i, v.x, v.y, v.z); }
     cg.computeVertexNormals(); return cg;
   };
-  const coralMat = new THREE.MeshStandardMaterial({ color: 0xf0ebe0, roughness: 0.9 });
+  const coralMat = new THREE.MeshStandardMaterial({ color: 0xd9d3c7, roughness: 0.9 });
   const wireMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1b, roughness: 0.5, metalness: 0.6, wireframe: true });
   const basket = () => { const g = new THREE.Group(); mesh(g, new THREE.CylinderGeometry(0.085, 0.07, 0.12, 14, 4, true), wireMat, [0, 0.06, 0], [0, 0, 0], { shadow: false }); mesh(g, new THREE.CircleGeometry(0.07, 14), M.matteBlack, [0, 0.003, 0], [-Math.PI / 2, 0, 0]); return g; };
   const coral = (r = 0.06) => { const m = new THREE.Mesh(coralGeo(r, 3), coralMat); m.castShadow = true; m.position.y = r * 0.9; const g = new THREE.Group(); g.add(m); return g; };
   const vase = (geo, mat, s = 1) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; m.scale.setScalar(s); return m; };
   const HZ = Math.PI / 2; // rotate local-x-long objects to run along the shelf (world z)
+  // r2 warm decor: tan glazed urn, wooden bead ring, brass vase with dried pampas, brass bud vase
+  const tanGlaze = new THREE.MeshPhysicalMaterial({ color: 0xb8875a, roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.4 });
+  const woodBead = new THREE.MeshStandardMaterial({ color: 0x9a6a42, roughness: 0.6 });
+  const pampas = new THREE.MeshStandardMaterial({ color: 0xe9dfcc, roughness: 0.95 });
+  const urnGeo = lathe([[0, 0], [0.04, 0], [0.065, 0.03], [0.075, 0.08], [0.06, 0.13], [0.03, 0.155], [0.033, 0.175], [0.028, 0.177]]);
+  const brassVaseGeo = lathe([[0, 0], [0.045, 0], [0.06, 0.05], [0.058, 0.11], [0.035, 0.16], [0.03, 0.19], [0.038, 0.2], [0.033, 0.202]]);
+  const urn = (s = 1) => vase(urnGeo, tanGlaze, s);
+  const beadRing = () => { const g = new THREE.Group(); const sg = new THREE.SphereGeometry(0.013, 10, 8); for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2; mesh(g, sg, woodBead, [Math.cos(a) * 0.055, 0.013, Math.sin(a) * 0.055]); } return g; };
+  const driedVase = () => { const g = new THREE.Group(); mesh(g, brassVaseGeo, brassMat);
+    for (let i = 0; i < 7; i++) { const a = R() * 6.28, r = 0.04 + R() * 0.07, h = 0.3 + R() * 0.12; const tip = [Math.cos(a) * r, h, Math.sin(a) * r];
+      mesh(g, kit.tube([[0, 0.15, 0], [tip[0] * 0.5, h * 0.75, tip[2] * 0.5], tip], 0.0025, 8), woodBead);
+      mesh(g, new THREE.IcosahedronGeometry(0.03, 1), pampas, tip).scale.set(0.7, 1.8, 0.7); }
+    return g; };
   // world helpers for each shelf level (bottom surfaces of compartments)
   const SH = { c: 1.025, s1: 1.536, s2: 2.086, s3: 2.616 };
   // right unit (z 14.15..15.66): from photo p04 — 3-4 objects per shelf
   place(tinyPlants(0.42), shelfX(), SH.s3, 15.30, HZ);
   place(vase(vaseGeo.jar, ceramicCream), shelfX(), SH.s3, 14.40);
   { const b = bookStack(3, 0.22, 0.16, ['#e8e2d6', '#8b8475', '#2d2a26']); place(b, shelfX(), SH.s3, 14.80); place(vase(vaseGeo.small, ceramicBlack, 0.8), shelfX(), SH.s3 + b.userData.h, 14.80); }
-  place(vase(vaseGeo.bulb, ceramicWhite), shelfX(), SH.s2, 15.40);
+  place(vase(vaseGeo.bulb, tanGlaze), shelfX(), SH.s2, 15.40);
+  place(urn(0.85), shelfX(), SH.s3, 14.60);
+  place(beadRing(), shelfX(), SH.s2, 15.25);
   place(vase(vaseGeo.small, ceramicBlack), shelfX(), SH.s2, 15.12).scale.set(1.2, 0.8, 1.2);
   place(coral(0.055), shelfX(), SH.s2, 14.86);
   { const b = bookStack(3, 0.22, 0.16); place(b, shelfX(), SH.s2, 14.45); const cam = new THREE.Group(); mesh(cam, rb(0.13, 0.08, 0.06, 0.01), M.matteBlack, [0, 0.04, 0]); mesh(cam, rb(0.12, 0.012, 0.055, 0.003), M.brushedNickel, [0, 0.085, 0]); mesh(cam, kit.cyl(0.026, 0.026, 0.05), M.matteBlack, [0, 0.04, 0.05], [Math.PI / 2, 0, 0]); place(cam, shelfX(), SH.s2 + b.userData.h, 14.45, Math.PI / 2); }
   place(vase(vaseGeo.small, terracotta), shelfX(), SH.s1, 15.45).scale.set(1, 1.1, 1);
   place(basket(), shelfX(), SH.s1, 15.20);
-  place(flowersInVase(), shelfX(), SH.s1, 14.95);
+  place(driedVase(), shelfX(), SH.s1, 14.95);
   for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(new THREE.SphereGeometry(0.025, 16, 12), brassMat); place(m, shelfX(0.24), SH.s1 + 0.025, 14.66 - i * 0.07); }
   place(sculptureHead(), shelfX(), SH.s1, 14.32);
   { const b = bookStack(4, 0.24, 0.17); place(b, shelfX(), SH.c, 15.42); const gm = new THREE.MeshStandardMaterial({ color: 0x3f7b5a, roughness: 0.4 }); for (let i = 0; i < 3; i++) place(new THREE.Mesh(rb(0.035, 0.07, 0.035, 0.006), gm), shelfX(0.2), SH.c + b.userData.h + 0.035, 15.34 + i * 0.06); }
   const shelfBowl = new THREE.Mesh(vaseGeo.bowl, ceramicWhite); shelfBowl.castShadow = true; place(shelfBowl, shelfX(), SH.c + 0.002, 14.98);
+  for (const [dx, dz, dy] of [[0, 0, 0], [0.05, 0.04, 0.005], [-0.04, 0.05, 0.004], [0.03, -0.05, 0.006], [-0.05, -0.03, 0.003]]) place(new THREE.Mesh(new THREE.SphereGeometry(0.032, 16, 12), coralMat), shelfX() + dx, SH.c + 0.045 + dy, 14.98 + dz);
   place(coral(0.045), shelfX(), SH.c, 14.72);
   { const m = new THREE.Mesh(vaseGeo.cloche, glassClear); place(m, shelfX(), SH.c, 14.40); mesh(m, new THREE.SphereGeometry(0.012, 12, 8), brassMat, [0, 0.21, 0]); }
   // left unit (z 17.96..19.0): top shelf = planter row (photo p04 top-left)
   place(tinyPlants(0.86), shelfX(), SH.s3, 18.48, HZ);
   place(vase(vaseGeo.jar, ceramicCream, 0.9), shelfX(), SH.s2, 18.82);
   { const b = bookStack(3, 0.2, 0.15, ['#2d2a26', '#d9d2c4', '#8b8475']); place(b, shelfX(), SH.s2, 18.48); place(coral(0.04), shelfX(), SH.s2 + b.userData.h, 18.48); }
-  place(vase(vaseGeo.small, ceramicWhite), shelfX(), SH.s2, 18.15).scale.set(1.1, 1.2, 1.1);
+  place(vase(brassVaseGeo, brassMat, 0.9), shelfX(), SH.s2, 18.15);
+  place(urn(0.7), shelfX(), SH.s1, 18.86);
   { const b = bookStack(2, 0.2, 0.15); place(b, shelfX(), SH.s1, 18.70); }
   place(sculptureHead(), shelfX(), SH.s1, 18.40);
   place(vase(vaseGeo.small, terracotta, 0.9), shelfX(), SH.s1, 18.12);
@@ -352,89 +403,139 @@ export async function build(ctx) {
   place(basket(), shelfX(), SH.c, 18.52);
   place(vase(vaseGeo.jar, terracotta), shelfX(), SH.c, 18.20).scale.set(0.7, 0.6, 0.7);
 
-  // ------------------------------------------------------------------ rug (flat-weave grey-beige, low pile, subtle pattern) 3.0 x 4.0
-  const RUG = [3.45, 15.30, 6.45, 19.30];
+  // ------------------------------------------------------------------ rug: warm cream hand-loomed wool, ~3.7 x 4.6 m,
+  // running under the sofa front, both swivel chairs and the side table (photos p04/p05); short fringe on the z ends.
+  const RUG = [3.25, 14.70, 6.95, 19.30];
   {
     const rugMap = kit.canvasTex(1024, 1024, (c, w, h) => {
-      c.fillStyle = '#b3aa9b'; c.fillRect(0, 0, w, h);
-      // fine woven rows + a faint lattice pattern, sparse darker flecks
-      for (let y = 0; y < h; y += 3) { const v = 176 + R() * 22; c.fillStyle = `rgba(${v},${v - 7},${v - 18},0.55)`; c.fillRect(0, y, w, 1); }
-      for (let i = 0; i < 9000; i++) { const v = 120 + R() * 50; c.fillStyle = `rgba(${v},${v - 5},${v - 12},0.35)`; c.fillRect(R() * w, R() * h, 1 + R() * 4, 1); }
-      c.strokeStyle = 'rgba(150,140,126,0.22)'; c.lineWidth = 2;
-      for (let k = -h; k < w; k += 64) { c.beginPath(); c.moveTo(k, 0); c.lineTo(k + h, h); c.moveTo(k + h, 0); c.lineTo(k, h); c.stroke(); }
-      c.strokeStyle = 'rgba(140,130,116,0.5)'; c.lineWidth = 8; c.strokeRect(4, 4, w - 8, h - 8);
+      c.fillStyle = '#d3c9b8'; c.fillRect(0, 0, w, h);
+      // hand-loomed: uneven weft rows (slubs), heathered fibres, a few darker oatmeal flecks, low-frequency mottling
+      for (let i = 0; i < 40; i++) { const x = R() * w, y = R() * h, r = 60 + R() * 200, v = R() < 0.5 ? 'rgba(255,250,240,0.08)' : 'rgba(150,135,115,0.07)'; const gr = c.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, v); gr.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = gr; c.fillRect(x - r, y - r, 2 * r, 2 * r); }
+      for (let y = 0; y < h; y += 2) { const v = 196 + R() * 30; c.fillStyle = `rgba(${v},${v - 8},${v - 22},${0.25 + R() * 0.35})`; c.fillRect(0, y, w, 1); }
+      for (let i = 0; i < 14000; i++) { const v = 215 + R() * 35; c.fillStyle = `rgba(${v},${v - 6},${v - 16},0.45)`; c.fillRect(R() * w, R() * h, 2 + R() * 7, 1 + R()); }
+      for (let i = 0; i < 5000; i++) { const v = 105 + R() * 45; c.fillStyle = `rgba(${v},${v - 8},${v - 20},0.4)`; c.fillRect(R() * w, R() * h, 1 + R() * 3, 1); }
+      for (let i = 0; i < 260; i++) { const y = R() * h, x = R() * w, l = 30 + R() * 120; c.fillStyle = 'rgba(245,238,225,0.35)'; c.fillRect(x, y, l, 2); }   // slubs
     });
-    const rugMat = new THREE.MeshStandardMaterial({ map: rugMap, roughness: 0.97, normalMap: kit.noiseNormal(128, 2, 64, 13), normalScale: new THREE.Vector2(0.25, 0.25) });
-    rugMat.normalMap.repeat.set(10, 10);
-    const g = rb(RUG[2] - RUG[0], 0.010, RUG[3] - RUG[1], 0.004, 2);
-    const m = mesh(root, g, rugMat, [(RUG[0] + RUG[2]) / 2, 0.005, (RUG[1] + RUG[3]) / 2], [0, 0, 0], { shadow: false }); m.name = 'rug';
-    m.userData.noCollide = true;
+    const rr = [(RUG[2] - RUG[0]) / 0.45, (RUG[3] - RUG[1]) / 0.45];
+    const rugMat = new THREE.MeshPhysicalMaterial({ map: rugMap, roughness: 1,
+      normalMap: kit.tex('assets/acg/Carpet016/Carpet016_NormalGL.jpg', { repeat: rr }), normalScale: new THREE.Vector2(0.9, 0.9),
+      roughnessMap: kit.tex('assets/acg/Carpet016/Carpet016_Roughness.jpg', { repeat: rr }),
+      sheen: 0.3, sheenRoughness: 0.8, sheenColor: new THREE.Color(0xe6dccb) });
+    rugMat.color.setScalar(0.9); sunBoost(rugMat);
+    const g = rb(RUG[2] - RUG[0], 0.014, RUG[3] - RUG[1], 0.006, 3);
+    const m = mesh(root, g, rugMat, [(RUG[0] + RUG[2]) / 2, 0.006, (RUG[1] + RUG[3]) / 2], [0, 0, 0], { shadow: false }); m.name = 'rug';
+    m.receiveShadow = true; m.userData.noCollide = true;
+    // fringe: alpha-tested strands on both short ends
+    const frTex = kit.canvasTex(512, 32, (c, w, h) => { c.clearRect(0, 0, w, h); for (let x = 0; x < w; x += 3) { const v = 200 + R() * 40; c.fillStyle = `rgb(${v},${v - 8},${v - 20})`; c.fillRect(x + R(), 0, 2, h * (0.7 + R() * 0.3)); } });
+    frTex.wrapS = THREE.RepeatWrapping; frTex.repeat.set((RUG[2] - RUG[0]) / 0.5, 1);
+    const frMat = sunBoost(new THREE.MeshStandardMaterial({ map: frTex, alphaTest: 0.5, roughness: 1, side: THREE.DoubleSide }));
+    for (const [zz, sgn] of [[RUG[1], -1], [RUG[3], 1]]) {
+      const fg = new THREE.PlaneGeometry(RUG[2] - RUG[0] - 0.02, 0.06); fg.rotateX(-Math.PI / 2); if (sgn < 0) fg.rotateY(Math.PI);
+      const fm = mesh(root, fg, frMat, [(RUG[0] + RUG[2]) / 2, 0.0065, zz + sgn * 0.03], [0, 0, 0], { shadow: false }); fm.userData.noCollide = true;
+    }
   }
 
-  // ------------------------------------------------------------------ sofa: long low linen L-sectional facing the TV (-x):
-  // continuous back, soft rolled arms, deep channel-tufted seats, chaise at the living-wall (-z) end
-  const SOFA_Z0 = 15.85, SOFA_L = 3.20, SOFA_D = 1.00, SOFA_XB = 6.62, CH_D = 1.72, CH_W = 1.00;
+  // ------------------------------------------------------------------ sofa: straight cream modular sofa facing the TV (-x)
+  // (fitted to both photos: back plane x~6.8, 3.0 m long, z 15.80..18.80). Three seat modules, each with its own
+  // tall puffy back block that runs to the floor (seams read from behind in p04), front-to-back channel-tufted
+  // seat cushions, and thick rounded arms at both ends; the -z arm's outer face is the big side seen in p04.
+  // Cushions are subdivided rounded boxes (SDF rounding on a dense grid) so puff, sag and creases actually bend.
+  function softBox(w, h, d, r, puff = 0, o = {}) {
+    const step = o.step || 0.035, n = (v) => Math.max(2, Math.min(28, Math.ceil(v / step)));
+    let g = new THREE.BoxGeometry(w, h, d, n(w), n(h), n(d)); g.deleteAttribute('uv'); g.deleteAttribute('normal');
+    g = mergeVertices(g, 1e-5);
+    const p = g.attributes.position, hx = w / 2, hy = h / 2, hz = d / 2;
+    const rr = Math.max(0.002, Math.min(r, hx - 1e-3, hy - 1e-3, hz - 1e-3));
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const qx = Math.max(-hx + rr, Math.min(hx - rr, x)), qy = Math.max(-hy + rr, Math.min(hy - rr, y)), qz = Math.max(-hz + rr, Math.min(hz - rr, z));
+      let dx = x - qx, dy = y - qy, dz = z - qz; const L = Math.hypot(dx, dy, dz) || 1;
+      x = qx + dx / L * rr; y = qy + dy / L * rr; z = qz + dz / L * rr;
+      const u = x / hx, v = z / hz, f = Math.max(0, 1 - (u * u + v * v) / 2);
+      if (y > 0) {
+        y += puff * f * (y / hy);                                                     // domed top
+        if (o.channels) y -= o.channels * Math.pow(Math.abs(Math.sin(Math.PI * (x + hx) / o.pitch)), 0.5) * f * (y / hy);
+        if (o.sag) y -= o.sag * Math.exp(-((u - o.sagU) ** 2) * 3) * (y / hy);        // sat-in sag
+      } else y -= puff * 0.25 * f * (-y / hy);
+      const pinch = 1 - (o.pinch ?? 0.03) * Math.abs(u * v) * Math.max(0, y / hy);    // corners pulled in
+      p.setXYZ(i, x * pinch, y, z * pinch);
+    }
+    g.computeVertexNormals(); return g;
+  }
+  const SOFA_Z0 = 15.64, SOFA_L = 3.30, SOFA_D = 1.02, SOFA_XB = 6.80;   // r2: longer + lower, crisper (critic: 'foam blocks')
   {
     const s = kit.group(root, [SOFA_XB, 0, SOFA_Z0], -Math.PI / 2, 'fam-sofa'); // local x -> +z, local z (front) -> -x
-    // modular sectional: separate puffy modules (~0.95 m) with visible seams, no plinth.
-    // chaise/corner module at local x 0..CH_W, three seat modules, thick rounded arm at the far end.
-    const L = SOFA_L, D = SOFA_D, BT = 0.26, armW = 0.26, SY = 0.40, BH = 0.82, GAP = 0.012;
-    const cu = (w, h, d, r, puff, pos, rot) => mesh(s, uvBox(kit.cushion(w, h, d, r, puff, 4), 0.32), linen, pos, rot);
-    // hidden dark base, recessed well back from every face
-    mesh(s, new THREE.BoxGeometry(L - 0.16, 0.04, D - 0.16), M.matteBlack, [L / 2, 0.02, D / 2]);
-    mesh(s, new THREE.BoxGeometry(CH_W - 0.16, 0.04, CH_D - D), M.matteBlack, [CH_W / 2, 0.02, D + (CH_D - D) / 2 - 0.08]);
-    const mods = [[0, CH_W, CH_D]]; { const n = 2, w = (L - armW - CH_W) / n; for (let k = 0; k < n; k++) mods.push([CH_W + k * w, CH_W + (k + 1) * w, D]); }
-    for (const [x0, x1, dd] of mods) {
-      const w = x1 - x0 - GAP, cx = (x0 + x1) / 2;
-      cu(w, SY - 0.17, dd - 0.02, 0.07, 0.01, [cx, 0.04 + (SY - 0.17) / 2, dd / 2]);                // module frame (upholstered)
-      // channel-tufted seat cushion: rounded channels running front-to-back
-      const n = Math.max(3, Math.round(w / 0.24)), cw = w / n;
-      for (let k = 0; k < n; k++) cu(cw - 0.004, 0.17, dd - BT - 0.03, 0.07, 0.035, [x0 + GAP / 2 + cw * (k + 0.5), SY - 0.13 + 0.085, BT + (dd - BT) / 2 - 0.01]);
-      // one puffy back module per seat, soft rounded top (separate from its neighbours)
-      cu(w, BH - 0.27, BT, 0.12, 0.05, [cx, 0.27 + (BH - 0.27) / 2, BT / 2], [-0.04, 0, 0]);
+    const L = SOFA_L, D = SOFA_D, BT = 0.22, armW = 0.24, SY = 0.43, BH = 0.74, GAP = 0.004, BASE = 0.04;
+    const up = (geo, pos, rot) => mesh(s, uvBox(geo, 1), linen, pos, rot);
+    // recessed dark kick base (in shadow, no visible plinth)
+    mesh(s, new THREE.BoxGeometry(L - 0.18, BASE, D - 0.18), M.matteBlack, [L / 2, BASE / 2, D / 2]);
+    const nMod = 3, mw = (L - 2 * armW) / nMod;
+    for (let k = 0; k < nMod; k++) {
+      const x0 = armW + k * mw, w = mw - GAP, cx = x0 + mw / 2;
+      // upholstered seat deck
+      up(softBox(w, 0.23, D - 0.01, 0.03, 0.003), [cx, BASE + 0.115, D / 2]);
+      // channel-tufted seat cushion (channels run front-to-back), slight sat-in sag
+      const sd = D - BT - 0.02;
+      up(softBox(w - 0.004, 0.15, sd, 0.04, 0.022, { channels: 0.055, pitch: w / 4, sag: 0.01, sagU: (R() - 0.5) * 0.6, pinch: 0.015, step: 0.02 }), [cx, BASE + 0.23 + 0.07, BT + sd / 2 + 0.005]);
+      // tall back block to the floor, puffy front, soft rounded top
+      // vertical channel tufting across the back's front face (photo p05), crisp tight top edge
+      const bg = softBox(w, BT, BH - BASE, 0.03, 0.018, { pinch: 0.008, channels: 0.05, pitch: w / 4, step: 0.02 }); bg.rotateX(Math.PI / 2);   // puff -> +z (front)
+      up(bg, [cx, BASE + (BH - BASE) / 2, BT / 2], [-0.02, 0, 0]);
     }
-    // thick rounded arm at the far (rear-window) end, full depth
-    cu(armW - GAP, 0.64, D, 0.12, 0.04, [L - armW / 2, 0.04 + 0.32, D / 2]);
+    // thick track arms (full depth, nearly back height: the near end reads as one broad side face in p04)
+    const AH = 0.64;
+    for (const ax of [armW / 2, L - armW / 2]) up(softBox(armW - GAP, AH - BASE, D, 0.05, 0.01, { pinch: 0.006 }), [ax, BASE + (AH - BASE) / 2, D / 2]);
+    // welt/piping along the seat-cushion front top edge
+    const pipe = sunBoost(kit.fabric.linen('#cfc4b4', { scale: 2.6, roughness: 0.95 }));
+    for (let k = 0; k < nMod; k++) { const x0 = armW + k * mw + 0.04, x1 = armW + (k + 1) * mw - 0.04; mesh(s, kit.tube([[x0, BASE + 0.23, D - 0.012], [x1, BASE + 0.23, D - 0.012]], 0.007, 12), pipe); }
     phys.solidGroup(s);
   }
   // side table (black open frame) beside the chaise's outer side
-  const sideT = kit.group(root, [6.18, 0, 15.52], 0.08, 'fam-sidetable');
+  const sideT = kit.group(root, [6.58, 0, 15.39], 0.06, 'fam-sidetable');
+  // photo: dark green-black shagreen-wrapped open cube table
+  const shagreen = new THREE.MeshStandardMaterial({ color: 0x232b29, roughness: 0.55, normalMap: kit.noiseNormal(256, 4, 96, 21), normalScale: new THREE.Vector2(0.35, 0.35) }); sunBoost(shagreen);
   {
-    const W = 0.46, H = 0.60, t = 0.032;
-    mesh(sideT, rb(W, 0.028, W, 0.004), blackWood, [0, H - 0.014, 0]);
-    for (const [x, z] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) mesh(sideT, rb(t, H - 0.028, t, 0.003), blackWood, [x * (W / 2 - t / 2), (H - 0.028) / 2, z * (W / 2 - t / 2)]);
-    for (const z of [-1, 1]) mesh(sideT, rb(W - 2 * t, t, t, 0.003), blackWood, [0, 0.06, z * (W / 2 - t / 2)]);
-    for (const x of [-1, 1]) mesh(sideT, rb(t, t, W - 2 * t, 0.003), blackWood, [x * (W / 2 - t / 2), 0.06, 0]);
+    const W = 0.46, H = 0.60, t = 0.042;
+    mesh(sideT, rb(W, 0.028, W, 0.004), shagreen, [0, H - 0.014, 0]);
+    for (const [x, z] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) mesh(sideT, rb(t, H - 0.028, t, 0.003), shagreen, [x * (W / 2 - t / 2), (H - 0.028) / 2, z * (W / 2 - t / 2)]);
+    for (const z of [-1, 1]) mesh(sideT, rb(W - 2 * t, t, t, 0.003), shagreen, [0, 0.06, z * (W / 2 - t / 2)]);
+    for (const x of [-1, 1]) mesh(sideT, rb(t, t, W - 2 * t, 0.003), shagreen, [x * (W / 2 - t / 2), 0.06, 0]);
     phys.solidGroup(sideT);
   }
   // coffee table: solid black rustic wood, thick block legs, arched aprons, lower shelf (long axis along z)
-  const CT = [4.75, 17.55], CT_H = 0.45;
+  const CT = [4.80, 17.15], CT_H = 0.45;
   const coffee = kit.group(root, [CT[0], 0, CT[1]], Math.PI / 2, 'fam-coffee');
   {
-    const L = 1.40, W = 0.80, H = CT_H, LEG = 0.16, TT = 0.08;
-    const bx = (w, h, d, pos, r = 0.012) => { const gg = rb(w, h, d, r); uvBox(gg, 0.8, { tu: 0.9, tv: 0.25 }); return mesh(coffee, gg, blackWood, pos); };
-    bx(L, TT, W, [0, H - TT / 2, 0], 0.015);                                                            // thick top slab
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(LEG, H - TT, LEG, [sx * (L / 2 - LEG / 2), (H - TT) / 2, sz * (W / 2 - LEG / 2)], 0.01);
-    // arched apron: a flat board with a shallow arch cut from its bottom edge, extruded `t` thick
-    const apron = (span, depth, t) => {
-      const sh = new THREE.Shape(); sh.moveTo(-span / 2, 0); sh.lineTo(span / 2, 0); sh.lineTo(span / 2, -depth);
-      sh.quadraticCurveTo(span / 2 - 0.06, -depth * 0.35, span / 2 - 0.16, -depth * 0.3); sh.lineTo(-span / 2 + 0.16, -depth * 0.3);
-      sh.quadraticCurveTo(-span / 2 + 0.06, -depth * 0.35, -span / 2, -depth); sh.closePath();
-      const gg = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false, curveSegments: 10 }); gg.translate(0, 0, -t / 2); uvBox(gg, 0.8, { tu: 0.9, tv: 0.25 }); return gg;
+    // photo: chunky wire-brushed black wood; each face is a thick frame with a big rounded-corner opening between
+    // the slab top and a low slab shelf (legs ~0.14 square), edges softly eased.
+    const L = 1.52, W = 0.90, H = CT_H, LEG = 0.16, TT = 0.085, SH0 = 0.035, SHT = 0.07;   // r2: chunkier, bigger
+    const bx = (w, h, d, pos, r = 0.012) => { const gg = rb(w, h, d, r, 3); uvBox(gg, 0.8, { tu: 0.9, tv: 0.25 }); return mesh(coffee, gg, blackWood, pos); };
+    bx(L, TT, W, [0, H - TT / 2, 0], 0.014);                                                            // thick top slab
+    bx(L - 0.02, SHT, W - 0.02, [0, SH0 + SHT / 2, 0], 0.01);                                           // low slab shelf
+    // side frames: rectangle with a rounded-rect hole, extruded LEG deep, eased edges
+    const frame = (span, t) => {
+      const y0 = SH0 + SHT, y1 = H - TT, r = 0.075, a = -span / 2 + LEG, b = span / 2 - LEG;
+      const sh = new THREE.Shape(); sh.moveTo(-span / 2, SH0); sh.lineTo(span / 2, SH0); sh.lineTo(span / 2, H - TT + 0.005); sh.lineTo(-span / 2, H - TT + 0.005); sh.closePath();
+      const hole = new THREE.Path(); hole.moveTo(a + r, y0); hole.lineTo(b - r, y0); hole.quadraticCurveTo(b, y0, b, y0 + r); hole.lineTo(b, y1 - r); hole.quadraticCurveTo(b, y1, b - r, y1);
+      hole.lineTo(a + r, y1); hole.quadraticCurveTo(a, y1, a, y1 - r); hole.lineTo(a, y0 + r); hole.quadraticCurveTo(a, y0, a + r, y0); sh.holes.push(hole);
+      const gg = new THREE.ExtrudeGeometry(sh, { depth: t - 0.012, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 10 });
+      gg.translate(0, 0, -(t - 0.012) / 2); gg.computeVertexNormals(); uvBox(gg, 0.8, { tu: 0.9, tv: 0.25 }); return gg;
     };
-    for (const sz of [-1, 1]) mesh(coffee, apron(L - 2 * LEG + 0.01, 0.16, 0.06), blackWood, [0, H - TT, sz * (W / 2 - 0.04)]);
-    for (const sx of [-1, 1]) mesh(coffee, apron(W - 2 * LEG + 0.01, 0.16, 0.06), blackWood, [sx * (L / 2 - 0.04), H - TT, 0], [0, Math.PI / 2, 0]);
-    bx(L - 2 * LEG + 0.02, 0.045, W - 0.06, [0, 0.10, 0], 0.006);                                         // lower shelf
+    for (const sz of [-1, 1]) mesh(coffee, frame(L - 0.012, LEG), blackWood, [0, 0, sz * (W / 2 - LEG / 2 - 0.006)]);
+    for (const sx of [-1, 1]) mesh(coffee, frame(W - 0.012, LEG), blackWood, [sx * (L / 2 - LEG / 2 - 0.006), 0, 0], [0, Math.PI / 2, 0]);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(LEG - 0.01, SH0, LEG - 0.01, [sx * (L / 2 - LEG / 2 - 0.006), SH0 / 2, sz * (W / 2 - LEG / 2 - 0.006)], 0.004); // feet
     phys.solidGroup(coffee);
   }
   // swivel barrel chairs: low continuous taupe boucle tub, ~0.85 W x 0.75 H, back wraps ~270 deg, seat at ~0.45
-  const boucleMaps = kit.pbrMaps('wool_boucle', '1k');
-  const boucleTub = new THREE.MeshPhysicalMaterial({ color: 0x9f8667, normalMap: boucleMaps.normalMap, roughnessMap: boucleMaps.roughnessMap, roughness: 1, normalScale: new THREE.Vector2(1.7, 1.7), sheen: 0.4, sheenRoughness: 0.8, sheenColor: new THREE.Color(0xe6d6c0), side: THREE.DoubleSide });
+  // warm camel/taupe boucle (photo: plush, nubby, light catching the loops) — fabric library, metre UVs below
+  const boucleTub = sunBoost(kit.fabric.boucle('#b09a80', { scale: 1, side: THREE.DoubleSide, normalScale: 2.4 }));
+  boucleTub.map = null; boucleTub.aoMap = null;   // the scan's colour/AO tiles read as a plaid at chair scale; keep the loop normal + sheen
   const metreUV = (geo, su, sv) => { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv); return geo; };
-  const BT_TILE = 0.18; // metres per boucle texture tile
+  const BT_TILE = 0.11; // metres per boucle texture tile
   function barrelChair(x, z, faceTo) {
     const ry = Math.atan2(faceTo[0] - x, faceTo[1] - z);
     const g = kit.group(root, [x, 0, z], ry, 'fam-chair');   // local +z = front
+    g.scale.setScalar(1.07);                                    // photo chairs ~0.92 m across
     const RO = 0.425, RI = 0.275, Y0 = 0.36;
     // tub body (slightly tapered, rounded bottom edge) — one with the back's outer face
     const bodyPts = [[0, 0.02], [0.33, 0.02], [0.37, 0.035], [0.395, 0.08], [0.41, 0.2], [RO, 0.40], [RO - 0.01, 0.43], [0, 0.43]];
@@ -470,8 +571,8 @@ export async function build(ctx) {
     mesh(g, bg, boucleTub);
     phys.solidGroup(g); return g;
   }
-  barrelChair(4.55, 14.75, [4.85, 17.4]);
-  barrelChair(4.30, 19.25, [4.75, 17.6]);
+  barrelChair(4.86, 15.12, [4.70, 17.2]);
+  barrelChair(4.62, 18.68, [4.85, 17.0]);
 
   // console (rustic) under the rear window r2, with planters
   const consoleG = kit.group(root, [6.86, 0, Z1 - 0.22], 0, 'fam-console');
@@ -529,7 +630,7 @@ export async function build(ctx) {
     phys.boxAABB([x - 0.2, 0, z - 0.2], [x + 0.2, 0.42, z + 0.2]);
     return g;
   }
-  fiddleFig(3.08, 19.55);
+  fiddleFig(3.25, 19.60);
   // plant stand (mid-century, 4 legs) with white pot + leafy plant, next to the fig
   {
     const st = kit.group(root, [3.95, 0, 19.72], 0, 'fam-plantstand');
@@ -562,7 +663,7 @@ export async function build(ctx) {
     phys.dynamic(knot, { mass: 0.6, shape: 'hull' });
     // white coral sphere on the side table
     const coral = new THREE.Mesh(coralGeo(0.085, 4), coralMat); coral.castShadow = true;
-    coral.position.set(6.18, 0.60 + 0.085, 15.52); root.add(coral);
+    coral.position.set(6.58, 0.60 + 0.085, 15.39); root.add(coral);
     phys.dynamic(coral, { mass: 0.8, shape: 'ball' });
     // shelf bowl + a vase on the shelves react to bumps too
     phys.dynamic(shelfBowl, { mass: 0.6, shape: 'hull' });
@@ -586,6 +687,23 @@ export async function build(ctx) {
     bb(X0, Z0, X1 - X0 - 0.15, 0.012);                          // living wall
     bb(NE_JOG_X - 0.012, DIN_Z + 0.30, 0.012, Z1 - DIN_Z - 0.30); // NE jog
     bb(X0, LS1, 0.012, Z1 - LS1);                               // fireplace wall near the window
+  }
+
+  // ------------------------------------------------------------------ sun-boosted floor + contact shadows
+  // Own copy of the oak floor over the family slab (same metre UVs as the shell slab) so the sun patches through
+  // the rear glazing read as hard bright trapezoids like the photos; shared M.oakFloor is untouched.
+  { const fm = sunBoost(M.oakFloor.clone()); const fl = kit.floorFinish(root, 'family', fm, null, 0.0025); fl.userData.noCollide = true; }
+  // soft contact shadows (multiply-darkening radial blobs) under the furniture: grounds the pieces in the fill light
+  {
+    const blobTex = kit.canvasTex(128, 128, (c, w, h) => { const gr = c.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.55, 'rgba(255,255,255,0.75)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); }, { srgb: false });
+    const blobMat = (o) => new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: blobTex, transparent: true, opacity: o, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const blob = (x, z, sx, sz, o = 0.45, ry = 0, y = 0.015) => { const g = new THREE.PlaneGeometry(sx, sz); g.rotateX(-Math.PI / 2); const m = mesh(root, g, blobMat(o), [x, y, z], [0, ry, 0], { shadow: false }); m.userData.noCollide = true; m.renderOrder = 2; return m; };
+    blob(SOFA_XB - SOFA_D / 2, SOFA_Z0 + SOFA_L / 2, SOFA_D + 0.35, SOFA_L + 0.35, 0.55);
+    blob(CT[0], CT[1], 1.05, 1.75, 0.5);
+    blob(6.58, 15.39, 0.62, 0.62, 0.4);
+    blob(4.86, 15.12, 1.05, 1.05, 0.5); blob(4.62, 18.68, 1.05, 1.05, 0.5);
+    blob(6.86, Z1 - 0.22, 1.35, 0.5, 0.35, 0, 0.004);
+    blob(3.25, 19.60, 0.55, 0.55, 0.4, 0, 0.004); blob(3.95, 19.72, 0.4, 0.4, 0.35, 0, 0.004);
   }
 
   kit.mergeStatic(root);

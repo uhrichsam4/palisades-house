@@ -7,9 +7,11 @@
 export const piece = { rooms: ["primaryBed", "balcony"], photos: ["p17", "p18", "p22"] };
 export const ownCeiling = ['primaryBed'];
 export const views = {
-  p17: { pos: [10.45, 4.52, 11.85], look: [14.35, 4.52, 16.7], fov: 76 },
-  p18: { pos: [15.08, 4.60, 12.70], look: [9.0, 4.35, 15.4], fov: 70 },
-  p22: { pos: [8.55, 4.95, 17.55], look: [13.82, 4.60, 20.42], fov: 65 },
+  // p17/p18 fitted to photo landmarks (bed-wall corner, nightstands, bay jambs, marble end, door, dresser)
+  p17: { pos: [9.30, 4.42, 11.90], look: [13.21, 4.66, 15.01], fov: 58 },
+  p18: { pos: [14.30, 4.43, 11.95], look: [11.65, 4.60, 16.19], fov: 68 },
+  // p22: from the open (family-room) end of the balcony, looking along it to the bath door, turned toward the canyon
+  p22: { pos: [8.50, 4.90, 18.70], look: [13.26, 4.62, 20.25], fov: 50 },
 };
 
 // ---- room constants (metres)
@@ -69,7 +71,7 @@ export async function build(ctx) {
   // Nero Marquina: near-black stone, white lightning veins.
   const marbleMap = kit.canvasTex(1024, 1024, (g, w, h) => {
     const r = kit.rng(77);
-    g.fillStyle = '#121212'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#1a1a1a'; g.fillRect(0, 0, w, h);
     for (let i = 0; i < 40; i++) { const x = r() * w, y = r() * h, rad = 60 + r() * 220; const gr = g.createRadialGradient(x, y, 0, x, y, rad); const k = 24 + r() * 16; gr.addColorStop(0, `rgba(${k},${k},${k},0.35)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h); }
     const vein = (x, y, ang, len, width, alpha, depth) => {
       g.strokeStyle = `rgba(232,232,228,${alpha})`; g.lineWidth = width; g.lineCap = 'round'; g.beginPath(); g.moveTo(x, y);
@@ -79,7 +81,7 @@ export async function build(ctx) {
       }
       g.stroke();
     };
-    for (let i = 0; i < 7; i++) vein(r() * w * 0.3, r() * h, -0.45 + (r() - 0.5) * 0.4, 600 + r() * 600, 1.5 + r() * 2.5, 0.75, 0);
+    for (let i = 0; i < 7; i++) vein(r() * w * 0.3, r() * h, -0.45 + (r() - 0.5) * 0.4, 600 + r() * 600, 2.2 + r() * 3, 0.85, 0);
     for (let i = 0; i < 14; i++) vein(r() * w, r() * h, r() * 6.28, 120 + r() * 260, 0.6 + r() * 0.8, 0.45, 1);
   }, { repeat: [0.55, 0.55] });
   const marbleMat = physm({ map: marbleMap, roughness: 0.12, clearcoat: 0.6, clearcoatRoughness: 0.08, envMapIntensity: 1.0 });
@@ -88,24 +90,25 @@ export async function build(ctx) {
   const ebony = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1.6, 1.6] }), color: 0x2c2826, roughness: 0.5, normalScale: new THREE.Vector2(0.5, 0.5) });
   ebony.map.rotation = Math.PI / 2;
   const ebonyMatte = std({ color: 0x151413, roughness: 0.75 });
-  const oakBeam = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [3, 0.6] }), color: 0xf0bf86, roughness: 0.62, normalScale: new THREE.Vector2(0.6, 0.6) });
+  const oakBeam = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [3, 0.6] }), color: 0xe8b47a, roughness: 0.62, normalScale: new THREE.Vector2(0.6, 0.6) });
   const fineNoise = kit.noiseNormal(256, 1.2, 32, 9); fineNoise.repeat.set(6, 6);
-  const sheetMat = std({ color: 0xf3f1ec, roughness: 0.92, normalMap: fineNoise, normalScale: new THREE.Vector2(0.25, 0.25) });
   const hess = (rep) => kit.tex('assets/ph/hessian_380/hessian_380_nor_gl_1k.jpg', { repeat: rep });
-  const coverMat = std({ color: 0xcdbfaa, roughness: 0.95, normalMap: hess([8, 8]), normalScale: new THREE.Vector2(0.4, 0.4) });
-  const linenCream = std({ color: 0xe9e0cf, roughness: 0.95, normalMap: hess([6, 6]), normalScale: new THREE.Vector2(0.5, 0.5) });
-  const taupeVel = std({ color: 0x8c7862, roughness: 0.85, normalMap: kit.tex('assets/ph/velour_velvet/velour_velvet_nor_gl_1k.jpg', { repeat: [3, 3] }), normalScale: new THREE.Vector2(0.6, 0.6) });
+  const fab = kit.fabric;
+  const sheetMat = fab.cotton('#f2f0ea', { scale: 5, normalScale: 0.35 });               // white duvet / sheets
+  const pillowWhite = fab.cotton('#f4f2ed', { scale: 3, normalScale: 0.3 });
+  const coverMat = fab.linen('#cdbca2', { scale: 6 });                                      // tan throw at the foot
+  const linenCream = fab.linen('#e6dccb', { scale: 3 });                                    // headboard + bench
+  const taupeVel = fab.velvet('#8a7560', { scale: 2 });
+  const brownBoucle = fab.boucle('#6e5846', { scale: 8 });
   const stripeMat = std({
     map: kit.canvasTex(256, 256, (g, w, h) => { g.fillStyle = '#6b5644'; g.fillRect(0, 0, w, h); const r = kit.rng(5); for (let y = 0; y < h; y += 12) { g.fillStyle = r() < 0.5 ? '#a89480' : '#3e3027'; g.fillRect(0, y, w, 4 + r() * 4); } }, { repeat: [1, 2] }),
     roughness: 0.9, normalMap: hess([4, 4]), normalScale: new THREE.Vector2(0.5, 0.5),
   });
-  const throwMat = std({ color: 0x6c6250, roughness: 0.97, side: THREE.DoubleSide, normalMap: hess([10, 10]), normalScale: new THREE.Vector2(1, 1) });
-  const boucleMaps = kit.pbrMaps('curly_teddy_natural', '1k', { repeat: [3, 3] });
-  const boucle = std({ normalMap: boucleMaps.normalMap, roughnessMap: boucleMaps.roughnessMap, color: 0xe9e4da, roughness: 1, normalScale: new THREE.Vector2(1.4, 1.4) });
-  const drapeMat = std({ color: 0xbcae98, roughness: 0.95, side: THREE.DoubleSide, normalMap: hess([5, 9]), normalScale: new THREE.Vector2(0.5, 0.5) });
+  const throwMat = fab.knit('#77695a', { scale: 4, side: THREE.DoubleSide });              // grey-brown knit throw (bench)
+  const boucle = fab.boucle('#ece6dc', { scale: 10 });
+  const drapeMat = fab.linen('#c9bba5', { scale: 5, side: THREE.DoubleSide });
   const shadeMat = std({ color: 0xf4f0e8, roughness: 0.9, side: THREE.DoubleSide, emissive: 0x2a2620, emissiveIntensity: 0.4 });
   const white = std({ color: 0xf2f2f0, roughness: 0.55 });
-  const sageThrow = std({ color: 0x8f9a86, roughness: 0.97, side: THREE.DoubleSide, normalMap: hess([10, 10]) });
 
   // ------------------------------------------------------------------ ceiling: z-ridge vault, oak beam, fan, cans
   const vault = kit.vault(root, [X0, Z0, X1, Z1], 'z', PL, RID, M.ceilingWhite, M.paintWhite, 0, false);
@@ -118,28 +121,86 @@ export async function build(ctx) {
   };
   tri([[X0 - 0.02, PL - 0.01, Z1], [X1 + 0.02, PL - 0.01, Z1], [XC, RID + 0.02, Z1]], [0, 0, -1], M.paintWhite);
   tri([[X0 - 0.02, PL - 0.01, Z0], [X1 + 0.02, PL - 0.01, Z0], [XC, RID + 0.02, Z0]], [0, 0, 1], M.paintWhite);
-  // the shell's interim roofs (hip over this block, garage wing, SW block) dip into the vault: hide their
-  // soffit faces inside this room only (fragment discard), so the vault reads clean from inside.
+  // Roof parts from the shell / exterior piece (hip ends, soffits, ridge caps, fascia) dip below this vault.
+  // A shader discard isn't enough (the AO depth pass still sees them and draws dark lines), so their
+  // triangles are clipped against this room's volume under the vault (a convex region: 4 walls, a floor
+  // plane at F+2.6 and the two vault slopes) and the parts inside are dropped. Runs over the first frames
+  // because the exterior piece swaps roof geometry after this build; each geometry is clipped once.
   {
-    const box = [X0 - 0.01, Z0 - 0.01, X1 + 0.01, BAY.c[1] + 0.2];
-    const cache = new Map();
-    ctx.shell?.root?.traverse(o => {
-      const isSoffit = o.name.startsWith('soffit:'), isRoof = o.name.startsWith('roof:');
-      if (!o.isMesh || !(isSoffit || isRoof)) return;
-      const cond = isSoffit ? `vPrW.y > ${(F + 2.3).toFixed(3)}` : `vPrW.y < ${(PL + 0.03).toFixed(3)}`;
-      let m = cache.get(o.material); if (!m) {
-        m = o.material.clone();
-        m.onBeforeCompile = (sh) => {
-          sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vPrW;').replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvPrW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-          sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vPrW;').replace('void main() {', `void main() {\n if (vPrW.x > ${box[0].toFixed(3)} && vPrW.x < ${box[2].toFixed(3)} && vPrW.z > ${box[1].toFixed(3)} && vPrW.z < ${box[3].toFixed(3)} && ${cond}) discard;`);
-        };
-        m.customProgramCacheKey = () => 'primary-roof-cut-' + (isSoffit ? 's' : 'r'); cache.set(o.material, m);
+    const e = 0.004, run = XC - X0, k = (RID - PL) / run, lift = 0.03;
+    // half-spaces n·p <= d describe the region to remove
+    const H = [[[-1, 0, 0], -(X0 + e)], [[1, 0, 0], X1 - e], [[0, 0, -1], -(Z0 + e)], [[0, 0, 1], Z1 - e], [[0, -1, 0], -(F + 2.6)],
+      // y <= RID + lift - k*|x - XC|  ->  y + k*(x-XC) <= RID+lift  and  y - k*(x-XC) <= RID+lift
+      [[k, 1, 0], RID + lift + k * XC], [[-k, 1, 0], RID + lift - k * XC]];
+    const box = new THREE.Box3(new THREE.Vector3(X0, F + 2.6, Z0), new THREE.Vector3(X1, RID + 0.05, Z1));
+    const done = new WeakSet(), swap = new WeakMap(); let frames = 0;
+    const clipGeo = (geo, mw) => {
+      const g = geo.index ? geo.toNonIndexed() : geo.clone();
+      const names = Object.keys(g.attributes).filter(n => g.attributes[n].itemSize <= 4 && !g.attributes[n].isInterleavedBufferAttribute);
+      const A = names.map(n => g.attributes[n]); const P = g.attributes.position;
+      const wp = new THREE.Vector3(); const out = names.map(() => []); let changed = false;
+      const vert = (i) => { wp.fromBufferAttribute(P, i).applyMatrix4(mw); return { w: [wp.x, wp.y, wp.z], a: A.map(at => { const r = []; for (let c = 0; c < at.itemSize; c++) r.push(at.array[i * at.itemSize + c]); return r; }) }; };
+      const lerp = (p, q, t) => ({ w: p.w.map((v, i) => v + (q.w[i] - v) * t), a: p.a.map((arr, j) => arr.map((v, i) => v + (q.a[j][i] - v) * t)) });
+      const side = (v, [n, d]) => n[0] * v.w[0] + n[1] * v.w[1] + n[2] * v.w[2] - d; // <=0 inside
+      const emit = (poly) => { for (let i = 1; i < poly.length - 1; i++) for (const v of [poly[0], poly[i], poly[i + 1]]) v.a.forEach((arr, j) => out[j].push(...arr)); };
+      const W = new Float32Array(9);
+      const copyTri = (t) => { for (let j = 0; j < A.length; j++) { const at = A[j], sz = at.itemSize; for (let i = t * sz; i < (t + 3) * sz; i++) out[j].push(at.array[i]); } };
+      for (let t = 0; t < P.count; t += 3) {
+        for (let k = 0; k < 3; k++) { wp.fromBufferAttribute(P, t + k).applyMatrix4(mw); W[k * 3] = wp.x; W[k * 3 + 1] = wp.y; W[k * 3 + 2] = wp.z; }
+        let outside = false; // fast path: all three vertices beyond one bounding plane -> keep as is
+        for (const [nn, d] of H) { if (nn[0] * W[0] + nn[1] * W[1] + nn[2] * W[2] > d && nn[0] * W[3] + nn[1] * W[4] + nn[2] * W[5] > d && nn[0] * W[6] + nn[1] * W[7] + nn[2] * W[8] > d) { outside = true; break; } }
+        if (outside) { copyTri(t); continue; }
+        let cur = [vert(t), vert(t + 1), vert(t + 2)]; const kept = [];
+        for (const h of H) {
+          const sd = cur.map(v => side(v, h));
+          if (sd.every(x => x <= 0)) continue;                       // fully inside this half-space
+          if (sd.every(x => x >= 0)) { kept.push(cur); cur = null; break; } // fully outside the region -> keep
+          const inP = [], outP = [];
+          for (let i = 0; i < cur.length; i++) {
+            const p = cur[i], q = cur[(i + 1) % cur.length], sp = sd[i], sq = sd[(i + 1) % cur.length];
+            if (sp <= 0) inP.push(p); if (sp >= 0) outP.push(p);
+            if ((sp < 0 && sq > 0) || (sp > 0 && sq < 0)) { const x = lerp(p, q, sp / (sp - sq)); inP.push(x); outP.push(x); }
+          }
+          if (outP.length >= 3) kept.push(outP);
+          cur = inP.length >= 3 ? inP : null; if (!cur) break;
+        }
+        if (cur) changed = true; // the part left in `cur` lies inside the region: dropped
+        for (const poly of kept) emit(poly);
       }
-      o.material = m;
-    });
+      if (!changed) return null;
+      const ng = new THREE.BufferGeometry();
+      names.forEach((n, j) => {
+        const at = g.attributes[n]; const arr = new Float32Array(out[j]); // attribute values stay in local space
+        ng.setAttribute(n, new THREE.BufferAttribute(arr, at.itemSize, at.normalized));
+      });
+      ng.computeBoundingBox(); ng.computeBoundingSphere(); return ng;
+    };
+    const apply = () => {
+      if (frames++ > 60) return;
+      ctx.scene.updateMatrixWorld();
+      ctx.scene.traverse(o => {
+        if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || o.userData.dynamic) return;
+        if (swap.has(o.geometry)) { const sw = swap.get(o.geometry); if (sw.mw.equals(o.matrixWorld)) o.geometry = sw.ng; return; } // shared geometry (roof + soffit)
+        if (done.has(o.geometry) || o.geometry.attributes.position?.isInterleavedBufferAttribute) return;
+        if (Array.isArray(o.material) || o.morphTargetInfluences || !o.geometry.attributes.position || o.name === 'water' || o.name === 'avatar') return; // anything else (roofs, soffits, fascia, ridge caps, trim) may be clipped
+        let p = o; while (p) { if (p === root) return; p = p.parent; }
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        if (!new THREE.Box3().copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld).intersectsBox(box)) { done.add(o.geometry); return; }
+        const old = o.geometry; let ng = null; try { ng = clipGeo(old, o.matrixWorld); } catch (e) { ng = null; } done.add(old);
+        if (ng) { done.add(ng); swap.set(old, { ng, mw: o.matrixWorld.clone() }); o.geometry = ng; }
+      });
+    };
+    apply(); ctx.onUpdate(apply);
+    // DEBUG (temporary): report meshes still crossing the vault volume
+    let dbgN = 0; ctx.onUpdate(() => { if (++dbgN !== 5) return; ctx.scene.updateMatrixWorld(); const hits = [];
+      ctx.scene.traverse(o => { if (!o.isMesh) return; let p = o; while (p) { if (p === root) return; p = p.parent; }
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); const bb = new THREE.Box3().copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+        if (!bb.intersectsBox(box)) return; let q = o, path = []; while (q) { path.push(q.name || q.type); q = q.parent; }
+        hits.push(`${path.slice(0, 4).join('<')} inst=${!!o.isInstancedMesh} arr=${Array.isArray(o.material)} dyn=${!!o.userData.dynamic} done=${done.has(o.geometry)} y=${bb.min.y.toFixed(2)}..${bb.max.y.toFixed(2)} x=${bb.min.x.toFixed(1)}..${bb.max.x.toFixed(1)} z=${bb.min.z.toFixed(1)}..${bb.max.z.toFixed(1)}`); });
+      console.warn('[primary-dbg] ' + hits.join(' || ')); });
   }
   // ridge beam (single rough-sawn oak beam on the ridge)
-  const BW = 0.20, BH = 0.30;
+  const BW = 0.25, BH = 0.30;
   add(root, kit.rbox(BW, BH, Z1 - Z0 + 0.02, 0.012), oakBeam, [XC, RID - BH / 2 + 0.06, (Z0 + Z1) / 2]);
   // recessed cans + speakers on the slopes
   {
@@ -147,12 +208,12 @@ export async function build(ctx) {
     const can = new THREE.CircleGeometry(0.045, 24); can.rotateX(Math.PI / 2);
     const trim = new THREE.RingGeometry(0.045, 0.062, 24); trim.rotateX(Math.PI / 2);
     const spk = new THREE.CircleGeometry(0.105, 32); spk.rotateX(Math.PI / 2);
-    const lit = std({ color: 0xffffff, emissive: 0xfff3e0, emissiveIntensity: 0.35, roughness: 0.4 });
+    const lit = std({ color: 0xffffff, emissive: 0xfff3e0, emissiveIntensity: 0.6, roughness: 0.4 });
     const trimM = std({ color: 0xe8e6e1, roughness: 0.5 });
     const spkM = std({ color: 0xe9e8e4, roughness: 0.85, normalMap: kit.noiseNormal(128, 4, 48, 3), normalScale: new THREE.Vector2(0.4, 0.4) });
     const put = (geo, mat, x, z, lift = 0.004) => { const m = add(root, geo, mat, [x, ceilY(x, z) - lift, z], [0, 0, x < XC ? Math.atan(s) : -Math.atan(s)], { shadow: false }); return m; };
-    for (const u of [0.85, 2.05]) for (const z of [12.45, 13.75, 15.05, 16.15]) for (const x of [X0 + u, X1 - u]) { put(can, lit, x, z, 0.005); put(trim, trimM, x, z, 0.006); }
-    for (const z of [13.1, 15.6]) for (const x of [X0 + 1.45, X1 - 1.45]) put(spk, spkM, x, z, 0.005);
+    for (const u of [1.35]) for (const z of [12.45, 13.75, 15.05, 16.15]) for (const x of [X0 + u, X1 - u]) { put(can, lit, x, z, 0.005); put(trim, trimM, x, z, 0.006); }
+    for (const [x, z] of [[X0 + 2.3, 13.1], [X1 - 2.3, 15.6]]) put(spk, spkM, x, z, 0.005);
   }
   // ceiling fan on the beam (white, three long tapered blades)
   {
@@ -175,7 +236,7 @@ export async function build(ctx) {
   kit.wallPanel(root, [X0, Z0], [X0, Z1], F, PL, [1, 0], grassMat, 0.003);    // fireplace wall
   kit.baseboards(root, [X0, Z0, X1, Z1], F, 0.11, 0.014, M.paintWhite, [
     { side: 'z1', from: DOOR.x0, to: DOOR.x1 }, { side: 'z1', from: BAY.a[0], to: BAY.d[0] },
-    { side: 'z0', from: 12.125, to: 13.075 }, { side: 'x1', from: 12.475, to: 13.325 }, { side: 'x0', from: 12.50, to: Z1 },
+    { side: 'z0', from: 12.125, to: 13.075 }, { side: 'x1', from: 12.475, to: 13.325 }, { side: 'x0', from: 12.10, to: Z1 },
   ]);
 
   // ------------------------------------------------------------------ bay window (projects 0.75 m onto the balcony)
@@ -231,9 +292,9 @@ export async function build(ctx) {
 
   // Drapery panel: pleated linen hanging from rod height y to the floor, centred at c=[x,z], facing along ry.
   function drape(c, ry, w, yTop, mat = drapeMat) {
-    const h = yTop - F - 0.01; const nf = Math.max(3, Math.round(w / 0.085));
+    const h = yTop - F - 0.005; const nf = Math.max(3, Math.round(w / 0.10));
     const g = new THREE.PlaneGeometry(w, h, nf * 8, 12); const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); const t = (h / 2 - y) / h; const k = (x / w + 0.5) * nf * Math.PI * 2; p.setZ(i, Math.sin(k) * (0.028 + 0.012 * t)); p.setX(i, x * (1 + 0.08 * t)); }
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); const t = (h / 2 - y) / h; const k = (x / w + 0.5) * nf * Math.PI * 2; const kk = k + 0.6 * Math.sin(y * 1.3 + x * 9); p.setZ(i, Math.sin(kk) * (0.045 + 0.02 * t) + 0.012 * Math.sin(kk * 2.1)); p.setX(i, x * (1 + 0.12 * t)); }
     g.computeVertexNormals();
     const m = add(root, g, mat, [c[0], F + 0.01 + h / 2, c[1]], [0, ry, 0]);
     // rings / header
@@ -270,96 +331,151 @@ export async function build(ctx) {
   fauxWindow(16.40, 16.66, 0.95, 2.45, []);
   drape([X1 - 0.12, 16.30], -Math.PI / 2, 0.18, F + 2.62);
 
+  // ------------------------------------------------------------------ soft-goods helper: cloth draped over a box
+  // Plane spanning u∈[u0,u1] (across), v∈[v0,v1] (along), laid on a support rect [-hx,hx]×[zA,zB] at height `top`.
+  // Cloth beyond the rect rolls over a rounded edge (radius R) and hangs (≤ maxDrop), with folds and corner sag.
+  function drapeGeo(u0, u1, v0, v1, hx, zA, zB, top, { R = 0.06, maxDrop = 0.4, fold = 0.022, wrinkle = 0.006, puff = 0.0, seed = 1, nu = 72, nv = 72, sides = true } = {}) {
+    const g = new THREE.PlaneGeometry(u1 - u0, v1 - v0, nu, nv); g.rotateX(-Math.PI / 2);
+    const p = g.attributes.position; const rr = kit.rng(seed); const ph = [rr() * 6, rr() * 6, rr() * 6, rr() * 6];
+    for (let i = 0; i < p.count; i++) {
+      const u = p.getX(i) + (u0 + u1) / 2, v = p.getZ(i) + (v0 + v1) / 2;
+      const ex = sides ? Math.max(0, Math.abs(u) - hx) : 0, ezF = Math.max(0, v - zB), ezH = Math.max(0, zA - v);
+      const ez = ezF || ezH, d = Math.hypot(ex, ez);
+      const cu = Math.max(-hx, Math.min(hx, u)), cv = Math.max(zA, Math.min(zB, v));
+      let x = u, y = top, z = v;
+      // top: soft puff + low-frequency wrinkles
+      const fx = Math.max(0, 1 - Math.pow(cu / hx, 2)), fz = Math.max(0, 1 - Math.pow((cv - (zA + zB) / 2) / ((zB - zA) / 2), 2));
+      y += puff * fx * fz + wrinkle * (Math.sin(u * 7.1 + ph[0]) * Math.sin(v * 5.3 + ph[1]) + 0.6 * Math.sin(u * 13 + v * 4 + ph[2]));
+      if (d > 0) {
+        const nx = (Math.sign(u) * ex) / d, nz = (ezF ? 1 : -1) * ez / d;
+        let out, drop; const arc = (R * Math.PI) / 2;
+        if (d < arc) { const t = d / R; out = R * Math.sin(t); drop = R * (1 - Math.cos(t)); } else { out = R; drop = R + (d - arc); }
+        const hang = Math.min(1, drop * 5);
+        drop = Math.min(drop, maxDrop + (ex > 0 && ez > 0 ? 0.06 : 0));
+        const along = ex > 0 && ez === 0 ? v : u; // coordinate along the edge
+        out += hang * (fold * Math.sin(along * 17 + ph[3]) + fold * 0.6 * Math.sin(along * 7.3 + ph[0]) + 0.012 * (ex > 0 && ez > 0 ? 1 : 0));
+        x = cu + nx * out; z = cv + nz * out; y = top - drop + wrinkle * 0.5 * Math.sin(along * 9);
+      }
+      p.setXYZ(i, x, y, z);
+    }
+    g.computeVertexNormals(); return g;
+  }
+
   // ------------------------------------------------------------------ bed (headboard on the bed wall, foot towards the fireplace)
   const BZ = 14.72;
   const bed = kit.group(root, [X1, F, BZ], -Math.PI / 2, 'bed'); // local: x across (world +z), z from wall to foot (world -x)
+  const duvetMat = sheetMat.clone(); duvetMat.side = THREE.DoubleSide;
+  const coverD = coverMat.clone(); coverD.side = THREE.DoubleSide;
   {
-    add(bed, kit.rbox(2.06, 1.40, 0.07, 0.012), ebonyMatte, [0, 0.70, 0.045]);                       // black headboard frame
-    add(bed, kit.cushion(1.96, 1.06, 0.08, 0.03, 0.012), linenCream, [0, 0.86, 0.10]);             // padded cream panel
-    add(bed, kit.rbox(2.04, 0.27, 2.20, 0.03), ebonyMatte, [0, 0.215, 1.20]);                      // platform base
-    add(bed, kit.box(1.86, 0.06, 2.0), ebonyMatte, [0, 0.03, 1.20]);                               // recessed plinth
-    add(bed, kit.rbox(1.93, 0.27, 2.06, 0.07), sheetMat, [0, 0.475, 1.17]);                        // mattress
-    add(bed, kit.cushion(2.06, 0.30, 2.06, 0.06, 0.03), sheetMat, [0, 0.505, 1.20]);               // white duvet
-    add(bed, kit.cushion(2.14, 0.38, 1.02, 0.07, 0.025), coverMat, [0, 0.48, 1.76]);               // beige coverlet over foot
-    add(bed, kit.cyl(0.025, 0.025, 1.98, 16), coverMat, [0, 0.67, 1.25], [0, 0, Math.PI / 2]);   // coverlet fold
-    // pillows: euros, sleepers (static); accent pillows (dynamic)
-    for (const s of [-0.48, 0.48]) add(bed, kit.cushion(0.66, 0.62, 0.17, 0.07, 0.06), sheetMat, [s, 0.98, 0.26], [-0.22, 0, 0]);
-    for (const s of [-0.46, 0.46]) add(bed, kit.cushion(0.74, 0.46, 0.15, 0.07, 0.05), sheetMat, [s, 0.86, 0.42], [-0.45, 0, 0]);
-    add(bed, kit.cushion(0.60, 0.34, 0.14, 0.05, 0.04), stripeMat, [0.06, 0.84, 0.60], [-0.35, 0, 0.02]);
+    // tall upholstered headboard: thin black wood frame round a cream linen panel (~1.5 m)
+    add(bed, kit.rbox(2.18, 1.52, 0.09, 0.018), ebony, [0, 0.76, 0.05]);
+    add(bed, kit.cushion(2.04, 0.07, 1.36, 0.03, 0.025, 8), linenCream, [0, 0.79, 0.11], [Math.PI / 2, 0, 0]);
+    // black wood-grain base (0.35 m) on a recessed plinth
+    add(bed, kit.rbox(2.08, 0.29, 2.18, 0.02), ebony, [0, 0.205, 1.22]);
+    add(bed, kit.box(1.90, 0.07, 2.0), ebonyMatte, [0, 0.035, 1.20]);
+    add(bed, kit.rbox(1.96, 0.26, 2.06, 0.08), sheetMat, [0, 0.48, 1.20]);                           // mattress
+    // white duvet draped over the mattress (top at 0.62), folded back below the pillows
+    add(bed, drapeGeo(-1.22, 1.22, 0.62, 2.62, 0.98, 0.62, 2.23, 0.635, { R: 0.07, maxDrop: 0.36, fold: 0.02, wrinkle: 0.007, puff: 0.03, seed: 4 }), duvetMat, [0, 0, 0]);
+    add(bed, kit.cushion(1.98, 0.07, 0.30, 0.03, 0.015), sheetMat, [0, 0.66, 0.66]);                // turned-down fold
+    // tan linen throw across the foot, hanging over the end and both sides
+    add(bed, drapeGeo(-1.14, 1.14, 1.50, 2.78, 1.02, 1.50, 2.26, 0.69, { R: 0.09, maxDrop: 0.44, fold: 0.03, wrinkle: 0.004, puff: 0.02, seed: 9 }), coverD, [0, 0, 0]);
+    // pillows: euro shams + sleepers (white), taupe velvet + stripe (accents below are dynamic)
+    for (const s of [-0.62, 0, 0.62]) add(bed, kit.cushion(0.64, 0.62, 0.18, 0.08, 0.07), pillowWhite, [s, 0.96, 0.24], [-0.18, 0, 0]);
+    for (const s of [-0.47, 0.47]) add(bed, kit.cushion(0.78, 0.48, 0.16, 0.08, 0.06), pillowWhite, [s, 0.86, 0.43], [-0.42, 0, s * 0.04]);
+    add(bed, kit.cushion(0.58, 0.30, 0.13, 0.06, 0.05), stripeMat, [0.0, 0.80, 0.66], [-0.40, 0, 0.02]);
   }
   phys.boxLocal(bed, 0, 0.35, 1.18, 1.05, 0.35, 1.12);
-  phys.boxLocal(bed, 0, 0.70, 0.05, 1.03, 0.70, 0.06);
+  phys.boxLocal(bed, 0, 0.76, 0.05, 1.09, 0.76, 0.06);
   const accents = [];
-  for (const [s, rz] of [[-0.40, 0.08], [0.48, -0.06]]) {
-    const pil = add(root, kit.cushion(0.46, 0.44, 0.10, 0.08, 0.07), taupeVel, [0, 0, 0]);
-    pil.position.copy(bed.localToWorld(new THREE.Vector3(s, 0.94, 0.62))); pil.rotation.set(0, -Math.PI / 2, 0); pil.rotateX(-0.32); pil.rotateZ(rz);
+  for (const [s, rz, m, w] of [[-0.42, 0.08, taupeVel, 0.48], [0.44, -0.06, brownBoucle, 0.46], [0.16, 0.03, taupeVel, 0.42]]) {
+    const pil = add(root, kit.cushion(w, w * 0.95, 0.12, 0.09, 0.08), m, [0, 0, 0]);
+    pil.position.copy(bed.localToWorld(new THREE.Vector3(s, 0.90, 0.58 + (s === 0.16 ? 0.04 : 0)))); pil.rotation.set(0, -Math.PI / 2, 0); pil.rotateX(-0.36); pil.rotateZ(rz);
     accents.push(pil);
   }
-  // bench at the foot (cream upholstered top, black frame + slim legs) with a fringed knit throw
-  const bench = kit.group(bed, [0, 0, 2.62], 0, 'bench');
+  // daybed-style bench at the foot: cream linen body + puffed seat + low rolled ends on black legs, knit throw over one end
+  const bench = kit.group(bed, [0, 0, 2.66], 0, 'bench');
   {
-    add(bench, kit.cushion(1.42, 0.13, 0.44, 0.04, 0.02), linenCream, [0, 0.425, 0]);
-    add(bench, kit.rbox(1.42, 0.05, 0.44, 0.01), ebonyMatte, [0, 0.345, 0]);
-    for (const sx of [-0.68, 0.68]) for (const sz of [-0.19, 0.19]) add(bench, kit.box(0.035, 0.33, 0.035), ebonyMatte, [sx, 0.165, sz]);
-    for (const sz of [-0.19, 0.19]) add(bench, kit.box(1.36, 0.025, 0.025), ebonyMatte, [0, 0.10, sz]);
-    // throw: lies across the top from the back edge, hangs over the front with soft folds
-    const tw = 0.62, tl = 1.0; const g = new THREE.PlaneGeometry(tw, tl, 30, 50); const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), v = (tl / 2 - p.getY(i)); // v: 0..tl along the throw
-      let y, z; const top = 0.50;
-      if (v < 0.42) { y = top + 0.01 + 0.012 * Math.sin(x * 25 + v * 9); z = -0.20 + v; }
-      else { const a = Math.min(1, (v - 0.42) / 0.12); const ang = a * Math.PI / 2; const rr = 0.05; const hang = Math.max(0, v - 0.54);
-        y = top + 0.01 - rr * Math.sin(ang) - hang; z = 0.22 + rr * (1 - Math.cos(ang)) * 0 + rr * Math.sin(ang) * 0.6 + 0.035 * Math.sin(x * 14 + 0.6) * Math.min(1, hang * 4); }
-      p.setXYZ(i, x * (1 + Math.max(0, v - 0.6) * 0.15), y, z);
+    const BL = 1.60, BD = 0.48;
+    for (const sx of [-BL / 2 + 0.06, BL / 2 - 0.06]) for (const sz of [-BD / 2 + 0.05, BD / 2 - 0.05]) add(bench, kit.lathe([[0, 0], [0.016, 0], [0.022, 0.15], [0, 0.15]], 16), ebonyMatte, [sx, 0, sz]);
+    add(bench, kit.rbox(BL, 0.22, BD, 0.05), linenCream, [0, 0.26, 0]);
+    add(bench, kit.cushion(BL - 0.30, 0.10, BD - 0.02, 0.04, 0.03), linenCream, [0, 0.41, 0]);
+    for (const s of [-1, 1]) {
+      const roll = kit.cushion(0.17, 0.24, BD, 0.08, 0.02); add(bench, roll, linenCream, [s * (BL / 2 - 0.085), 0.47, 0]);
+      add(bench, kit.tube([[s * (BL / 2 - 0.004), 0.37, -BD / 2], [s * (BL / 2 - 0.004), 0.37, BD / 2]], 0.007, 8), linenCream, [0, 0, 0]); // welt
     }
-    g.computeVertexNormals(); add(bench, g, throwMat, [-0.12, 0, 0]);
-    const fringe = kit.canvasTex(256, 32, (c, w, h) => { c.clearRect(0, 0, w, h); c.strokeStyle = '#5c5444'; c.lineWidth = 2; for (let x = 2; x < w; x += 5) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (Math.random() - 0.5) * 2, h); c.stroke(); } });
-    const fr = add(bench, new THREE.PlaneGeometry(tw * 1.06, 0.06), std({ map: fringe, alphaTest: 0.4, transparent: false, side: THREE.DoubleSide, roughness: 1, color: 0xffffff }), [-0.12, 0.51 - 0.05 - (1.0 - 0.54) - 0.03, 0.25], [0, 0, 0], { shadow: false });
+    // throw: over the left end of the seat, hanging down the front and back
+    add(bench, drapeGeo(-0.62, 0.0, -0.62, 0.62, 0.62, -BD / 2, BD / 2, 0.47, { R: 0.05, maxDrop: 0.32, fold: 0.03, wrinkle: 0.01, seed: 13, sides: false, nu: 40, nv: 60 }), throwMat, [-0.06, 0, 0]);
   }
   phys.solidGroup(bench);
 
-  // nightstands (black oak, three drawers, brushed-nickel bar pulls) + lamps
+  // nightstands (black oak, three drawers with reveals, brushed-nickel bar pulls) + lamps
   function nightstand(zc, w) {
-    const g = kit.group(root, [X1 - 0.24, F, zc], -Math.PI / 2); // local x across (world +z), z out from wall
-    const H = 0.66, D = 0.46;
-    add(g, kit.rbox(w, H - 0.06, D, 0.012), ebony, [0, 0.06 + (H - 0.06) / 2, 0]);
-    add(g, kit.box(w - 0.08, 0.06, D - 0.08), ebonyMatte, [0, 0.03, -0.02]);
+    const g = kit.group(root, [X1 - 0.25, F, zc], -Math.PI / 2); // local x across (world +z), z out from wall
+    const H = 0.66, D = 0.46, K = 0.07;
+    add(g, kit.rbox(w, H - K, D - 0.02, 0.012), ebony, [0, K + (H - K) / 2, -0.01]);
+    add(g, kit.box(w - 0.08, K, D - 0.10), ebonyMatte, [0, K / 2, -0.03]);
+    add(g, kit.box(w - 0.04, H - K - 0.04, 0.01), ebonyMatte, [0, K + (H - K) / 2, D / 2 - 0.02]); // dark reveal behind fronts
+    const dh = (H - K - 0.04) / 3;
     for (let i = 0; i < 3; i++) {
-      const y = 0.06 + 0.012 + (i + 0.5) * ((H - 0.084) / 3);
-      add(g, kit.box(w - 0.04, 0.004, 0.004), ebonyMatte, [0, y - (H - 0.084) / 6, D / 2 + 0.001]);
-      add(g, kit.rbox(0.20, 0.014, 0.02, 0.006), M.brushedNickel, [0, y + 0.02, D / 2 + 0.012]);
+      const y = K + 0.02 + (i + 0.5) * dh;
+      add(g, kit.rbox(w - 0.04, dh - 0.006, 0.022, 0.003), ebony, [0, y, D / 2 - 0.004]);
+      add(g, kit.rbox(0.22, 0.013, 0.016, 0.006), M.brushedNickel, [0, y + 0.01, D / 2 + 0.018]);
+      for (const sx of [-0.1, 0.1]) add(g, kit.box(0.01, 0.01, 0.016), M.brushedNickel, [sx, y + 0.01, D / 2 + 0.009]);
     }
     phys.solidGroup(g);
     return g;
   }
-  nightstand(13.33, 0.66);
-  nightstand(16.08, 0.54);
+  nightstand(13.30, 0.68);
+  nightstand(16.10, 0.60);
   function lamp(x, z, tall) {
     const g = kit.group(root, [x, F + 0.66, z]);
-    const bh = tall ? 0.36 : 0.30;
-    add(g, kit.lathe([[0, 0], [0.07, 0], [0.072, 0.012], [0.055, 0.02], [0.05, bh], [0.012, bh + 0.01], [0.008, bh + 0.08], [0, bh + 0.08]]), M.brass, [0, 0, 0]);
-    const sh = new THREE.CylinderGeometry(0.19, 0.20, 0.26, 40, 1, true); add(g, sh, shadeMat, [0, bh + 0.17, 0]);
+    const bh = tall ? 0.40 : 0.36;
+    add(g, kit.lathe([[0, 0], [0.065, 0], [0.067, 0.012], [0.05, 0.02], [0.05, bh], [0.012, bh + 0.01], [0.008, bh + 0.08], [0, bh + 0.08]], 40), M.brass, [0, 0, 0]);
+    for (let k = 1; k < 6; k++) add(g, kit.cyl(0.0505, 0.0505, 0.004, 32), M.brass, [0, 0.02 + k * (bh - 0.02) / 6, 0]); // fluted rings
+    const sh = new THREE.CylinderGeometry(0.20, 0.20, 0.28, 48, 1, true); add(g, sh, shadeMat, [0, bh + 0.17, 0]);
     add(g, kit.sphere(0.03, 12, 8), M.emissiveWarm, [0, bh + 0.12, 0], [0, 0, 0], { shadow: false });
     return g;
   }
-  lamp(X1 - 0.26, 13.33, false);
-  lamp(X1 - 0.26, 16.08, true);
+  lamp(X1 - 0.26, 13.30, false);
+  lamp(X1 - 0.26, 16.10, true);
 
-  // ------------------------------------------------------------------ rug (faded vintage, grey-mauve with border)
+  // ------------------------------------------------------------------ rug (faded vintage Persian, grey-mauve / taupe, set at an angle)
   {
+    const RW = 4.0, RD = 3.0;
     const rugTex = kit.canvasTex(1024, 768, (g, w, h) => {
       const r = kit.rng(31);
-      g.fillStyle = '#675b55'; g.fillRect(0, 0, w, h);
-      const b = 40; g.strokeStyle = '#4f4642'; g.lineWidth = 34; g.strokeRect(b, b, w - 2 * b, h - 2 * b);
-      g.strokeStyle = 'rgba(150,138,128,0.18)'; g.lineWidth = 4; g.strokeRect(b + 24, b + 24, w - 2 * b - 48, h - 2 * b - 48); g.strokeRect(b - 20, b - 20, w - 2 * b + 40, h - 2 * b + 40);
-      for (let i = 0; i < 260; i++) { const x = b + 30 + r() * (w - 2 * b - 60), y = b + 30 + r() * (h - 2 * b - 60); g.fillStyle = `rgba(${r() < 0.5 ? '120,98,104' : '150,140,128'},${0.15 + r() * 0.2})`; g.save(); g.translate(x, y); g.rotate(r() * 6.3); g.fillRect(-14, -3, 28 + r() * 30, 6); g.restore(); }
-      g.save(); g.translate(w / 2, h / 2); for (let k = 0; k < 3; k++) { g.strokeStyle = `rgba(${k % 2 ? '140,128,122' : '90,78,80'},0.18)`; g.lineWidth = 10; g.beginPath(); for (let a = 0; a <= 6.3; a += 0.1) { const rr = (160 - k * 40) * (1 + 0.18 * Math.sin(a * 8)); g.lineTo(Math.cos(a) * rr * 1.3, Math.sin(a) * rr); } g.closePath(); g.stroke(); } g.restore();
-      const img = g.getImageData(0, 0, w, h); for (let i = 0; i < img.data.length; i += 4) { const y = (i / 4 / w) | 0; const n = (r() - 0.5) * 46 + (r() < 0.03 ? 40 : 0) + ((y * 7 + (r() * 3 | 0)) % 9 < 1 ? -18 : 0); img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n; } g.putImageData(img, 0, 0);
+      g.fillStyle = '#857772'; g.fillRect(0, 0, w, h);
+      // borders
+      const band = (inset, width, col) => { g.strokeStyle = col; g.lineWidth = width; g.strokeRect(inset, inset, w - 2 * inset, h - 2 * inset); };
+      band(18, 12, '#6f625f'); band(42, 30, '#7b6d6b'); band(62, 4, '#a39591'); band(28, 3, '#a39591');
+      // border motif: small rosettes along the main band
+      for (let x = 60; x < w - 40; x += 26) for (const y of [42, h - 42]) { g.fillStyle = r() < 0.5 ? 'rgba(160,140,138,0.55)' : 'rgba(95,80,82,0.6)'; g.beginPath(); g.ellipse(x, y, 8, 6, 0, 0, 6.3); g.fill(); }
+      for (let y = 60; y < h - 40; y += 26) for (const x of [42, w - 42]) { g.fillStyle = r() < 0.5 ? 'rgba(160,140,138,0.55)' : 'rgba(95,80,82,0.6)'; g.beginPath(); g.ellipse(x, y, 6, 8, 0, 0, 6.3); g.fill(); }
+      // field: all-over lattice of small palmettes (fine pattern)
+      g.save(); g.beginPath(); g.rect(70, 70, w - 140, h - 140); g.clip();
+      for (let y = 70; y < h; y += 34) for (let x = 70 + ((y / 34) % 2) * 22; x < w; x += 44) {
+        g.strokeStyle = 'rgba(105,90,94,0.55)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 16, y); g.lineTo(x, y - 12); g.lineTo(x + 16, y); g.lineTo(x, y + 12); g.closePath(); g.stroke();
+        g.fillStyle = r() < 0.3 ? 'rgba(150,128,128,0.5)' : r() < 0.6 ? 'rgba(120,108,100,0.45)' : 'rgba(176,166,156,0.35)'; g.beginPath(); g.arc(x, y, 4 + r() * 2, 0, 6.3); g.fill();
+      }
+      // central medallion (very faded)
+      g.translate(w / 2, h / 2);
+      for (let k = 0; k < 4; k++) { g.strokeStyle = `rgba(${k % 2 ? '150,134,132' : '96,82,86'},0.35)`; g.lineWidth = 6; g.beginPath(); for (let a = 0; a <= 6.3; a += 0.05) { const rr = (190 - k * 38) * (1 + 0.14 * Math.sin(a * 8) + 0.05 * Math.sin(a * 24)); g.lineTo(Math.cos(a) * rr * 1.25, Math.sin(a) * rr); } g.closePath(); g.stroke(); }
+      g.restore();
+      // distress: abrash streaks, worn patches, speckle
+      for (let i = 0; i < 70; i++) { const y = r() * h; g.fillStyle = `rgba(${r() < 0.5 ? '200,190,184' : '70,60,60'},${0.04 + r() * 0.06})`; g.fillRect(0, y, w, 2 + r() * 10); }
+      for (let i = 0; i < 40; i++) { const x = r() * w, y = r() * h, rad = 30 + r() * 120; const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(190,180,174,0.22)'); gr.addColorStop(1, 'rgba(190,180,174,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
+      const img = g.getImageData(0, 0, w, h); for (let i = 0; i < img.data.length; i += 4) { const n = (r() - 0.5) * 34; img.data[i] += n; img.data[i + 1] += n * 0.95; img.data[i + 2] += n * 0.95; } g.putImageData(img, 0, 0);
     });
-    const rugMat = std({ map: rugTex, roughness: 0.98, normalMap: kit.tex('assets/ph/hessian_380/hessian_380_nor_gl_1k.jpg', { repeat: [14, 10] }), normalScale: new THREE.Vector2(0.35, 0.35) });
-    const RW = 4.0, RD = 3.0; const g = new THREE.PlaneGeometry(RW, RD); g.rotateX(-Math.PI / 2);
-    add(root, g, rugMat, [12.25, F + 0.012, BZ], [0, 0, 0], { shadow: false });
-    add(root, kit.box(RW, 0.01, RD), std({ color: 0x5e544c, roughness: 1 }), [12.25, F + 0.006, BZ], [0, 0, 0], { shadow: false });
+    const rep = [RW * 1.2, RD * 1.2];
+    const rugMat = new THREE.MeshPhysicalMaterial({ map: rugTex, roughness: 1, sheen: 0.3, sheenColor: new THREE.Color(0xb8aaa4), sheenRoughness: 0.8,
+      normalMap: kit.tex('assets/acg/Carpet016/Carpet016_NormalGL.jpg', { repeat: rep }), normalScale: new THREE.Vector2(0.45, 0.45),
+      aoMap: kit.tex('assets/acg/Carpet016/Carpet016_AmbientOcclusion.jpg', { repeat: rep }), aoMapIntensity: 0.5 });
+    const rug = kit.group(root, [12.35, F, BZ - 0.05], 0.10);
+    const top = kit.rbox(RW, 0.012, RD, 0.005); add(rug, top, rugMat, [0, 0.006, 0], [0, 0, 0], { shadow: false });
+    // fringe at the short ends
+    const fringe = kit.canvasTex(512, 32, (c, w, h) => { c.clearRect(0, 0, w, h); const r = kit.rng(8); c.strokeStyle = '#cfc6bc'; c.lineWidth = 2; for (let x = 2; x < w; x += 4) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (r() - 0.5) * 4, h * (0.6 + r() * 0.4)); c.stroke(); } });
+    const fm = std({ map: fringe, alphaTest: 0.4, roughness: 1, side: THREE.DoubleSide });
+    for (const s of [-1, 1]) add(rug, new THREE.PlaneGeometry(RD, 0.07), fm, [s * (RW / 2 + 0.035), 0.004, 0], [-Math.PI / 2, 0, Math.PI / 2], { shadow: false });
   }
 
   // ------------------------------------------------------------------ boucle chairs + side table in front of the bay
@@ -371,7 +487,7 @@ export async function build(ctx) {
     add(g, back, boucle, [0, 0.47, -0.02]);
     for (const a of [0, 1.2 * Math.PI]) { const ang = Math.PI * 0.4 + Math.PI + a; } // (arms are the torus ends)
     for (const s of [-1, 1]) add(g, kit.sphere(0.10, 20, 14), boucle, [s * 0.24, 0.47, 0.17], [0, 0, 0]);
-    if (withThrow) { const t = new THREE.PlaneGeometry(0.42, 0.55, 12, 14); const p = t.attributes.position; for (let i = 0; i < p.count; i++) { const yy = p.getY(i); p.setZ(i, 0.03 * Math.sin(p.getX(i) * 18) + (yy < 0 ? -yy * 0.9 : 0)); } t.computeVertexNormals(); add(g, t, sageThrow, [-0.10, 0.60, -0.24], [-0.6, 0.3, 0.1]); }
+    if (withThrow) { const t = new THREE.PlaneGeometry(0.42, 0.55, 12, 14); const p = t.attributes.position; for (let i = 0; i < p.count; i++) { const yy = p.getY(i); p.setZ(i, 0.03 * Math.sin(p.getX(i) * 18) + (yy < 0 ? -yy * 0.9 : 0)); } t.computeVertexNormals(); add(g, t, fab.knit('#8f9a86', { scale: 3, side: THREE.DoubleSide }), [-0.10, 0.60, -0.24], [-0.6, 0.3, 0.1]); }
     phys.solidGroup(g); return g;
   }
   const face = (x, z, tx, tz) => Math.atan2(tx - x, tz - z);
@@ -387,26 +503,40 @@ export async function build(ctx) {
 
   // ------------------------------------------------------------------ fireplace wall: black marble box, firebox, niche, frame TV
   {
-    const D = 0.40, H = 1.12, s0 = 12.50, s1 = Z1;
-    const fb = [15.30, 16.30], ni = [13.55, 14.85], oy0 = 0.42, oy1 = 0.86;
+    const D = 0.40, H = 1.1, s0 = 12.10, s1 = Z1 - 0.05; // ~4.55 m long slab (p18)
+    const fb = [15.36, 16.36], ni = [13.90, 15.16], oy0 = 0.32, oy1 = 0.74;
     // extrude in (u=-z, v=y), depth along +x after rotation
     const outline = [[-s1, 0], [-s0, 0], [-s0, H], [-s1, H]];
     const holes = [[[-fb[1], oy0], [-fb[1], oy1], [-fb[0], oy1], [-fb[0], oy0]], [[-ni[1], oy0], [-ni[1], oy1], [-ni[0], oy1], [-ni[0], oy0]]];
     const g = kit.extrude(outline, D, 0, holes); g.rotateY(Math.PI / 2);
     add(root, g, marbleMat, [X0, F, 0]);
     phys.boxAABB([X0, F, s0], [X0 + D, F + H, s1]);
-    // firebox: herringbone refractory back, black sides, logs, glass
-    const herring = kit.canvasTex(256, 256, (c, w, h) => { c.fillStyle = '#1a1817'; c.fillRect(0, 0, w, h); const r = kit.rng(2); for (let y = -64; y < h + 64; y += 22) for (let x = 0; x < w; x += 44) { for (const s of [1, -1]) { const v = 52 + r() * 30; c.fillStyle = `rgb(${v},${v - 4},${v - 8})`; c.save(); c.translate(x + (s > 0 ? 0 : 22), y); c.rotate(s * Math.PI / 4); c.fillRect(0, 0, 30, 10); c.restore(); } } }, { repeat: [3, 1.5] });
-    add(root, new THREE.PlaneGeometry(fb[1] - fb[0], oy1 - oy0), std({ map: herring, roughness: 0.9 }), [X0 + 0.04, F + (oy0 + oy1) / 2, (fb[0] + fb[1]) / 2], [0, Math.PI / 2, 0]);
-    add(root, kit.box(0.30, 0.02, fb[1] - fb[0]), M.matteBlack, [X0 + 0.18, F + oy0 + 0.01, (fb[0] + fb[1]) / 2]);
-    const logM = std({ color: 0x4a4038, roughness: 0.95, normalMap: fineNoise, normalScale: new THREE.Vector2(1, 1) });
-    add(root, kit.cyl(0.045, 0.05, 0.75, 14), logM, [X0 + 0.16, F + oy0 + 0.07, (fb[0] + fb[1]) / 2], [Math.PI / 2, 0, 0.05]);
-    add(root, kit.cyl(0.04, 0.045, 0.6, 14), logM, [X0 + 0.24, F + oy0 + 0.12, (fb[0] + fb[1]) / 2 + 0.05], [Math.PI / 2, 0.4, 0]);
-    add(root, kit.cyl(0.035, 0.04, 0.5, 14), logM, [X0 + 0.12, F + oy0 + 0.13, (fb[0] + fb[1]) / 2 - 0.08], [Math.PI / 2, -0.5, 0]);
-    const fg = add(root, new THREE.PlaneGeometry(fb[1] - fb[0], oy1 - oy0), M.glass, [X0 + D - 0.02, F + (oy0 + oy1) / 2, (fb[0] + fb[1]) / 2], [0, Math.PI / 2, 0], { shadow: false }); fg.renderOrder = 2;
-    add(root, new THREE.PlaneGeometry(ni[1] - ni[0], oy1 - oy0), M.matteBlack, [X0 + 0.02, F + (oy0 + oy1) / 2, (ni[0] + ni[1]) / 2], [0, Math.PI / 2, 0]);
+    const oh = oy1 - oy0, oyc = F + (oy0 + oy1) / 2;
+    // recessed openings: black liners (top, bottom, ends) + a thin blackened-steel frame round each opening
+    const liner = std({ color: 0x0d0d0d, roughness: 0.6, metalness: 0.2 });
+    for (const [a0, a1] of [fb, ni]) {
+      const zc = (a0 + a1) / 2, L = a1 - a0;
+      add(root, kit.box(D - 0.02, 0.01, L), liner, [X0 + D / 2, F + oy0 + 0.005, zc]);
+      add(root, kit.box(D - 0.02, 0.01, L), liner, [X0 + D / 2, F + oy1 - 0.005, zc]);
+      for (const zz of [a0 + 0.005, a1 - 0.005]) add(root, kit.box(D - 0.02, oh, 0.01), liner, [X0 + D / 2, oyc, zz]);
+      const t = 0.018, fx = X0 + D + 0.004;
+      add(root, kit.box(0.012, t, L + 2 * t), M.matteBlack, [fx, F + oy1 + t / 2, zc]); add(root, kit.box(0.012, t, L + 2 * t), M.matteBlack, [fx, F + oy0 - t / 2, zc]);
+      for (const zz of [a0 - t / 2, a1 + t / 2]) add(root, kit.box(0.012, oh, t), M.matteBlack, [fx, oyc, zz]);
+    }
+    // firebox: dark herringbone refractory back, ember bed, gas logs, glass
+    const herring = kit.canvasTex(256, 256, (c, w, h) => { c.fillStyle = '#121110'; c.fillRect(0, 0, w, h); const r = kit.rng(2); for (let y = -64; y < h + 64; y += 22) for (let x = 0; x < w; x += 44) { for (const s of [1, -1]) { const v = 34 + r() * 22; c.fillStyle = `rgb(${v},${v - 3},${v - 6})`; c.save(); c.translate(x + (s > 0 ? 0 : 22), y); c.rotate(s * Math.PI / 4); c.fillRect(0, 0, 30, 10); c.restore(); } } }, { repeat: [3, 1.2] });
+    add(root, new THREE.PlaneGeometry(fb[1] - fb[0], oh), std({ map: herring, roughness: 0.9 }), [X0 + 0.04, oyc, (fb[0] + fb[1]) / 2], [0, Math.PI / 2, 0]);
+    add(root, kit.box(0.30, 0.03, fb[1] - fb[0] - 0.04), std({ color: 0x3a3634, roughness: 1, normalMap: fineNoise }), [X0 + 0.20, F + oy0 + 0.02, (fb[0] + fb[1]) / 2]);
+    const logM = std({ color: 0x51463d, roughness: 0.95, normalMap: fineNoise, normalScale: new THREE.Vector2(1.2, 1.2) });
+    const fz = (fb[0] + fb[1]) / 2;
+    add(root, kit.cyl(0.045, 0.05, 0.70, 14), logM, [X0 + 0.16, F + oy0 + 0.08, fz], [Math.PI / 2, 0, 0.05]);
+    add(root, kit.cyl(0.04, 0.045, 0.55, 14), logM, [X0 + 0.26, F + oy0 + 0.11, fz + 0.06], [Math.PI / 2, 0.35, 0]);
+    add(root, kit.cyl(0.035, 0.04, 0.45, 14), logM, [X0 + 0.12, F + oy0 + 0.14, fz - 0.10], [Math.PI / 2, -0.5, 0]);
+    for (let i = 0; i < 9; i++) add(root, kit.sphere(0.022, 8, 6), std({ color: 0xd8d4cc, roughness: 0.9 }), [X0 + 0.27 + (i % 3) * 0.03, F + oy0 + 0.045, fb[0] + 0.08 + i * 0.09]); // glass/stone media
+    const fg = add(root, new THREE.PlaneGeometry(fb[1] - fb[0], oh), M.glass, [X0 + D - 0.02, oyc, fz], [0, Math.PI / 2, 0], { shadow: false }); fg.renderOrder = 2;
+    add(root, new THREE.PlaneGeometry(ni[1] - ni[0], oh), liner, [X0 + 0.02, oyc, (ni[0] + ni[1]) / 2], [0, Math.PI / 2, 0]);
     // frame TV (oak frame, noir film still recreated as a simple painting)
-    const tvW = 1.86, tvH = 1.06, tz = 14.90, ty = F + H + 0.20 + tvH / 2;
+    const tvW = 2.30, tvH = 1.30, tz = 15.13, ty = F + H + 0.36 + tvH / 2;
     const noir = kit.canvasTex(1024, 584, (c, w, h) => {
       const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#5a5a58'); gr.addColorStop(0.55, '#2c2c2b'); gr.addColorStop(1, '#121212'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
       const r = kit.rng(9); for (let i = 0; i < 30; i++) { c.fillStyle = `rgba(200,200,190,${0.05 + r() * 0.1})`; c.fillRect(600 + r() * 380, 300 + r() * 160, 3, 3); }
@@ -416,7 +546,7 @@ export async function build(ctx) {
       fig(470, 200, 1.6); fig(200, 300, 1.0);
     });
     const tv = kit.group(root, [X0 + 0.04, ty, tz], Math.PI / 2);
-    add(tv, kit.rbox(tvW + 0.08, tvH + 0.08, 0.05, 0.006), std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1, 1] }), color: 0xe7c597, roughness: 0.55 }), [0, 0, 0]);
+    add(tv, kit.rbox(tvW + 0.05, tvH + 0.05, 0.05, 0.004), std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1, 1] }), color: 0xe7c597, roughness: 0.55 }), [0, 0, 0]);
     add(tv, new THREE.PlaneGeometry(tvW, tvH), std({ map: noir, roughness: 0.6, emissiveMap: noir, emissive: 0xffffff, emissiveIntensity: 0.25 }), [0, 0, 0.0255], [0, 0, 0], { shadow: false });
   }
 
@@ -424,10 +554,11 @@ export async function build(ctx) {
   {
     const g = kit.group(root, [10.62, F, Z1 - 0.25], Math.PI); // local +z faces the room (-z world)
     const W = 1.18, H = 0.84, D = 0.50;
-    add(g, kit.rbox(W, H - 0.07, D, 0.01), ebony, [0, 0.07 + (H - 0.07) / 2, 0]);
-    add(g, kit.box(W - 0.06, 0.07, D - 0.06), ebonyMatte, [0, 0.035, -0.02]);
-    for (let r = 0; r < 3; r++) { const y = 0.07 + ((H - 0.07) * (r + 1)) / 3; if (r < 2) add(g, kit.box(W - 0.02, 0.005, 0.006), ebonyMatte, [0, y, D / 2 + 0.001]); }
-    add(g, kit.box(0.005, H - 0.09, 0.006), ebonyMatte, [0, 0.07 + (H - 0.07) / 2, D / 2 + 0.001]);
+    add(g, kit.rbox(W, H - 0.07, D - 0.02, 0.012), ebony, [0, 0.07 + (H - 0.07) / 2, -0.01]);
+    add(g, kit.box(W - 0.06, 0.07, D - 0.10), ebonyMatte, [0, 0.035, -0.03]);                     // toe kick
+    add(g, kit.box(W - 0.03, H - 0.11, 0.01), ebonyMatte, [0, 0.07 + (H - 0.07) / 2, D / 2 - 0.02]); // reveal
+    { const dh = (H - 0.07 - 0.04) / 3, dw = (W - 0.04) / 2; // 2 x 3 drawer fronts with 3 mm gaps, finger-pull tops
+      for (let c = 0; c < 2; c++) for (let r = 0; r < 3; r++) add(g, kit.rbox(dw - 0.003, dh - 0.003, 0.022, 0.003), ebony, [(c - 0.5) * dw, 0.09 + (r + 0.5) * dh, D / 2 - 0.004]); }
     phys.solidGroup(g);
     // orchid (white phalaenopsis in a white cachepot)
     const o = kit.group(root, [10.22, F + H, Z1 - 0.24]);
@@ -454,43 +585,73 @@ export async function build(ctx) {
   // ================================================================== balcony
   {
     const [bx0, bz0, bx1, bz1] = ctx.plan.ROOMS.balcony.rect; const B = F;
-    // black porcelain tile, light grout (0.6 x 0.3 m)
-    const tileTex = kit.canvasTex(512, 512, (c, w, h) => { const r = kit.rng(17); c.fillStyle = '#7a7a76'; c.fillRect(0, 0, w, h); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const v = 22 + r() * 6; c.fillStyle = `rgb(${v},${v},${v})`; c.fillRect(i * 128 + 1.5, j * 128 + 1.5, 125, 125); } }, { repeat: [1 / 1.2, 1 / 1.2] });
-    const tileMat = kit.outdoor(std({ map: tileTex, roughness: 0.45, envMapIntensity: 0.35 }));
+    // near-black glossy porcelain, 0.6 m squares, thin light-grey grout (texture tile = 2.4 m = 4x4)
+    const tileDraw = (hgt) => (c, w, h) => { const r = kit.rng(17); c.fillStyle = hgt ? '#000' : '#8c8c88'; c.fillRect(0, 0, w, h); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { const v = hgt ? 255 : 44 + r() * 8; c.fillStyle = `rgb(${v},${v},${v + (hgt ? 0 : 2)})`; c.fillRect(i * 256 + 2, j * 256 + 2, 252, 252); if (!hgt) for (let k = 0; k < 60; k++) { const q = 38 + r() * 14; c.fillStyle = `rgba(${q},${q},${q},0.5)`; c.fillRect(i * 256 + 2 + r() * 240, j * 256 + 2 + r() * 240, 3 + r() * 10, 2 + r() * 6); } } };
+    const tileMat = kit.outdoor(std({ map: kit.canvasTex(1024, 1024, tileDraw(false), { repeat: [1 / 2.4, 1 / 2.4] }), normalMap: heightNormal(512, tileDraw(true), 4, [1 / 2.4, 1 / 2.4]), normalScale: new THREE.Vector2(0.6, 0.6), color: 0xffffff, roughness: 0.62, envMapIntensity: 0.3 })); // matte charcoal (p22)
     kit.floorFinish(root, [bx0, bz0, bx1, bz1], tileMat, B, 0.006);
     // dark fascia band round the slab edge
     const fasc = kit.outdoor(std({ color: 0x1e1e1e, roughness: 0.6 }));
     add(root, kit.box(bx1 - bx0 + 0.04, 0.32, 0.04), fasc, [(bx0 + bx1) / 2, B - 0.15, bz1 + 0.02]);
     add(root, kit.box(0.04, 0.32, bz1 - bz0), fasc, [bx0 - 0.02, B - 0.15, (bz0 + bz1) / 2]);
-    // black metal railing: top rail, bottom rail, posts, square pickets (instanced)
-    const railM = kit.outdoor(std({ color: 0x151515, roughness: 0.5, metalness: 0.5 }));
-    const RH = 1.07, inset = 0.06;
+    // slim matte-black railing: flat top rail, bottom rail, posts, 12 mm square pickets at ~95 mm (instanced)
+    const railM = kit.outdoor(std({ color: 0x141414, roughness: 0.55, metalness: 0.4 }));
+    const RH = 1.07, inset = 0.05;
     const runs = [[[bx0 + inset, bz1 - inset], [bx1, bz1 - inset]], [[bx0 + inset, bz0 + 0.30], [bx0 + inset, bz1 - inset]]];
-    const pick = new THREE.BoxGeometry(0.015, RH - 0.12, 0.015); const picks = [];
+    const pick = new THREE.BoxGeometry(0.013, RH - 0.10, 0.013); const picks = [];
     for (const [a, b] of runs) {
       const L = Math.hypot(b[0] - a[0], b[1] - a[1]); const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L; const ry = Math.atan2(ux, uz);
       const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-      add(root, kit.box(0.05, 0.035, L + 0.05), railM, [mid[0], B + RH, mid[1]], [0, ry, 0]);
-      add(root, kit.box(0.035, 0.03, L), railM, [mid[0], B + 0.08, mid[1]], [0, ry, 0]);
-      for (let s = 0; s <= L + 0.01; s += L / Math.ceil(L / 1.8)) add(root, kit.box(0.05, RH, 0.05), railM, [a[0] + ux * s, B + RH / 2, a[1] + uz * s]);
-      for (let s = 0.10; s < L - 0.05; s += 0.10) picks.push([a[0] + ux * s, B + 0.06 + (RH - 0.12) / 2 + 0.02, a[1] + uz * s]);
+      add(root, kit.rbox(0.042, 0.012, L + 0.05, 0.003), railM, [mid[0], B + RH, mid[1]], [0, ry, 0]); // thin flat cap
+      add(root, kit.box(0.016, 0.022, L), railM, [mid[0], B + RH - 0.017, mid[1]], [0, ry, 0]);
+      add(root, kit.box(0.025, 0.025, L), railM, [mid[0], B + 0.07, mid[1]], [0, ry, 0]);
+      for (let s = 0; s <= L + 0.01; s += L / Math.ceil(L / 1.8)) add(root, kit.box(0.04, RH, 0.04), railM, [a[0] + ux * s, B + RH / 2, a[1] + uz * s]);
+      for (let s = 0.095; s < L - 0.04; s += 0.095) picks.push([a[0] + ux * s, B + 0.06 + (RH - 0.10) / 2 - 0.01, a[1] + uz * s]);
       phys.boxAABB([Math.min(a[0], b[0]) - 0.03, B, Math.min(a[1], b[1]) - 0.03], [Math.max(a[0], b[0]) + 0.03, B + RH + 0.02, Math.max(a[1], b[1]) + 0.03]);
     }
     const im = new THREE.InstancedMesh(pick, railM, picks.length); const mm = new THREE.Matrix4();
     picks.forEach((p, i) => im.setMatrixAt(i, mm.makeTranslation(p[0], p[1], p[2]))); im.castShadow = true; im.receiveShadow = true; root.add(im);
-    // wall lanterns (black box lantern, seeded glass, warm bulb) on the rear wall
-    const lglass = std({ color: 0xffffff, roughness: 0.15, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
-    for (const lx of [8.62, 10.25, 15.05]) {
-      const g = kit.group(root, [lx, B + 1.95, 17.0]);
-      add(g, kit.box(0.14, 0.24, 0.02), railM, [0, 0, 0.01]);
-      add(g, kit.box(0.03, 0.03, 0.10), railM, [0, 0.05, 0.06]);
-      const body = kit.group(g, [0, 0, 0.17]);
-      add(body, kit.box(0.20, 0.025, 0.20), railM, [0, 0.165, 0]); add(body, kit.box(0.17, 0.02, 0.17), railM, [0, -0.165, 0]);
-      add(body, kit.lathe([[0, 0], [0.11, 0], [0.04, 0.05], [0, 0.06]], 4), railM, [0, 0.175, 0], [0, Math.PI / 4, 0]);
-      for (const sx of [-0.08, 0.08]) for (const sz of [-0.08, 0.08]) add(body, kit.box(0.015, 0.31, 0.015), railM, [sx, 0, sz]);
-      add(body, kit.box(0.16, 0.30, 0.16), lglass, [0, 0, 0], [0, 0, 0], { shadow: false });
-      add(body, kit.sphere(0.025, 12, 8), M.emissiveWarm, [0, -0.02, 0], [0, 0, 0], { shadow: false });
+
+    // white horizontal lap siding (0.15 m reveal) on the balcony faces of the rear wall and the bath's end wall
+    const lapDraw = (hgt) => (c, w, h) => { const r = kit.rng(29); const bh = h / 8; for (let k = 0; k < 8; k++) { const gr = c.createLinearGradient(0, k * bh, 0, (k + 1) * bh); if (hgt) { gr.addColorStop(0, '#202020'); gr.addColorStop(0.9, '#f0f0f0'); gr.addColorStop(1, '#000'); } else { const v = 240 + r() * 6; gr.addColorStop(0, `rgb(${v - 12},${v - 13},${v - 16})`); gr.addColorStop(0.85, `rgb(${v},${v - 1},${v - 5})`); gr.addColorStop(1, `rgb(${v - 70},${v - 70},${v - 72})`); } c.fillStyle = gr; c.fillRect(0, k * bh, w, bh); } };
+    const lap = kit.outdoor(std({ map: kit.canvasTex(256, 512, lapDraw(false), { repeat: [1, 1 / 1.2] }), normalMap: heightNormal(256, lapDraw(true), 3, [1, 1 / 1.2]), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.75 }));
+    const yTop = PL - 0.02, RZ = Z1 + 0.30, EX = bx1;
+    const segs = [[bx0, DOOR.x0 - 0.06, B, yTop], [DOOR.x0 - 0.06, DOOR.x1 + 0.06, B + 2.47, yTop], [DOOR.x1 + 0.06, BAY.a[0] - 0.12, B, yTop], [BAY.a[0] - 0.12, BAY.d[0] + 0.12, B + BAY.top + 0.07, yTop], [BAY.d[0] + 0.12, EX, B, yTop]];
+    for (const [xa, xb, y0, y1] of segs) if (xb - xa > 0.02) kit.wallPanel(root, [xa, RZ], [xb, RZ], y0, y1, [0, 1], lap, 0.006);
+    // end wall (x = 15.39, bath beyond): glass door (0.9 x 2.4) between two box lanterns
+    const DZ0 = 17.42, DZ1 = 18.32, DH = 2.40;
+    kit.wallPanel(root, [EX, bz0], [EX, DZ0 - 0.05], B, yTop, [-1, 0], lap, 0.006);
+    kit.wallPanel(root, [EX, DZ1 + 0.05], [EX, bz1 + 0.05], B, yTop, [-1, 0], lap, 0.006);
+    kit.wallPanel(root, [EX, DZ0 - 0.05], [EX, DZ1 + 0.05], B + DH + 0.05, yTop, [-1, 0], lap, 0.006);
+    {
+      const dz = (DZ0 + DZ1) / 2, fw = 0.055;
+      // dark interior seen through the glass (bath: charcoal tile, a lit vanity glow)
+      const inside = kit.canvasTex(256, 512, (c, w, h) => { c.fillStyle = '#2b2d2f'; c.fillRect(0, 0, w, h); const r = kit.rng(3); for (let y = 0; y < h; y += 32) for (let x = 0; x < w; x += 64) { const v = 36 + r() * 14; c.fillStyle = `rgb(${v},${v + 1},${v + 3})`; c.fillRect(x + 1, y + 1, 62, 30); } const gr = c.createRadialGradient(w * 0.7, h * 0.35, 4, w * 0.7, h * 0.35, 140); gr.addColorStop(0, 'rgba(230,220,200,0.55)'); gr.addColorStop(1, 'rgba(230,220,200,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); c.fillStyle = 'rgba(220,220,215,0.5)'; c.fillRect(w * 0.15, h * 0.62, w * 0.6, h * 0.05); });
+      add(root, new THREE.PlaneGeometry(DZ1 - DZ0, DH), std({ map: inside, roughness: 0.9 }), [EX + 0.12, B + DH / 2, dz], [0, -Math.PI / 2, 0], { shadow: false });
+      for (const [zz, ww] of [[DZ0 + fw / 2, fw], [DZ1 - fw / 2, fw]]) add(root, kit.box(0.10, DH, ww), railM, [EX + 0.02, B + DH / 2, zz]);
+      add(root, kit.box(0.10, fw, DZ1 - DZ0), railM, [EX + 0.02, B + DH - fw / 2, dz]);
+      add(root, kit.box(0.10, 0.10, DZ1 - DZ0), railM, [EX + 0.02, B + 0.05, dz]);
+      // reveal returns (white) so the door sits in the wall thickness
+      for (const zz of [DZ0 - 0.005, DZ1 + 0.005]) add(root, kit.box(0.14, DH, 0.01), M.extWhite, [EX + 0.07, B + DH / 2, zz]);
+      const dg = add(root, new THREE.PlaneGeometry(DZ1 - DZ0 - 2 * fw, DH - 0.10 - fw), M.glass, [EX + 0.02, B + 0.10 + (DH - 0.10 - fw) / 2, dz], [0, -Math.PI / 2, 0], { shadow: false }); dg.renderOrder = 2;
+      add(root, kit.box(0.03, 0.30, 0.02), M.matteBlack, [EX - 0.04, B + 1.05, DZ1 - 0.12]); // pull
     }
+    // wall lanterns: black box lantern (~0.32 x 0.52), seeded glass, warm bulb. [x, z, facing]
+    const lglass = kit.outdoor(new THREE.MeshPhysicalMaterial({ color: 0xfff6e8, roughness: 0.12, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
+    const lanternAt = (x, z, ry, s = 1) => {
+      const g = kit.group(root, [x, B + 2.0, z], ry); g.scale.setScalar(s);
+      add(g, kit.box(0.12, 0.30, 0.02), railM, [0, 0.02, 0.01]);
+      add(g, kit.box(0.03, 0.03, 0.08), railM, [0, 0.10, 0.06]);
+      const body = kit.group(g, [0, 0, 0.19]);
+      add(body, kit.box(0.32, 0.03, 0.32), railM, [0, 0.245, 0]); add(body, kit.box(0.28, 0.03, 0.28), railM, [0, -0.245, 0]);
+      add(body, kit.lathe([[0, 0], [0.19, 0], [0.06, 0.08], [0, 0.09]], 4), railM, [0, 0.26, 0], [0, Math.PI / 4, 0]);
+      add(body, kit.box(0.04, 0.03, 0.04), railM, [0, 0.36, 0]);
+      for (const sx of [-0.135, 0.135]) for (const sz of [-0.135, 0.135]) add(body, kit.box(0.018, 0.47, 0.018), railM, [sx, 0, sz]);
+      add(body, kit.box(0.26, 0.46, 0.26), lglass, [0, 0, 0], [0, 0, 0], { shadow: false });
+      add(body, kit.cyl(0.012, 0.012, 0.10, 10), std({ color: 0xf4f0e6, roughness: 0.6 }), [0, -0.12, 0]);
+      add(body, kit.sphere(0.022, 12, 8), M.emissiveWarm, [0, -0.05, 0], [0, 0, 0], { shadow: false });
+    };
+    lanternAt(DOOR.x0 - 0.36, RZ, 0, 0.95); lanternAt(DOOR.x1 + 0.36, RZ, 0, 0.95); // primary balcony door
+    lanternAt(EX, DZ0 - 0.32, -Math.PI / 2, 1.1); lanternAt(EX, DZ1 + 0.32, -Math.PI / 2, 1.1); // flanking the end door
   }
 
   kit.mergeStatic(root);

@@ -10,13 +10,15 @@
 //       blue seascape photo, "LA MER" print, white-oak slab doors.
 //  p16  upper walkway beside the void, octopus panels across the void, oak door near the camera.
 
+import { Reflector } from 'three/addons/objects/Reflector.js';
+
 export const piece = { rooms: ["foyer", "gallery", "hallEW", "hallNS", "hallC"], photos: ["p02", "p14", "p15", "p16"] };
 export const ownCeiling = ['gallery'];
 export const views = {
-  p02: { pos: [9.35, 1.40, 4.62], look: [9.95, 2.25, 14], fov: 60 },
-  p14: { pos: [9.55, 1.30, 4.85], look: [9.0, 1.55, 9.5], fov: 58 },
-  p15: { pos: [10.85, 4.80, 10.90], look: [8.3, 4.50, 8.2], fov: 62 },
-  p16: { pos: [8.50, 4.80, 6.60], look: [10.0, 4.75, 10.4], fov: 58 },
+  p02: { pos: [9.12, 1.40, 4.66], look: [9.62, 1.75, 14], fov: 60 },
+  p14: { pos: [10.12, 1.30, 5.20], look: [8.30, 1.40, 8.60], fov: 60 },
+  p15: { pos: [11.0, 4.85, 11.38], look: [8.65, 4.35, 6.95], fov: 62 },
+  p16: { pos: [8.64, 4.80, 4.92], look: [9.30, 4.80, 11.0], fov: 58 },
 };
 
 // ---- stair + void constants (mirrors plan.STAIR / plan.VOIDS)
@@ -34,13 +36,24 @@ export async function build(ctx) {
   const zr = (k) => k <= NL ? ST.z0 + (k - 1) * R : zL1 + (k - NL - 1) * R;   // front face of riser k (1..17)
 
   // ---------------------------------------------------------------- materials
-  const oak = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1, 1] }), color: 0xffe4c4, roughness: 0.55, normalScale: new THREE.Vector2(0.3, 0.3) });
-  const oakRail = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [0.2, 2] }), color: 0xffe0bc, roughness: 0.5, normalScale: new THREE.Vector2(0.25, 0.25) });
-  const ironBlack = std({ color: 0x151515, roughness: 0.55, metalness: 0.35 });
+  const oak = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1, 1] }), color: 0xfff4e8, roughness: 0.55, normalScale: new THREE.Vector2(0.3, 0.3) });
+  const oakRail = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [0.2, 2] }), color: 0xfff1e2, roughness: 0.5, normalScale: new THREE.Vector2(0.25, 0.25) });
+  const phys_ = (o) => new THREE.MeshPhysicalMaterial(o);
+  // satin powder-coated steel balusters (LOOKDEV matte-black hardware recipe, a touch rougher)
+  const ironBlack = phys_({ color: 0x0c0c0c, roughness: 0.55, metalness: 0.1, envMapIntensity: 0.5 });
+  // brushed brass (mirror frame, vase) and matte black hardware per LOOKDEV recipes
+  const brass = phys_({ color: 0xd4a84b, metalness: 1, roughness: 0.3, anisotropy: 0.4 });
+  const blackHW = phys_({ color: 0x151515, metalness: 0.8, roughness: 0.45 });
   const wallWhite = M.paintWhite;
   const wallDouble = M.paintWhite.clone(); wallDouble.side = THREE.DoubleSide;
   const frameWhite = std({ color: 0xf4f3ef, roughness: 0.6 });
   const mirrorMat = std({ color: 0xffffff, metalness: 1.0, roughness: 0.03 });
+  // live mirrors (Reflector), shown only while the camera is in the matching zone (LOOKDEV: one per room)
+  const mirrors = [];
+  const liveMirror = (geo, zone) => {
+    const m = new Reflector(geo, { textureWidth: 640, textureHeight: 640, color: 0xd8e0e0, clipBias: 0.003 });
+    m.userData.keep = true; m.name = 'mirror'; mirrors.push([m, zone]); return m;
+  };
 
   // ---------------------------------------------------------------- STAIR
   const stair = kit.group(root, [0, 0, 0], 0, 'stair');
@@ -127,7 +140,7 @@ export async function build(ctx) {
   railRun([wX, fZ], [ST.x1 - 0.01, fZ]);
   railRun([wX, bZ], [ST.x0 - 0.02, bZ]);
   for (const [x, z] of [[wX, fZ], [wX, bZ], [ST.x0 - 0.02, bZ]]) {
-    kit.add(root, kit.rbox(0.09, RAIL_UP + 0.04, 0.09, 0.008), oakRail, [x, UP + (RAIL_UP + 0.04) / 2, z]);
+    kit.add(root, kit.rbox(0.075, RAIL_UP + 0.03, 0.075, 0.008), oakRail, [x, UP + (RAIL_UP + 0.03) / 2, z]);
     posts.push([x, z]);
   }
   // oak nosing strip on the void slab edges (as in p02: thin oak edge under the balusters)
@@ -178,7 +191,7 @@ export async function build(ctx) {
       }
       for (const [xe, te, be] of [S[0], S[N]]) quad([xe, be, zb - w], [xe, be, zb + w], [xe, te, zb + w], [xe, te, zb - w], 0, 0.15);   // end caps
       const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); bg.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); bg.computeVertexNormals();
-      const bm = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [0.6, 0.25] }), color: 0xf0c48e, roughness: 0.6, side: THREE.DoubleSide });
+      const bm = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [0.6, 0.25] }), color: 0xffd9a8, roughness: 0.6, side: THREE.DoubleSide });
       kit.add(root, bg, bm, [0, 0, 0]);
     }
     // skylight between the middle and back beams (glowing recessed panel + white light well lip)
@@ -237,15 +250,23 @@ export async function build(ctx) {
   // octopus triptych (navy, cream stippled octopus) — upper east wall above the stair (p14, p16, p02 top-left)
   for (let k = 0; k < 3; k++) {
     const t = kit.canvasTex(400, 880, (g, w, h) => drawOcto(g, w, h, kit.rng(31 + k * 7), k));
-    framed(root, 0.52, 1.30, artMat(t), frameWhite, [ST.x1 - 0.005, UP + 1.55, 8.65 + k * 0.62], R_E, { fw: 0.03 });
+    framed(root, 0.50, 1.15, artMat(t), frameWhite, [ST.x1 - 0.005, UP + 1.62, 8.62 + k * 0.62], R_E, { fw: 0.03 });
   }
-  // blue seascape photo (p15) — upper hall wall facing the landing
-  framed(root, 1.42, 1.25, artMat(kit.canvasTex(800, 700, drawSea)), frameWhite, [8.30 + 0.005, UP + 1.55, 10.30], R_W, { fw: 0.035, mat: 0.08 });
-  // thermostat + black keypad on the gallery wall between the doors (p15)
-  kit.add(root, kit.rbox(0.012, 0.12, 0.085, 0.004), frameWhite, [8.30 + 0.006, UP + 1.45, 7.85]);
-  kit.add(root, kit.rbox(0.012, 0.11, 0.13, 0.004), std({ color: 0x0b0b0c, roughness: 0.2 }), [8.30 + 0.006, UP + 1.40, 6.85]);
-  // "LA MER" print (p15) — west wall of the landing between the guest-bath door and the hall-C opening
-  framed(root, 0.42, 0.62, artMat(kit.canvasTex(300, 440, drawLaMer)), frameWhite, [8.30 + 0.005, UP + 1.55, 7.30], R_W, { fw: 0.025, fd: 0.03 });
+  // blue seascape photo (p15) — gallery west wall between the hall-C opening (casing to 9.57) and the bath-C door (10.68)
+  framed(root, 1.04, 0.98, artMat(kit.canvasTex(800, 760, drawSea)), frameWhite, [8.30 + 0.005, UP + 1.55, 10.12], R_W, { fw: 0.03, mat: 0.07 });
+  // thermostat + black keypad on the gallery wall (p15/p16)
+  kit.add(root, kit.rbox(0.012, 0.12, 0.085, 0.004), frameWhite, [8.30 + 0.006, UP + 1.45, 7.02]);
+  kit.add(root, kit.rbox(0.012, 0.11, 0.13, 0.004), std({ color: 0x0b0b0c, roughness: 0.2 }), [8.30 + 0.006, UP + 1.40, 7.90]);
+  // "LA MER" print (p15) — west wall of the landing between the mirror and the hall-C opening
+  framed(root, 0.42, 0.62, artMat(kit.canvasTex(300, 440, drawLaMer)), frameWhite, [8.30 + 0.005, UP + 1.55, 7.46], R_W, { fw: 0.025, fd: 0.03 });
+  // tall white-framed mirror on the gallery west wall (p16, right wall): chunky white frame, live reflection upstairs
+  {
+    const g = kit.group(root, [8.30 + 0.004, UP + 1.42, 6.30], R_W, 'galMirror');
+    const W = 1.0, Hm = 1.40, fw = 0.06, fd = 0.05;
+    for (const [bw, bh, x, y] of [[W, fw, 0, Hm / 2 - fw / 2], [W, fw, 0, -Hm / 2 + fw / 2], [fw, Hm - 2 * fw, -W / 2 + fw / 2, 0], [fw, Hm - 2 * fw, W / 2 - fw / 2, 0]])
+      kit.add(g, kit.rbox(bw, bh, fd, 0.006), frameWhite, [x, y, fd / 2]);
+    const m = liveMirror(new THREE.PlaneGeometry(W - 2 * fw + 0.01, Hm - 2 * fw + 0.01), 'up'); m.position.set(0, 0, 0.012); g.add(m);
+  }
   // sepia zebra interior print (p14) — west hall wall
   framed(root, 1.30, 1.00, artMat(kit.canvasTex(900, 700, drawZebra)), oak, [8.30 + 0.005, 1.60, 9.05], R_W, { fw: 0.04, fd: 0.045, mat: 0.06 });
   // oak framed linen panels by the living-room opening (p02, right wall)
@@ -279,26 +300,29 @@ export async function build(ctx) {
   }
   phys.solidGroup(consoleG);
   // smart-home panel beside the mirror (p14)
-  kit.add(root, kit.rbox(0.012, 0.13, 0.17, 0.004), std({ color: 0x0b0b0c, roughness: 0.15, metalness: 0.2 }), [8.30 + 0.006, 1.40, CZ + 0.66]);
+  kit.add(root, kit.rbox(0.012, 0.13, 0.17, 0.004), std({ color: 0x0b0b0c, roughness: 0.15, metalness: 0.2 }), [8.30 + 0.006, 1.48, CZ - 0.70]);
   // organic brass-framed mirror above the console: wide asymmetric blob ~0.95 x 0.85, bottom ~0.25 above the top (p14)
   {
-    const g = kit.group(root, [8.30 + 0.01, CT + 0.24 + 0.55, CZ - 0.12], R_W, 'blobMirror');
-    const pts = (s) => { const a = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; const r = 1 + 0.07 * Math.sin(2 * t + 0.9) + 0.05 * Math.sin(3 * t + 2.3) + 0.025 * Math.cos(5 * t + 0.4); a.push([Math.cos(t) * 0.45 * r * s + 0.03 * Math.sin(t), Math.sin(t) * 0.55 * r * s - 0.05 * Math.cos(2 * t) * s]); } return a; };
+    const g = kit.group(root, [8.30 + 0.01, CT + 0.22 + 0.62, CZ + 0.02], R_W, 'blobMirror');
+    const pts = (s) => { const a = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; const r = 1 + 0.07 * Math.sin(2 * t + 0.9) + 0.05 * Math.sin(3 * t + 2.3) + 0.025 * Math.cos(5 * t + 0.4); a.push([Math.cos(t) * 0.47 * r * s + 0.03 * Math.sin(t), Math.sin(t) * 0.62 * r * s - 0.05 * Math.cos(2 * t) * s]); } return a; };
     const outer = pts(1.0), inner = pts(0.982);
-    const fr = kit.extrude(outer, 0.018, 0.004, [inner.slice().reverse()]); kit.add(g, fr, M.brass, [0, 0, 0]);
+    const fr = kit.extrude(outer, 0.022, 0.003, [inner.slice().reverse()]); kit.add(g, fr, brass, [0, 0, 0]);
     const shape = new THREE.Shape(inner.map(([x, y]) => new THREE.Vector2(x, y)));
-    // static env-reflecting mirror (a live Reflector re-rendered the whole house every frame: too heavy)
-    kit.add(g, new THREE.ShapeGeometry(shape, 24), mirrorMat, [0, 0, 0.012]);
+    // live Reflector, rendered only while the camera is downstairs in the foyer (room-culled)
+    const m = liveMirror(new THREE.ShapeGeometry(shape, 24), 'foyer'); m.position.set(0, 0, 0.012); g.add(m);
+    kit.add(g, new THREE.ShapeGeometry(shape, 24), std({ color: 0x222222, roughness: 0.9 }), [0, 0, 0.004]); // backing
   }
   // decor on the console: gold swirl vase with white kalanchoe, linen lamp, stone, mother-of-pearl boxes on the shelf
   const decor = [];
   {
-    // small white ceramic gourd lamp at the far end of the console (p14), not in front of the mirror
-    const lamp = kit.group(root, [CX + 0.02, CT, CZ - 0.76], 0, 'lamp');
-    kit.add(lamp, kit.lathe([[0.001, 0], [0.06, 0.004], [0.10, 0.04], [0.115, 0.10], [0.10, 0.16], [0.06, 0.19], [0.03, 0.205], [0.015, 0.215], [0.001, 0.215]], 40), std({ color: 0xe3d9c8, roughness: 0.75 }), [0, 0, 0]);
-    kit.add(lamp, kit.cyl(0.006, 0.006, 0.09, 8), M.brushedNickel, [0, 0.265, 0]);
-    const shadeM = std({ color: 0xf3eee4, roughness: 0.95, side: THREE.DoubleSide, emissive: 0xffe9c8, emissiveIntensity: 0.25 });
-    kit.add(lamp, new THREE.CylinderGeometry(0.15, 0.165, 0.22, 40, 1, true), shadeM, [0, 0.39, 0]);
+    // squat stoneware lamp with a linen drum shade at the far (+z) end of the console (p14, far left in the photo)
+    const lamp = kit.group(root, [CX + 0.02, CT, CZ + 0.70], 0, 'lamp');
+    const stoneware = std({ color: 0xe6ddcf, roughness: 0.7, normalMap: kit.noiseNormal(256, 1.2, 24, 3), normalScale: new THREE.Vector2(0.35, 0.35) });
+    kit.add(lamp, kit.lathe([[0.001, 0], [0.07, 0.002], [0.12, 0.02], [0.148, 0.06], [0.145, 0.10], [0.12, 0.13], [0.07, 0.15], [0.035, 0.158], [0.03, 0.17], [0.001, 0.17]], 48), stoneware, [0, 0, 0]);
+    kit.add(lamp, kit.cyl(0.006, 0.006, 0.12, 8), brass, [0, 0.23, 0]);
+    const shadeM = kit.fabric.linen('#f1ebe0', { scale: 4, side: THREE.DoubleSide }); shadeM.emissive = new THREE.Color(0xffe9c8); shadeM.emissiveIntensity = 0.12;
+    kit.add(lamp, new THREE.CylinderGeometry(0.19, 0.20, 0.21, 48, 1, true), shadeM, [0, 0.39, 0]);
+    for (const y of [0.285, 0.495]) kit.add(lamp, kit.torus(y < 0.3 ? 0.2 : 0.19, 0.003, 6, 48), shadeM, [0, y, 0], [Math.PI / 2, 0, 0]);
     decor.push([lamp, { mass: 1.5, shape: 'box' }]);
     // silver faceted vase with yellow flowers (p14)
     if (false) {
@@ -311,13 +335,13 @@ export async function build(ctx) {
       for (let i = 0; i < 6; i++) { const a = i * 1.05; kit.add(sv, kit.tube([[0, 0.18, 0], [Math.cos(a) * 0.05, 0.3, Math.sin(a) * 0.05]], 0.003, 4), std({ color: 0x4f7a3a, roughness: 0.7 }), [0, 0, 0]); }
       decor.push([sv, { mass: 1.0, shape: 'box' }]);
     }
-    const vg = kit.group(root, [CX + 0.02, CT, CZ + 0.42], 0, 'vase');
+    const vg = kit.group(root, [CX + 0.03, CT, CZ - 0.56], 0, 'vase');
     const swirl = kit.canvasTex(512, 256, (g, w, h) => {
       g.fillStyle = '#b99350'; g.fillRect(0, 0, w, h); const q = kit.rng(5);
       for (let i = 0; i < 26; i++) { const x = i * w / 22; g.strokeStyle = i % 2 ? 'rgba(250,236,200,0.75)' : 'rgba(120,88,40,0.5)'; g.lineWidth = 6 + q() * 10; g.beginPath(); g.moveTo(x, h); g.bezierCurveTo(x + 40, h * 0.6, x + 120, h * 0.4, x + 160 + q() * 30, 0); g.stroke(); }
     });
     const vase = kit.add(vg, kit.lathe([[0.001, 0], [0.07, 0.004], [0.115, 0.05], [0.128, 0.11], [0.118, 0.17], [0.085, 0.215], [0.05, 0.235], [0.045, 0.245], [0.04, 0.24]], 9),
-      std({ map: swirl, color: 0xffffff, metalness: 0.85, roughness: 0.25, flatShading: true }), [0, 0, 0]);
+      new THREE.MeshPhysicalMaterial({ map: swirl, color: 0xfff2d8, metalness: 1, roughness: 0.3, anisotropy: 0.4, flatShading: true }), [0, 0, 0]);
     // flowers
     const stemMat = std({ color: 0x4f7a3a, roughness: 0.7 }); const q = kit.rng(9);
     const blooms = [], leaves = [];
@@ -336,23 +360,23 @@ export async function build(ctx) {
     bm.castShadow = lm.castShadow = true; vg.add(bm, lm);
     decor.push([vg, { mass: 2.5, shape: 'box' }]);
     // agate stone
-    const stone = kit.add(root, (() => { const s = kit.sphere(0.055, 20, 14); s.scale(1, 0.75, 0.85); return s; })(), std({ color: 0x8f8c88, roughness: 0.35, metalness: 0.1 }), [CX + 0.06, CT + 0.04, CZ - 0.05]);
+    const stone = kit.add(root, (() => { const s = kit.sphere(0.055, 20, 14); s.scale(1, 0.75, 0.85); return s; })(), std({ color: 0x8f8c88, roughness: 0.35, metalness: 0.1 }), [CX + 0.06, CT + 0.04, CZ - 0.34]);
     decor.push([stone, { mass: 0.8, shape: 'ball' }]);
     // pearl boxes on the lower shelf
     const pearl = std({ map: kit.canvasTex(256, 256, (g, w, h) => { const r = kit.rng(4); for (let y = 0; y < h; y += 16) for (let x = 0; x < w; x += 16) { const v = 225 + r() * 28; g.fillStyle = `rgb(${v},${v - 3 + r() * 6},${v - 10 + r() * 10})`; g.fillRect(x, y, 15, 15); } g.fillStyle = 'rgba(180,170,150,0.6)'; for (let i = 0; i <= w; i += 16) { g.fillRect(i - 1, 0, 1, h); g.fillRect(0, i - 1, w, 1); } }), roughness: 0.35, metalness: 0.05 });
-    const b1 = kit.add(root, kit.rbox(0.24, 0.10, 0.32, 0.01), pearl, [CX, 0.143 + 0.05, CZ + 0.35]);
-    const b2 = kit.add(root, kit.rbox(0.20, 0.08, 0.26, 0.01), pearl, [CX, 0.143 + 0.10 + 0.04, CZ + 0.35], [0, 0.12, 0]);
+    const b1 = kit.add(root, kit.rbox(0.24, 0.10, 0.32, 0.01), pearl, [CX, 0.143 + 0.05, CZ - 0.45]);
+    const b2 = kit.add(root, kit.rbox(0.20, 0.08, 0.26, 0.01), pearl, [CX, 0.143 + 0.10 + 0.04, CZ - 0.45], [0, 0.12, 0]);
     decor.push([b1, { mass: 1.2 }], [b2, { mass: 0.9 }]);
     // pink quartz geode bookend
-    const geo = kit.add(root, (() => { const s = new THREE.DodecahedronGeometry(0.06, 0); s.scale(1.1, 0.9, 0.8); return s; })(), std({ color: 0xe8c9c2, roughness: 0.45, flatShading: true }), [CX, 0.143 + 0.05, CZ - 0.55]);
+    const geo = kit.add(root, (() => { const s = new THREE.DodecahedronGeometry(0.06, 0); s.scale(1.1, 0.9, 0.8); return s; })(), std({ color: 0xe8c9c2, roughness: 0.45, flatShading: true }), [CX, 0.143 + 0.05, CZ + 0.55]);
     decor.push([geo, { mass: 0.6, shape: 'hull' }]);
   }
 
   // ---------------------------------------------------------------- DRACAENA in a black pot by the stair (p02, p14)
-  const PX = 9.76, PZ = 7.45;
+  const PX = 9.78, PZ = 8.35;   // beside the stair skirt; keep clear of the foyer light probes at z 6.95 / 11.38 (a plant there tints the room green)
   const plant = kit.group(root, [PX, 0, PZ], 0.4, 'plant');
   {
-    kit.add(plant, kit.lathe([[0.001, 0], [0.135, 0], [0.15, 0.03], [0.168, 0.30], [0.172, 0.34], [0.158, 0.34], [0.155, 0.32], [0.001, 0.32]], 40), std({ color: 0x3a3b3d, roughness: 0.6, metalness: 0.05 }), [0, 0, 0]);
+    kit.add(plant, kit.lathe([[0.001, 0], [0.14, 0], [0.165, 0.012], [0.175, 0.04], [0.176, 0.33], [0.172, 0.345], [0.162, 0.345], [0.158, 0.325], [0.001, 0.325]], 48), std({ color: 0x2a2a2c, roughness: 0.55, metalness: 0.05, normalMap: kit.noiseNormal(256, 0.8, 16, 9), normalScale: new THREE.Vector2(0.2, 0.2) }), [0, 0, 0]);
     kit.add(plant, kit.cyl(0.152, 0.152, 0.01, 24), std({ color: 0x8e8a63, roughness: 1 }), [0, 0.325, 0]); // moss
     const cane = std({ color: 0x8a7457, roughness: 0.9 });
     const leafG = (() => { const g = new THREE.PlaneGeometry(0.062, 1, 1, 8); g.translate(0, 0.5, 0); const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i); p.setX(i, p.getX(i) * (y < 0.15 ? 0.45 + y * 3.6 : 1 - 0.9 * Math.pow((y - 0.15) / 0.85, 2))); p.setZ(i, 0.38 * y * y); } g.computeVertexNormals(); return g; })();
@@ -366,7 +390,7 @@ export async function build(ctx) {
         for (let k = 0; k < n; k++) L.push([c[0], yy - 0.02 + q() * 0.06, c[2], q() * 6.283, 0.25 + q() * 1.1, len * (0.7 + q() * 0.5)]);
       }
     }
-    const lm = new THREE.InstancedMesh(leafG, std({ color: 0x24501f, roughness: 0.38, side: THREE.DoubleSide }), L.length);
+    const lm = new THREE.InstancedMesh(leafG, std({ color: 0x1f4a1c, roughness: 0.55, side: THREE.DoubleSide }), L.length);
     const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), e = new THREE.Euler();
     L.forEach(([x, y, z, ry, tilt, len], i) => lm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), qq.setFromEuler(e.set(tilt, ry, 0, 'YXZ')), new THREE.Vector3(1, len, len))));
     lm.castShadow = true; plant.add(lm);
@@ -411,23 +435,31 @@ export async function build(ctx) {
     // base cabinets: shaker drawers, black counter
     const oakC = M.oakCabinet || oak, blk = std({ color: 0x141414, roughness: 0.35 });
     const cz = ZB - 0.36, cw = X1 - 0.08 - X0;
-    kit.boxAt(root, oakC, X0, UP, cz, cw, 0.86, 0.36);
+    kit.boxAt(root, oakC, X0, UP + 0.09, cz, cw, 0.77, 0.36);
+    kit.boxAt(root, std({ color: 0x2a2219, roughness: 0.8 }), X0, UP + 0.095, cz - 0.001, cw, 0.76, 0.004);   // dark reveal behind the fronts
+    kit.boxAt(root, std({ color: 0x5a4a38, roughness: 0.8 }), X0, UP, cz + 0.07, cw, 0.09, 0.29);              // toe kick, inset 70 mm
     const nd = 3, dw = cw / nd;
     for (let k = 0; k < nd; k++) for (let r = 0; r < 3; r++) {
       const fx = X0 + k * dw + 0.004, fy = UP + 0.1 + r * 0.25;
-      const f = kit.add(root, kit.shakerFront(dw - 0.008, 0.24, 0.045, 0.02), oakC, [fx, fy, cz - 0.02]);
-      kit.add(root, kit.sphere(0.012, 10, 8), blk, [fx + dw / 2, fy + 0.18, cz - 0.03]);
+      // shaker drawer front facing the hall (-z): 3 mm gaps, dark reveal behind, black knob
+      kit.add(root, kit.shakerFront(dw - 0.008, 0.24, 0.045, 0.02), oakC, [fx + dw - 0.008, fy, cz - 0.002], [0, Math.PI, 0]);
+      kit.add(root, kit.sphere(0.012, 10, 8), blackHW, [fx + dw / 2, fy + 0.18, cz - 0.03]);
     }
     kit.boxAt(root, blk, X0, UP + 0.86, cz - 0.03, cw, 0.035, 0.39);                                 // black counter
-    const splash = std({ color: 0x8a7c70, roughness: 0.45, map: kit.canvasTex(256, 128, (g, w, h) => { g.fillStyle = '#3a3330'; g.fillRect(0, 0, w, h); const q = kit.rng(12); for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(${60 + q() * 30},${50 + q() * 25},${42 + q() * 20},0.5)`; g.fillRect(0, q() * h, w, 1 + q() * 2); } }) });
+    // dark smoked stone backsplash with horizontal striations (p16), honed, not glossy
+    const splash = std({ roughness: 0.55, map: kit.canvasTex(512, 256, (g, w, h) => {
+      g.fillStyle = '#2b2622'; g.fillRect(0, 0, w, h); const q = kit.rng(12);
+      for (let i = 0; i < 220; i++) { const v = 30 + q() * 30; g.fillStyle = `rgba(${v + 6},${v + 2},${v - 2},${0.25 + q() * 0.4})`; g.fillRect(0, q() * h, w, 0.6 + q() * 2.2); }
+      for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(120,110,98,${0.08 + q() * 0.12})`; g.fillRect(q() * w * 0.5, q() * h, w * (0.3 + q() * 0.5), 0.8); }
+    }) });
     kit.boxAt(root, splash, X0, UP + 0.895, ZB - 0.02, cw, 0.55, 0.02);
     // upper: shaker door at the left (camera view), open oak shelves with coral + brass decor
     kit.boxAt(root, oakC, X0, UP + 1.45, ZB - 0.32, cw, 0.02, 0.32);
     kit.boxAt(root, oakC, X0, UP + 2.43, ZB - 0.32, cw, 0.02, 0.32);
     kit.boxAt(root, oakC, X0, UP + 1.45, ZB - 0.02, cw, 1.0, 0.02);                                  // back
     kit.boxAt(root, oakC, 9.10, UP + 1.45, ZB - 0.32, 0.02, 1.0, 0.32);                              // divider
-    kit.add(root, kit.shakerFront(0.58, 0.96, 0.05, 0.02), oakC, [9.12, UP + 1.47, ZB - 0.34]);
-    kit.add(root, kit.sphere(0.012, 10, 8), blk, [9.17, UP + 1.6, ZB - 0.35]);
+    kit.add(root, kit.shakerFront(0.58, 0.96, 0.05, 0.02), oakC, [9.70, UP + 1.47, ZB - 0.32], [0, Math.PI, 0]);
+    kit.add(root, kit.sphere(0.012, 10, 8), blackHW, [9.17, UP + 1.6, ZB - 0.35]);
     for (const y of [UP + 1.78, UP + 2.10]) kit.boxAt(root, oakC, X0, y, ZB - 0.30, 9.10 - X0, 0.025, 0.28);
     const coral = std({ color: 0xf1ebe0, roughness: 0.8, flatShading: true });
     const cq = kit.rng(44);
@@ -438,12 +470,20 @@ export async function build(ctx) {
     kit.boxAt(root, std({ color: 0xe6dccb, roughness: 0.9 }), 8.45, UP + 1.47, 11.36, 0.22, 0.06, 0.16);
     // open oak door leaf swung in against the left jamb (black hinges)
     kit.boxAt(root, M.oakDoor || oak, DX1 - 0.045, UP, ZW + T, 0.04, 2.16, 0.40);
-    for (const y of [0.25, 1.05, 1.9]) kit.boxAt(root, blk, DX1 - 0.05, UP + y, ZW + T - 0.005, 0.05, 0.1, 0.012);
+    for (const y of [0.25, 1.05, 1.9]) kit.boxAt(root, blackHW, DX1 - 0.05, UP + y, ZW + T - 0.005, 0.05, 0.1, 0.012);
     phys.boxAABB([X0, UP, ZW], [X1, PLATE, ZB]);
   }
 
   // ---------------------------------------------------------------- finish: merge static, then dynamics
   kit.mergeStatic(root);
+  // room-cull the live mirrors: each re-renders the scene, so only while the camera can see it
+  {
+    const inZone = (p, z) => z === 'foyer'
+      ? p.y < UP - 0.1 && p.x > 8.2 && p.x < 11.2 && p.z > 4.3 && p.z < 13.6
+      : p.y > UP - 0.1 && p.x > 8.2 && p.x < 11.2 && p.z > 4.6 && p.z < 11.7;
+    const cull = () => { for (const [m, z] of mirrors) m.visible = inZone(ctx.camera.position, z); };
+    cull(); ctx.onUpdate(cull);
+  }
   for (const [o, opt] of decor) { o.userData.keep = true; try { phys.dynamic(o, opt); } catch (e) { console.warn('[foyer] dynamic', e); } }
 }
 
@@ -485,12 +525,12 @@ function tentacle(g, q, sx, sy, ex, ey, wid, cream) {
 }
 function drawSea(g, w, h) {
   const grad = g.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#dfe5e7'); grad.addColorStop(0.36, '#b4c7d0'); grad.addColorStop(0.44, '#5e88a6'); grad.addColorStop(0.5, '#7aa1bb');
-  grad.addColorStop(0.58, '#3f6680'); grad.addColorStop(0.8, '#1f3446'); grad.addColorStop(1, '#0c141c');
+  grad.addColorStop(0, '#e8eaeb'); grad.addColorStop(0.36, '#cdd6da'); grad.addColorStop(0.44, '#6f8999'); grad.addColorStop(0.5, '#8399a7');
+  grad.addColorStop(0.58, '#4b6474'); grad.addColorStop(0.8, '#253440'); grad.addColorStop(1, '#0e1419');
   g.fillStyle = grad; g.fillRect(0, 0, w, h);
   g.filter = 'blur(3px)'; let s = 3;
   const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  for (let i = 0; i < 160; i++) { const y = h * (0.38 + r() * 0.6); g.fillStyle = r() < 0.5 ? `rgba(120,180,220,${0.15 + r() * 0.2})` : `rgba(10,30,60,${0.15 + r() * 0.25})`; g.fillRect(0, y, w, 1 + r() * 5); }
+  for (let i = 0; i < 160; i++) { const y = h * (0.38 + r() * 0.6); g.fillStyle = r() < 0.5 ? `rgba(140,170,190,${0.12 + r() * 0.16})` : `rgba(15,28,42,${0.15 + r() * 0.25})`; g.fillRect(0, y, w, 1 + r() * 5); }
   g.filter = 'none';
   g.fillStyle = 'rgba(20,25,30,0.55)'; g.fillRect(0, h * 0.86, w, 3); for (let x = 0; x < w; x += 22) g.fillRect(x, h * 0.86, 2, h * 0.05);
 }

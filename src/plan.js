@@ -155,13 +155,13 @@ export const OPENINGS = [
   { id: 'liv-front', owner: 'living', level: 0, type: 'window', at: [1.50, 7.07], w: 0.85, sill: 0.95, head: 2.65, panes: [1, 2] },
   { id: 'liv-sw1', owner: 'living', level: 0, type: 'window', at: [0.35, 9.05], w: 0.75, sill: 0.95, head: 2.65, panes: [1, 2] },
   { id: 'liv-sw2', owner: 'living', level: 0, type: 'window', at: [0.35, 12.10], w: 0.75, sill: 0.95, head: 2.65, panes: [1, 2] },
-  { id: 'pow-win', owner: 'service', level: 0, type: 'window', at: [0.35, 14.15], w: 0.60, sill: 1.25, head: 2.65, panes: [1, 2] },
+  { id: 'pow-win', owner: 'service', level: 0, type: 'window', at: [0.35, 14.47], w: 0.80, sill: 1.00, head: 2.60, panes: [1, 2] },
   { id: 'fam-r1', owner: 'family', level: 0, type: 'window', at: [3.35, 20.32], w: 1.10, sill: 1.05, head: 2.50, panes: [2, 1] },
   { id: 'fam-door', owner: 'family', level: 0, type: 'french', at: [5.07, 20.32], w: 1.55, sill: 0, head: 2.50, panes: [2, 1] },
   { id: 'fam-r2', owner: 'family', level: 0, type: 'window', at: [6.86, 20.32], w: 1.20, sill: 1.05, head: 2.50, panes: [2, 1] },
   { id: 'fam-sw', owner: 'family', level: 0, type: 'window', at: [2.35, 19.45], w: 0.60, sill: 1.05, head: 2.50, panes: [1, 1] },
   { id: 'fam-ne', owner: 'family', level: 0, type: 'window', at: [8.27, 19.30], w: 0.60, sill: 1.05, head: 2.50, panes: [1, 1] },
-  { id: 'din-slider', owner: 'dining', level: 0, type: 'slider', at: [11.83, 18.40], w: 7.00, sill: 0, head: 2.90, panes: [3, 1], open: 1 },
+  { id: 'din-slider', owner: 'dining', level: 0, type: 'slider', at: [11.83, 18.40], w: 7.00, sill: 0, head: 2.90, panes: [4, 1], open: 1 },
   { id: 'k-rear', owner: 'kitchen', level: 0, type: 'window', at: [19.05, 21.65], w: 1.45, sill: 0.95, head: 2.55, panes: [2, 2] },
   { id: 'k-rear2', owner: 'kitchen', level: 0, type: 'window', at: [20.40, 21.65], w: 0.55, sill: 0.95, head: 2.55, panes: [1, 3] },
   { id: 'k-sw', owner: 'kitchen', level: 0, type: 'window', at: [15.39, 20.30], w: 0.60, sill: 0.95, head: 2.55, panes: [1, 3] },
@@ -172,16 +172,16 @@ export const OPENINGS = [
   { id: 'game-d', owner: 'game', level: 0, type: 'door', at: [8.225, 5.90], w: 0.90, sill: 0, head: 2.40, open: 0 },
   { id: 'liv-d', owner: 'living', level: 0, type: 'doorway', at: [8.225, 11.70], w: 1.80, sill: 0, head: 2.55 },
   { id: 'gar-mud', owner: 'service', level: 0, type: 'door', at: [12.40, 7.125], w: 0.90, sill: 0, head: 2.40 },
-  { id: 'mud-k', owner: 'service', level: 0, type: 'door', at: [16.00, 10.675], w: 0.90, sill: 0, head: 2.40 },
+  { id: 'mud-k', owner: 'service', level: 0, type: 'door', at: [16.00, 10.675], w: 0.90, sill: 0, head: 2.40, open: 0 },
   { id: 'off-d', owner: 'service', level: 0, type: 'door', at: [16.925, 9.95], w: 0.85, sill: 0, head: 2.40 },
   { id: 'pan-d', owner: 'kitchen', level: 0, type: 'door', at: [15.315, 12.90], w: 0.90, sill: 0, head: 2.40 },
   { id: 'kp-d', owner: 'kitchen', level: 0, type: 'door', at: [21.475, 12.00], w: 0.80, sill: 0, head: 2.40 },
-  { id: 'pow-d', owner: 'service', level: 0, type: 'door', at: [2.575, 13.98], w: 0.75, sill: 0, head: 2.40 },
+  { id: 'pow-d', owner: 'service', level: 0, type: 'door', at: [1.60, 13.45], w: 0.75, sill: 0, head: 2.40, open: 0 }, // lead: on the living-room wall — the family-room shelving wall covered the old spot (p03 shows a door here)
   { id: 'st-d', owner: 'kitchen', level: 0, type: 'door', at: [14.45, 13.525], w: 0.80, sill: 0, head: 2.40 },
   // ---------------- upper, exterior
-  { id: 'bA-front', owner: 'bedA', level: 1, type: 'window', at: [13.40, 0.35], w: 1.80, sill: 0.95, head: 2.30, panes: [3, 1] },
+  { id: 'bA-front', owner: 'bedA', level: 1, type: 'window', at: [13.50, 0.35], w: 2.00, sill: 0.95, head: 2.30, panes: [3, 1] },
   { id: 'bA-side', owner: 'bedA', level: 1, type: 'window', at: [11.12, 2.40], w: 1.20, sill: 0.95, head: 2.30, panes: [2, 1] },
-  { id: 'bathA-front', owner: 'bedA', level: 1, type: 'window', at: [16.80, 0.35], w: 0.70, sill: 1.10, head: 2.30, panes: [1, 2] },
+  { id: 'bathA-front', owner: 'bedA', level: 1, type: 'window', at: [16.80, 0.35], w: 0.90, sill: 1.10, head: 2.30, panes: [1, 2] },
   { id: 'bB-front', owner: 'bedB', level: 1, type: 'skylight', at: [20.40, 0.35], w: 1.80, sill: 0.95, head: 2.30, panes: [2, 1] }, // p27: wardrobe wall has no window (not cut)
   { id: 'bB-side', owner: 'bedB', level: 1, type: 'window', at: [23.10, 3.12], w: 1.60, sill: 1.32, head: 2.16, panes: [2, 1] },
   { id: 'bathB-win', owner: 'bedB', level: 1, type: 'window', at: [23.10, 7.12], w: 0.60, sill: 1.00, head: 1.85, panes: [1, 1] }, // p29: left of the toilet, shower beyond
@@ -199,7 +199,7 @@ export const OPENINGS = [
   { id: 'bC-front', owner: 'bedC', level: 1, type: 'window', at: [2.55, 7.07], w: 2.40, sill: 1.15, head: 2.60, panes: [3, 1] }, // p30: head hidden behind the roman shade
   { id: 'bC-sw', owner: 'bedC', level: 1, type: 'window', at: [0.35, 12.70], w: 0.90, sill: 0.95, head: 2.30, panes: [2, 1] },
   { id: 'bathC-rear', owner: 'bedC', level: 1, type: 'window', at: [6.85, 13.60], w: 0.70, sill: 1.00, head: 2.45, panes: [1, 1] }, // p31: left wall, between vanity and door
-  { id: 'gal-front', owner: 'foyer', level: 1, type: 'window', at: [9.80, 4.43], w: 1.60, sill: 0.60, head: 2.30, panes: [2, 1] },
+  { id: 'gal-front', owner: 'foyer', level: 1, type: 'skylight', at: [9.80, 4.43], w: 1.60, sill: 0.60, head: 2.30, panes: [2, 1] }, // p01: no window above the entry (roof); p15 reads as a wall: not cut
   // ---------------- upper, interior
   { id: 'bA-d', owner: 'bedA', level: 1, type: 'door', at: [11.27, 5.20], w: 0.85, sill: 0, head: 2.30 },
   { id: 'bathA-d', owner: 'bedA', level: 1, type: 'door', at: [17.00, 4.525], w: 0.70, sill: 0, head: 2.30 },
@@ -209,7 +209,7 @@ export const OPENINGS = [
   { id: 'th-d', owner: 'theater', level: 1, type: 'door', at: [12.40, 10.225], w: 0.90, sill: 0, head: 2.30 },
   { id: 'pr-d', owner: 'primary', level: 1, type: 'door', at: [12.60, 11.675], w: 0.95, sill: 0, head: 2.30, open: 0 },
   { id: 'vest-d', owner: 'primarybath', level: 1, type: 'door', at: [16.45, 11.675], w: 0.85, sill: 0, head: 2.30, open: 0 },
-  { id: 'pr-vest-d', owner: 'primarybath', level: 1, type: 'door', at: [15.465, 12.90], w: 0.85, sill: 0, head: 2.30 },
+  { id: 'pr-vest-d', owner: 'primarybath', level: 1, type: 'door', at: [15.465, 12.90], w: 0.85, sill: 0, head: 2.30, open: 0 },
   { id: 'vest-bath-d', owner: 'primarybath', level: 1, type: 'doorway', at: [16.45, 14.425], w: 0.95, sill: 0, head: 2.30 },
   { id: 'vest-pc-d', owner: 'primarybath', level: 1, type: 'door', at: [19.85, 14.28], w: 0.85, sill: 0, head: 2.35, open: 0 },
   { id: 'gb-d', owner: 'theater', level: 1, type: 'door', at: [8.225, 5.25], w: 0.80, sill: 0, head: 2.30 },

@@ -10,7 +10,7 @@ export const ownCeiling = [];
 // (uncropped) frame of height 2*shift[1].
 export const views = {
   p13: { pos: [14.30, 1.21, 7.54], look: [14.30, 1.21, 10.60], fov: 46 },
-  p34: { pos: [1.30, 1.38, 13.66], look: [0.93, 1.38, 15.63], fov: 80 },
+  p34: { pos: [1.60, 1.18, 13.94], look: [1.116, 1.18, 15.88], fov: 80 },
   p35: { pos: [16.93, 1.36, 10.23], look: [22.80, 1.36, 10.23], fov: 71.8, shift: [795, 370] },
 };
 
@@ -34,7 +34,9 @@ export async function build(ctx) {
     applWhite: physMat({ color: 0xf7f7f5, roughness: 0.2, clearcoat: 0.6, clearcoatRoughness: 0.15 }),
     applGrey: std({ color: 0xdcdcda, roughness: 0.35 }),
     smoke: physMat({ color: 0x1b1f25, roughness: 0.05, metalness: 0.0, clearcoat: 1, envMapIntensity: 1.6 }),
-    drum: std({ color: 0x6b6f75, roughness: 0.3, metalness: 0.8 }),
+    drum: std({ color: 0x6e7277, roughness: 0.4, metalness: 0.85, side: THREE.DoubleSide }),
+    drumDark: std({ color: 0x4a4d52, roughness: 0.45, metalness: 0.8 }),
+    washerGlass: physMat({ color: 0x14181c, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.72, clearcoat: 0.6, clearcoatRoughness: 0.05, envMapIntensity: 0.55, depthWrite: false }),
     ceramic: physMat({ color: 0xf6f5f2, roughness: 0.12, clearcoat: 0.8, clearcoatRoughness: 0.08 }),
     blackPowder: std({ color: 0x121212, roughness: 0.55, metalness: 0.35 }),
     blackGlass: physMat({ color: 0x0d0d0f, roughness: 0.08, clearcoat: 1 }),
@@ -46,15 +48,15 @@ export async function build(ctx) {
     oliveWool: std({ color: 0x6e5c2f, roughness: 0.92 }),
     puffNormal: null,
     pot: std({ color: 0x1e1e20, roughness: 0.55 }),
-    leaf: std({ color: 0x3d6a2c, roughness: 0.6, side: THREE.DoubleSide }),
-    leafDark: std({ color: 0x2c5222, roughness: 0.6, side: THREE.DoubleSide }),
+    leaf: std({ color: 0x35582a, roughness: 0.55, side: THREE.DoubleSide }),
+    leafDark: std({ color: 0x223d1b, roughness: 0.55, side: THREE.DoubleSide }),
     cane: std({ color: 0x6b5a45, roughness: 0.85 }),
     blackWood: std({ color: 0x151515, roughness: 0.6 }),
     blackLeather: std({ color: 0x141416, roughness: 0.42 }),
     tvBody: std({ color: 0x0c0c0d, roughness: 0.4, metalness: 0.3 }),
-    tvScreen: physMat({ color: 0x050506, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.3 }),
+    tvScreen: physMat({ color: 0x050506, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 0.6 }),
     deskGlass: physMat({ color: 0xdaf0e6, roughness: 0.02, transparent: true, opacity: 0.2, depthWrite: false, envMapIntensity: 1.8, side: THREE.DoubleSide }),
-    deskGlassEdge: std({ color: 0x9ac7b0, roughness: 0.1, transparent: true, opacity: 0.55 }),
+    deskGlassEdge: physMat({ color: 0x5fae86, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.85 }),
     shadeFabric: std({ color: 0x18181a, roughness: 0.9 }),
     linen: std({ color: 0xf1ede6, roughness: 0.95, side: THREE.DoubleSide }),
     plate: std({ color: 0xf5f4f0, roughness: 0.45 }),
@@ -70,10 +72,10 @@ export async function build(ctx) {
 
   // procedural textures ---------------------------------------------------------------
   // powder-room wallpaper: overlapping "mosaic sunburst" medallions, white on black (p34)
-  const WP_TILE = 0.66;
+  const WP_TILE = 0.95;
   const wallpaperMap = kit.canvasTex(1024, 1024, (g, w, h) => {
     const r = kit.rng(341);
-    g.fillStyle = '#121214'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#0c0c0e'; g.fillRect(0, 0, w, h);
     const n = 3, cells = [];
     for (let layer = 0; layer < 2; layer++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
       const ox = layer ? 0.5 : 0, oy = layer ? 0.5 : 0;
@@ -81,17 +83,17 @@ export async function build(ctx) {
     }
     for (let i = cells.length - 1; i > 0; i--) { const k = Math.floor(r() * (i + 1)); [cells[i], cells[k]] = [cells[k], cells[i]]; }
     const disc = (x, y, R) => {
-      g.fillStyle = '#121214'; g.beginPath(); g.arc(x, y, R + 3, 0, 7); g.fill();
-      g.strokeStyle = 'rgba(232,228,218,0.95)'; g.lineCap = 'round';
-      let rad = R * 0.2; const a0 = r() * 6.283;
+      g.fillStyle = '#0c0c0e'; g.beginPath(); g.arc(x, y, R + 3, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(226,221,209,0.9)'; g.lineCap = 'round';
+      let rad = R * 0.17; const a0 = r() * 6.283;
       while (rad < R - 4) {
-        const len = R * 0.085; const cnt = Math.max(8, Math.floor((2 * Math.PI * rad) / (R * 0.075)));
-        g.lineWidth = Math.max(2, R * 0.032); g.beginPath();
+        const len = R * 0.062; const cnt = Math.max(8, Math.floor((2 * Math.PI * rad) / (R * 0.062)));
+        g.lineWidth = Math.max(1.5, R * 0.019); g.beginPath();
         for (let m = 0; m < cnt; m++) {
           const a = a0 + (m + (rad / R) * 0.5) / cnt * 2 * Math.PI + (r() - 0.5) * 0.04; const c = Math.cos(a), s = Math.sin(a);
           g.moveTo(x + c * rad, y + s * rad); g.lineTo(x + c * (rad + len), y + s * (rad + len));
         }
-        g.stroke(); rad += len * 1.42;
+        g.stroke(); rad += len * 1.95;
       }
     };
     for (const [cx, cy, R] of cells) for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) {
@@ -105,12 +107,12 @@ export async function build(ctx) {
   const GC_TILE = 0.91;
   const grassMap = kit.canvasTex(1024, 1024, (g, w, h) => {
     const r = kit.rng(77);
-    g.fillStyle = '#3f3127'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#352e29'; g.fillRect(0, 0, w, h);
     for (let y = 0; y < h; y += 2) {
       let x = -r() * 100;
       while (x < w) {
-        const len = 25 + r() * 220; const v = r();
-        g.fillStyle = v < 0.45 ? `rgba(18,12,8,${0.2 + r() * 0.4})` : v < 0.9 ? `rgba(${105 + r() * 50},${80 + r() * 35},${58 + r() * 22},${0.14 + r() * 0.3})` : `rgba(170,140,100,${0.25 + r() * 0.3})`;
+        const len = 40 + r() * 260; const v = r();
+        g.fillStyle = v < 0.5 ? `rgba(16,11,8,${0.2 + r() * 0.35})` : v < 0.96 ? `rgba(${80 + r() * 28},${68 + r() * 22},${58 + r() * 16},${0.12 + r() * 0.22})` : `rgba(128,108,88,${0.2 + r() * 0.2})`;
         g.fillRect(x, y, len, r() < 0.35 ? 2 : 1); x += len * (0.5 + r() * 0.7);
       }
     }
@@ -137,11 +139,28 @@ export async function build(ctx) {
   // bar pull: vertical (len along y) or horizontal (len along x), local frame, z = front face
   function pull(p, x, y, z, len, vertical = true, m = M.blackMetal) {
     const g = kit.group(p, [x, y, z]);
-    add(g, kit.rbox(vertical ? 0.011 : len, vertical ? len : 0.011, 0.011, 0.004), m, [0, 0, 0.03]);
-    for (const s of [-1, 1]) add(g, kit.cyl(0.0045, 0.0045, 0.03, 10), m, vertical ? [0, s * (len / 2 - 0.02), 0.015] : [s * (len / 2 - 0.02), 0, 0.015], [Math.PI / 2, 0, 0]);
+    add(g, kit.rbox(vertical ? 0.009 : len, vertical ? len : 0.008, 0.008, 0.0035), m, [0, 0, 0.027]);
+    for (const s of [-1, 1]) add(g, kit.cyl(0.004, 0.004, 0.026, 10), m, vertical ? [0, s * (len / 2 - 0.015), 0.013] : [s * (len / 2 - 0.015), 0, 0.013], [Math.PI / 2, 0, 0]);
     return g;
   }
-  const shaker = (p, x0, y0, z, w, h, m = mat.lacquer, frame = 0.055) => add(p, kit.shakerFront(w, h, Math.min(frame, w / 4, h / 4), 0.02, 0.006), m, [x0, y0, z]);
+  // 5-piece shaker front: full-height stiles + rails as separate bevelled pieces (visible joint seams),
+  // centre panel recessed 12 mm. Front face at z + 0.02.
+  function shaker(p, x0, y0, z, w, h, m = mat.lacquer, frame = 0.06) {
+    const g = kit.group(p, [x0, y0, z]); const f = Math.min(frame, w / 4, h / 4); const D = 0.02, r = 0.0025;
+    for (const sx of [f / 2, w - f / 2]) add(g, kit.rbox(f, h, D, r), m, [sx, h / 2, D / 2]);
+    for (const sy of [f / 2, h - f / 2]) add(g, kit.rbox(w - 2 * f + 0.002, f, D, r), m, [w / 2, sy, D / 2]);
+    add(g, kit.rbox(w - 2 * f + 0.004, h - 2 * f + 0.004, 0.008, 0.0015), m, [w / 2, h / 2, 0.004]);
+    return g;
+  }
+  // dark shadow-line plane behind a bank of doors (shows only through the 3 mm gaps)
+  const revealMat = std({ color: 0x6f6e6a, roughness: 0.95 });
+  const reveal = (p, x0, y0, z, w, h) => { const m = add(p, new THREE.PlaneGeometry(w, h), revealMat, [x0 + w / 2, y0 + h / 2, z]); m.castShadow = false; return m; };
+  // fake contact-shadow / AO gradient card: black, alpha `a0` at the v=1 edge fading to 0 at v=0
+  const aoTex = kit.canvasTex(16, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.3, '#8a8a8a'); gr.addColorStop(1, '#000000'); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
+  const aoCard = (p, w, h, pos, rot, a0 = 0.35) => {
+    const m = add(p, new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: aoTex, transparent: true, opacity: a0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }), pos, rot);
+    m.castShadow = false; m.receiveShadow = false; m.renderOrder = 1; return m;
+  };
   function leafGeo(len, wid, droop, twist = 0) { // strap leaf along +y then drooping toward +z
     const seg = 7, pos = [], uv = [], idx = [];
     for (let i = 0; i <= seg; i++) {
@@ -157,11 +176,36 @@ export async function build(ctx) {
     const rr = kit.rng(seed); const geos1 = [], geos2 = [];
     for (let i = 0; i < n; i++) {
       const up = rr(); const g = leafGeo(len * (0.6 + rr() * 0.5), 0.028 + rr() * 0.012, 0.25 + (1 - up) * 1.1, (rr() - 0.5) * 1.2);
-      g.rotateX(-(0.15 + (1 - up) * 1.0)); g.rotateY(rr() * Math.PI * 2); g.translate(x + (rr() - 0.5) * r, y + rr() * 0.12, z + (rr() - 0.5) * r);
+      g.rotateX(-(0.25 + (1 - up) * 1.35)); g.rotateY(rr() * Math.PI * 2); g.translate(x + (rr() - 0.5) * r, y + rr() * 0.12, z + (rr() - 0.5) * r);
       (i % 3 ? geos1 : geos2).push(g);
     }
     if (geos1.length) add(p, kit.mergeGeometries(geos1), m1, [0, 0, 0]);
     if (geos2.length) add(p, kit.mergeGeometries(geos2), m2, [0, 0, 0]);
+  }
+  // a garment hanging from a hook by its collar loop: closed, subdivided surface whose cross-section
+  // grows from a bunched collar to the full body, with vertical drape folds, optional quilt baffles,
+  // a slightly ragged hem and a forward lean. Origin = hook point; hangs down -y, depth along +z.
+  function garmentGeo(len, w, d, { quilt = 0, folds = 5, seed = 1, lean = 0.04, topW = 0.035 } = {}) {
+    const rr = kit.rng(seed); const ph = rr() * 6.28; const NU = 40, NV = 48; const pos = [], uv = [], idx = [];
+    const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    for (let j = 0; j <= NV; j++) {
+      const v = j / NV; const y = -len * v;
+      const a = topW + (w / 2 - topW) * sm(0, 0.2, v) + 0.01 * v; const b = 0.02 + (d / 2 - 0.02) * sm(0, 0.28, v);
+      const q = quilt ? 1 + 0.09 * (Math.pow(Math.abs(Math.sin(Math.PI * v * quilt)), 0.6) - 0.6) * sm(0.08, 0.2, v) : 1;
+      for (let i = 0; i <= NU; i++) {
+        const u = i / NU, t = u * Math.PI * 2; const c = Math.cos(t), s = Math.sin(t);
+        const fold = 1 + 0.07 * Math.sin(t * folds + ph + v * 2.5) * sm(0.12, 0.5, v) + 0.03 * Math.sin(t * 11 + v * 9 + ph);
+        const hem = v > 0.97 ? (v - 0.97) * 4 : 0;
+        pos.push(a * c * q * fold * (1 - hem), y + 0.012 * Math.sin(t * 3 + ph) * v, b * s * q * fold * (1 - hem) + lean * v * v);
+        uv.push(u * 2, v * 2);
+      }
+    }
+    for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) { const a = j * (NU + 1) + i, b2 = a + NU + 1; idx.push(a, a + 1, b2, b2, a + 1, b2 + 1); }
+    // bottom cap
+    const cIdx = pos.length / 3; pos.push(0, -len, lean * 0.95); uv.push(0.5, 2);
+    const last = NV * (NU + 1); for (let i = 0; i < NU; i++) idx.push(last + i, last + i + 1, cIdx);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+    return g;
   }
 
   // =====================================================================================
@@ -176,52 +220,77 @@ export async function build(ctx) {
     RB(bi, mat.lacquer, 0, 0, 0, 0.03, H, FZ, 0.003);
     add(bi, kit.rbox(0.004, 0.11, 0.07, 0.003), mat.plate, [0.032, 1.17, 0.42]);
     add(bi, kit.rbox(0.006, 0.05, 0.022, 0.002), mat.plate, [0.034, 1.17, 0.42]);
-    // nook back panel
-    RB(bi, mat.lacquer, 0.03, 0.5, 0, 1.49, 1.43, 0.018, 0.002);
-    // hooks (6 black double robe hooks)
-    const hookX = [0.225, 0.445, 0.675, 0.915, 1.135, 1.355];
-    for (const hx of hookX) {
-      const hg = kit.group(bi, [hx, 1.77, 0.018]);
-      add(hg, kit.rbox(0.03, 0.05, 0.008, 0.003), M.blackMetal, [0, 0, 0.004]);
-      add(hg, kit.tube([[0, 0.0, 0.006], [0, -0.005, 0.03], [0, 0.005, 0.055], [0, 0.035, 0.062]], 0.0045, 16), M.blackMetal, [0, 0, 0]);
-      add(hg, kit.tube([[0, -0.01, 0.006], [0, -0.025, 0.035], [0, -0.03, 0.06], [0, -0.012, 0.072]], 0.0045, 16), M.blackMetal, [0, 0, 0]);
-    }
-    // coats: black quilted puffer on hook 2, olive jacket on hook 3
+    // nook back panel: recessed centre panel inside a 4 cm applied frame
+    const BY = 0.48; // bench seat height (top of the lip)
+    RB(bi, mat.lacquer, 0.03, BY - 0.02, 0, 1.49, 1.92 - BY + 0.02, 0.018, 0.002);
     {
-      const prof = []; for (let i = 0; i <= 24; i++) { const t = i / 24; const base = 0.03 + 0.1 * Math.min(1, t * 4) - 0.012 * t; const quilt = (t > 0.18) ? 0.01 * Math.abs(Math.sin(t * 34)) : 0; prof.push([base + quilt, -t * 0.62]); }
-      const puff = add(bi, kit.lathe(prof, 28), mat.nylonBlack, [0.452, 1.79, 0.075]); puff.scale.set(1, 1, 0.42); puff.rotation.z = 0.04;
-      add(bi, kit.cushion(0.2, 0.06, 0.08, 0.03, 0.01), mat.nylonBlack, [0.452, 1.80, 0.07]); // folded collar/hood
-      const jp = []; for (let i = 0; i <= 20; i++) { const t = i / 20; jp.push([0.025 + 0.105 * Math.min(1, t * 3.5) + 0.01 * Math.sin(t * 9), -t * 0.76]); }
-      const jk = add(bi, kit.lathe(jp, 28), mat.oliveWool, [0.682, 1.80, 0.07]); jk.scale.set(1, 1, 0.38); jk.rotation.z = -0.03;
-      add(bi, kit.rbox(0.05, 0.3, 0.012, 0.004), mat.oliveWool, [0.64, 1.58, 0.11], [0, 0, 0.25]); // lapel fold
-      add(bi, kit.rbox(0.06, 0.012, 0.03, 0.004), mat.oliveWool, [0.682, 1.78, 0.03]); // hanger loop
+      const fx0 = 0.03, fx1 = 1.515, fy0 = BY, fy1 = 1.92, FWd = 0.04, FD = 0.014;
+      RB(bi, mat.lacquer, fx0, fy0, 0.018, FWd, fy1 - fy0, FD, 0.002); RB(bi, mat.lacquer, fx1 - FWd, fy0, 0.018, FWd, fy1 - fy0, FD, 0.002);
+      RB(bi, mat.lacquer, fx0 + FWd, fy1 - FWd, 0.018, fx1 - fx0 - 2 * FWd, FWd, FD, 0.002); RB(bi, mat.lacquer, fx0 + FWd, fy0, 0.018, fx1 - fx0 - 2 * FWd, FWd, FD, 0.002);
+      // soft AO: under the uppers (top of niche), into both side corners, and along the bench/back joint
+      aoCard(bi, fx1 - fx0, 0.9, [(fx0 + fx1) / 2, fy1 - 0.45, 0.033], [0, 0, 0], 0.32);
+      aoCard(bi, fx1 - fx0, 0.22, [(fx0 + fx1) / 2, fy0 + 0.11, 0.033], [0, 0, Math.PI], 0.28);
+      aoCard(bi, fy1 - fy0, 0.36, [fx0 + 0.001, (fy0 + fy1) / 2, 0.2], [0, Math.PI / 2, -Math.PI / 2], 0.3);
+      aoCard(bi, fy1 - fy0, 0.36, [fx1 - 0.001, (fy0 + fy1) / 2, 0.2], [0, -Math.PI / 2, Math.PI / 2], 0.3);
+      aoCard(bi, fx1 - fx0, 0.3, [(fx0 + fx1) / 2, BY + 0.002, 0.182], [-Math.PI / 2, 0, 0], 0.3);
+      aoCard(bi, fx1 - fx0, FZ - 0.02, [(fx0 + fx1) / 2, 1.92 - 0.002, (FZ - 0.02) / 2], [Math.PI / 2, 0, Math.PI], 0.22);
     }
-    // bench: carcass, top, two drawers, toe kick
-    RB(bi, mat.lacquer, 0.03, 0.1, 0.02, 1.49, 0.40, FZ - 0.04, 0.003);
-    RB(bi, mat.lacquerEdge, 0.05, 0, 0.02, 1.45, 0.1, FZ - 0.1, 0.002);
-    RB(bi, mat.lacquer, 0.03, 0.50, 0.0, 1.49, 0.036, FZ + 0.01, 0.004);
-    shaker(bi, 0.04, 0.235, FZ - 0.02, 0.73, 0.255, mat.lacquer, 0.05);
-    shaker(bi, 0.785, 0.235, FZ - 0.02, 0.73, 0.255, mat.lacquer, 0.05);
-    pull(bi, 0.405, 0.37, FZ, 0.13, false); pull(bi, 1.15, 0.37, FZ, 0.13, false);
+    // hooks (6 black double-prong robe hooks, evenly over ~1.1 m)
+    const hookX = Array.from({ length: 6 }, (_, i) => 0.22 + i * 0.226);
+    for (const hx of hookX) {
+      const hg = kit.group(bi, [hx, 1.77, 0.032]);
+      add(hg, kit.rbox(0.022, 0.06, 0.008, 0.003), M.blackMetal, [0, 0.005, 0.004]);
+      add(hg, kit.tube([[0, 0.02, 0.006], [0, 0.018, 0.035], [0, 0.03, 0.058], [0, 0.06, 0.066]], 0.0042, 20), M.blackMetal, [0, 0, 0]);
+      add(hg, kit.sphere(0.0055, 10, 8), M.blackMetal, [0, 0.061, 0.066]);
+      add(hg, kit.tube([[0, -0.012, 0.006], [0, -0.03, 0.04], [0, -0.035, 0.075], [0, -0.015, 0.09]], 0.0048, 20), M.blackMetal, [0, 0, 0]);
+      add(hg, kit.sphere(0.006, 10, 8), M.blackMetal, [0, -0.014, 0.09]);
+    }
+    // coats on hooks 2 and 3: black quilted puffer (baffles) and an olive wool blazer, both draped meshes
+    {
+      const nylon = physMat({ color: 0x0f1012, roughness: 0.34, clearcoat: 0.35, clearcoatRoughness: 0.35, sheen: 0.4, sheenColor: new THREE.Color(0x3a3d44), sheenRoughness: 0.5 });
+      const olive = kit.fabric.linen('#5d5026', { scale: 5, normalScale: 0.9 });
+      const hookPt = (i) => [hookX[i], 1.835, 0.115];
+      const pf = add(bi, garmentGeo(0.56, 0.2, 0.11, { quilt: 7, folds: 4, seed: 3, lean: 0.03 }), nylon, hookPt(1)); pf.rotation.z = 0.03;
+      // puffer sleeve bundled at the front
+      add(bi, garmentGeo(0.42, 0.075, 0.07, { quilt: 6, folds: 3, seed: 8, lean: 0.02, topW: 0.03 }), nylon, [hookX[1] - 0.04, 1.75, 0.165]).rotation.z = -0.05;
+      const bz = add(bi, garmentGeo(0.62, 0.22, 0.1, { folds: 6, seed: 5, lean: 0.035, topW: 0.03 }), olive, hookPt(2)); bz.rotation.z = -0.025;
+      // blazer sleeve + lapel edge hanging in front
+      add(bi, garmentGeo(0.52, 0.07, 0.055, { folds: 3, seed: 11, lean: 0.015, topW: 0.028 }), olive, [hookX[2] + 0.055, 1.74, 0.16]).rotation.z = 0.04;
+      add(bi, garmentGeo(0.45, 0.05, 0.03, { folds: 2, seed: 13, lean: 0.01, topW: 0.02 }), olive, [hookX[2] - 0.05, 1.76, 0.17]).rotation.z = 0.08;
+    }
+    // bench: carcass, overhanging seat with a front lip, two drawers, recessed toe kick
+    RB(bi, mat.lacquer, 0.03, 0.1, 0.02, 1.49, BY - 0.135, FZ - 0.04, 0.003);
+    RB(bi, std({ color: 0xd9d8d3, roughness: 0.6 }), 0.05, 0, 0.02, 1.45, 0.1, FZ - 0.095, 0.002);
+    RB(bi, mat.lacquer, 0.03, BY - 0.035, 0.0, 1.49, 0.035, FZ + 0.012, 0.004);
+    reveal(bi, 0.035, 0.105, FZ - 0.0195, 1.48, BY - 0.145);
+    shaker(bi, 0.04, 0.115, FZ - 0.02, 0.733, BY - 0.155, mat.lacquer, 0.055);
+    shaker(bi, 0.776, 0.115, FZ - 0.02, 0.733, BY - 0.155, mat.lacquer, 0.055);
+    pull(bi, 0.405, 0.115 + (BY - 0.155) / 2, FZ, 0.12, false); pull(bi, 1.143, 0.115 + (BY - 0.155) / 2, FZ, 0.12, false);
     // upper cabinets over the nook (2 rows of 4 doors), carcass full depth
     RB(bi, mat.lacquer, 0.03, 1.92, 0, 1.635, H - 1.92, FZ - 0.02, 0.003);
+    reveal(bi, 0.035, 1.94, FZ - 0.0195, 0.743, H - 1.95); reveal(bi, 0.81, 1.94, FZ - 0.0195, 0.743, H - 1.95);
     const updx = [[0.035, 0.37], [0.408, 0.37], [0.81, 0.37], [1.183, 0.37]];
-    for (const [x0, w] of updx) { shaker(bi, x0, 1.945, FZ - 0.02, w, 0.265, mat.lacquer, 0.05); shaker(bi, x0, 2.235, FZ - 0.02, w, 0.80, mat.lacquer, 0.06); }
+    for (const [x0, w] of updx) { shaker(bi, x0, 1.945, FZ - 0.02, w, 0.265, mat.lacquer, 0.06); shaker(bi, x0, 2.213, FZ - 0.02, w, 0.82, mat.lacquer, 0.06); }
     pull(bi, 0.37, 2.06, FZ, 0.12); pull(bi, 0.43, 2.06, FZ, 0.12); pull(bi, 1.15, 2.06, FZ, 0.12); pull(bi, 1.21, 2.06, FZ, 0.12);
     // partition between nook and laundry column
     RB(bi, mat.lacquer, 1.515, 0, 0, 0.15, 1.92, FZ, 0.004);
     // laundry column: niche for stacked Miele washer + dryer, cabinet above
     RB(bi, mat.lacquer, 1.665, 1.81, 0, 0.67, H - 1.81, FZ - 0.02, 0.003);
-    shaker(bi, 1.67, 1.815, FZ - 0.02, 0.325, H - 1.835, mat.lacquer, 0.06); shaker(bi, 2.0, 1.815, FZ - 0.02, 0.325, H - 1.835, mat.lacquer, 0.06);
+    reveal(bi, 1.668, 1.812, FZ - 0.0195, 0.66, H - 1.83);
+    shaker(bi, 1.67, 1.815, FZ - 0.02, 0.3265, H - 1.835, mat.lacquer, 0.06); shaker(bi, 1.9995, 1.815, FZ - 0.02, 0.3265, H - 1.835, mat.lacquer, 0.06);
     pull(bi, 1.955, 1.95, FZ, 0.16); pull(bi, 2.04, 1.95, FZ, 0.16);
     RB(bi, mat.lacquerEdge, 1.665, 0, 0, 0.65, 1.81, 0.015, 0.002); // niche back
+    aoCard(bi, 0.65, 0.5, [1.99, 1.81 - 0.25, 0.017], [0, 0, 0], 0.3);
+    aoCard(bi, 0.65, FZ - 0.02, [1.99, 1.81 - 0.002, (FZ - 0.02) / 2], [Math.PI / 2, 0, Math.PI], 0.25);
     RB(bi, mat.lacquer, 2.315, 0, 0, 0.03, H, FZ, 0.003); // right side panel of the niche
     // tall pantry / broom cabinets to the right (to the foyer wall)
     const tallX = [[2.345, 0.79], [3.135, 0.79]];
     RB(bi, mat.lacquer, 2.345, 0, 0, 1.58, H, FZ - 0.02, 0.003);
+    reveal(bi, 2.35, 0.1, FZ - 0.0195, 1.57, H - 0.12);
+    RB(bi, std({ color: 0xd9d8d3, roughness: 0.6 }), 2.36, 0, FZ - 0.09, 1.56, 0.1, 0.02, 0.002);
     for (const [x0, w] of tallX) {
-      shaker(bi, x0 + 0.005, 0.1, FZ - 0.02, w - 0.01, 1.66, mat.lacquer, 0.06);
-      shaker(bi, x0 + 0.005, 1.79, FZ - 0.02, w - 0.01, 1.23, mat.lacquer, 0.06);
+      shaker(bi, x0 + 0.0015, 0.1, FZ - 0.02, w - 0.003, 1.66, mat.lacquer, 0.06);
+      shaker(bi, x0 + 0.0015, 1.763, FZ - 0.02, w - 0.003, 1.257, mat.lacquer, 0.06);
     }
     pull(bi, 2.345 + 0.73, 0.95, FZ, 0.2); pull(bi, 3.135 + 0.06, 0.95, FZ, 0.2);
     // ---- Miele compact washer (bottom) + heat-pump dryer (top)
@@ -233,10 +302,10 @@ export async function build(ctx) {
       g.fillStyle = '#0c0c0e'; g.fillRect(186, 14, 136, 44); g.fillStyle = '#26303a'; g.fillRect(192, 20, 124, 32);
       g.fillStyle = '#e8e8e8'; for (let i = 0; i < 6; i++) g.fillRect(340 + i * 14, 34, 6, 2);
       if (dryer) { // plinth filter flap (p13 "Easy to Clean Plinth Filter")
-        g.fillStyle = '#e9e9e7'; g.fillRect(20, 568, 472, 150); g.strokeStyle = '#cfcfcd'; g.lineWidth = 2; g.strokeRect(20, 568, 472, 150);
-        g.fillStyle = '#c0353a'; g.font = '13px Helvetica, Arial'; g.fillText('Easy to Clean Plinth Filter', 50, 600);
-        g.fillStyle = '#909090'; g.font = '10px Helvetica, Arial'; g.fillText('Push here to open', 50, 618);
-        g.fillStyle = '#b5b5b3'; for (let i = 0; i < 14; i++) g.fillRect(352 + i * 8, 588, 4, 100);
+        g.fillStyle = '#e9e9e7'; g.fillRect(20, 612, 472, 104); g.strokeStyle = '#cfcfcd'; g.lineWidth = 2; g.strokeRect(20, 612, 472, 104);
+        g.fillStyle = '#c0353a'; g.font = '13px Helvetica, Arial'; g.fillText('Easy to Clean Plinth Filter', 50, 640);
+        g.fillStyle = '#909090'; g.font = '10px Helvetica, Arial'; g.fillText('Push here to open', 50, 658);
+        g.fillStyle = '#b5b5b3'; for (let i = 0; i < 14; i++) g.fillRect(352 + i * 8, 626, 4, 76);
       }
     });
     function miele(y0, dryer) {
@@ -248,22 +317,27 @@ export async function build(ctx) {
       add(g, kit.cyl(0.028, 0.03, 0.022, 32), mat.applWhite, [0.205, 0.797, 0.612], [Math.PI / 2, 0, 0]);
       add(g, kit.torus(0.028, 0.004, 8, 32), M.chrome, [0.205, 0.797, 0.612]);
       add(g, kit.rbox(0.07, 0.022, 0.012, 0.01), M.chrome, [-0.205, 0.735, 0.606]);
-      // porthole door: white outer ring, chrome bezel, smoked glass dome, drum behind
+      add(g, kit.rbox(0.158, 0.05, 0.005, 0.002), mat.blackGlass, [-0.0035, 0.805, 0.603]); // display strip
+      add(g, kit.torus(0.034, 0.005, 10, 40), M.chrome, [0.205, 0.797, 0.606]);
+      // porthole door: white outer ring, ~3 cm chrome bezel, dark tinted glass bowl (0.30 m), drum behind
       const dy = dryer ? 0.495 : 0.486; const R = 0.236;
       const door = kit.group(g, [0.005, dy, 0.6]);
-      add(door, kit.lathe([[0.0, 0.0], [R, 0.0], [R + 0.004, 0.02], [R - 0.01, 0.045], [0.19, 0.05], [0.185, 0.045]], 64), mat.applWhite, [0, 0, 0], [Math.PI / 2, 0, 0]);
-      add(door, kit.torus(0.192, 0.011, 12, 64), M.chrome, [0, 0, 0.05]);
-      add(door, kit.torus(R + 0.002, 0.006, 8, 64), M.chrome, [0, 0, 0.022]);
-      const dome = add(door, new THREE.SphereGeometry(0.19, 48, 16, 0, Math.PI * 2, 0, 0.55), mat.smoke, [0, 0, -0.09], [Math.PI / 2, 0, 0]);
-      dome.castShadow = false;
-      add(door, kit.cyl(0.17, 0.17, 0.02, 40), mat.drum, [0, 0, -0.02], [Math.PI / 2, 0, 0]);
-      add(door, kit.cushion(0.2, 0.08, 0.12, 0.04, 0.03), dryer ? std({ color: 0x5b6f86, roughness: 0.9 }) : std({ color: 0x8a6a8f, roughness: 0.9 }), [0.02, -0.08, -0.02], [0.3, 0.2, 0.3]);
+      add(door, kit.lathe([[0.18, 0.0], [R, 0.0], [R + 0.004, 0.02], [R - 0.008, 0.042], [0.184, 0.046], [0.18, 0.04]], 72), mat.applWhite, [0, 0, 0], [Math.PI / 2, 0, 0]);
+      add(door, kit.lathe([[0.183, 0.036], [0.187, 0.05], [0.18, 0.062], [0.162, 0.066], [0.152, 0.06], [0.149, 0.044], [0.149, 0.02]], 72), M.chrome, [0, 0, 0], [Math.PI / 2, 0, 0]);
+      add(door, kit.torus(R + 0.002, 0.005, 8, 72), M.chrome, [0, 0, 0.022]);
+      const Rs = 0.339; const glass = add(door, new THREE.SphereGeometry(Rs, 64, 8, 0, Math.PI * 2, 0, 0.4585), mat.washerGlass, [0, 0, 0.072 - Rs], [Math.PI / 2, 0, 0]);
+      glass.castShadow = false; glass.renderOrder = 2;
+      add(door, kit.lathe([[0.149, 0.03], [0.152, -0.04], [0.14, -0.26], [0.0, -0.27]], 48), mat.drum, [0, 0, 0], [Math.PI / 2, 0, 0]);
+      add(door, kit.torus(0.13, 0.012, 8, 48), mat.drumDark, [0, 0, -0.05]);
+      const cl = dryer ? [0x2f3540, 0x5a4c44] : [0x3a3036, 0x23272e];
+      add(door, kit.cushion(0.16, 0.06, 0.1, 0.03, 0.03), std({ color: cl[0], roughness: 0.95 }), [0.01, -0.09, -0.13], [0.4, 0.3, 0.25]);
+      add(door, kit.cushion(0.12, 0.05, 0.09, 0.025, 0.025), std({ color: cl[1], roughness: 0.95 }), [-0.05, -0.1, -0.17], [0.2, -0.5, -0.3]);
       return g;
     }
     miele(0.0, false); miele(0.852, true);
     // physics: bench, partitions, columns
     const wx = (lx) => 15.195 - lx; const zF = 10.60 - FZ;
-    phys.boxAABB([wx(1.515), 0, zF], [wx(0.03), 0.536, 10.60]);
+    phys.boxAABB([wx(1.515), 0, zF], [wx(0.03), BY, 10.60]);
     phys.boxAABB([wx(1.665), 1.92, zF], [wx(0.03), H, 10.60]);
     phys.boxAABB([wx(0.03), 0, zF], [wx(0), H, 10.60]);
     phys.boxAABB([wx(1.665), 0, zF], [wx(1.515), H, 10.60]);
@@ -272,8 +346,22 @@ export async function build(ctx) {
 
     // room finishes: baseboards on the open walls, cans
     kit.baseboards(root, [11.27, 7.20, 16.85, 10.60], 0, 0.11, 0.014, M.paintWhite, [
-      { side: 'z1', from: 11.27, to: 15.20 }, { side: 'z1', from: 15.55, to: 16.45 }, { side: 'z0', from: 11.95, to: 12.85 }, { side: 'x1', from: 9.52, to: 10.38 },
+      { side: 'z1', from: 11.27, to: 15.20 }, { side: 'z1', from: 15.47, to: 16.53 }, { side: 'z0', from: 11.95, to: 12.85 }, { side: 'x1', from: 9.52, to: 10.38 },
     ]);
+    // p13 shows a white painted leaf on this door: repaint our own opening's leaf (shell builds it in oak)
+    { const dk = (ctx.doors || []).find(d => d.o && d.o.id === 'mud-k'); if (dk) { const wp = std({ color: 0xf3f2ee, roughness: 0.42 }); dk.g.traverse(o => { if (o.isMesh && o.material === M.oakDoor) o.material = wp; }); } }
+    // mudroom -> kitchen door (mud-k, x 15.55..16.45, head 2.40): painted white casing on the mudroom face
+    // and white jamb liners through the wall (p13 shows a white cased opening, not an oak jamb)
+    {
+      const cw = 0.07, ct = 0.018, x0 = 15.55, x1 = 16.45, hd = 2.40, zf = 10.60;
+      const trim = std({ color: 0xf3f2ee, roughness: 0.45 });
+      RB(root, trim, x0 - cw, 0, zf - ct, cw, hd + cw, ct, 0.003); RB(root, trim, x1, 0, zf - ct, cw, hd + cw, ct, 0.003);
+      RB(root, trim, x0 - cw, hd, zf - ct, x1 - x0 + 2 * cw, cw, ct, 0.003);
+      RB(root, trim, x0, 0, zf - 0.001, 0.012, hd, 0.152, 0.002); RB(root, trim, x1 - 0.012, 0, zf - 0.001, 0.012, hd, 0.152, 0.002);
+      RB(root, trim, x0, hd - 0.012, zf - 0.001, x1 - x0, 0.012, 0.152, 0.002);
+      // plinth blocks
+      for (const x of [x0 - cw - 0.004, x1 - 0.004]) RB(root, trim, x, 0, zf - ct - 0.004, cw + 0.008, 0.12, ct + 0.004, 0.002);
+    }
     kit.canLights(root, [[12.6, 8.4], [14.3, 8.4], [15.9, 8.4]], 3.05);
     // dynamic clutter out of the photo's frame: sneakers by the garage door, laundry basket, detergent
     const shoe = (x, z, ry) => {
@@ -303,21 +391,21 @@ export async function build(ctx) {
   // =====================================================================================
   {
     const pw = kit.group(root, [0, 0, 0], 0, 'powder');
-    const P1 = [1.40, 15.85], P2 = [0.65, 14.47]; const H = 3.05;
+    const P1 = [1.55, 15.85], P2 = [0.65, 14.95]; const H = 3.05; const UA = 2.50 - P1[0]; // 45-degree chamfer (p34)
     const L = Math.hypot(P2[0] - P1[0], P2[1] - P1[1]);
     const u = [(P2[0] - P1[0]) / L, (P2[1] - P1[1]) / L]; const n = [-u[1], u[0]]; // (0.878,-0.477) into the room
     if (n[0] < 0) { n[0] *= -1; n[1] *= -1; }
     const prism = kit.extrude([[P1[0], -P1[1]], [P2[0], -P2[1]], [0.60, -P2[1]], [0.60, -15.90], [P1[0], -15.90]], H); prism.rotateX(-Math.PI / 2);
     add(pw, prism, M.paintWhite, [0, 0, 0]); phys.trimesh(prism);
     // wall finishes
-    panel(pw, P1, P2, 0, H, n, wallpaper, 0.004, 1.10);
+    panel(pw, P1, P2, 0, H, n, wallpaper, 0.004, UA);
     panel(pw, [2.50, 15.85], P1, 0, H, [0, -1], wallpaper, 0.004, 0);
-    // C wall around the real window (z 13.85..14.45, y 1.25..2.65)
-    const W0 = 13.85, W1 = 14.45, WS = 1.25, WH = 2.65;
-    panel(pw, P2, [0.65, 13.60], 0, WS, [1, 0], wallpaper, 0.004, 1.10 + L);
-    panel(pw, P2, [0.65, 13.60], WH, H, [1, 0], wallpaper, 0.004, 1.10 + L);
-    panel(pw, [0.65, W0], [0.65, 13.60], WS, WH, [1, 0], wallpaper, 0.004, 1.10 + L + (P2[1] - W0));
-    panel(pw, P2, [0.65, W1], WS, WH, [1, 0], wallpaper, 0.004, 1.10 + L);
+    // C wall around the real window pow-win (plan.js: z 14.07..14.87, y 1.00..2.60)
+    const W0 = 14.07, W1 = 14.87, WS = 1.00, WH = 2.60;
+    panel(pw, P2, [0.65, 13.60], 0, WS, [1, 0], wallpaper, 0.004, UA + L);
+    panel(pw, P2, [0.65, 13.60], WH, H, [1, 0], wallpaper, 0.004, UA + L);
+    panel(pw, [0.65, W0], [0.65, 13.60], WS, WH, [1, 0], wallpaper, 0.004, UA + L + (P2[1] - W0));
+    panel(pw, P2, [0.65, W1], WS, WH, [1, 0], wallpaper, 0.004, UA + L);
     // window reveal lined with paper, frosted glass behind the shell's black frame
     const rv = (a, b, y0, y1, nn) => panel(pw, a, b, y0, y1, nn, wallpaper, 0.002);
     rv([0.46, W1], [0.46, W0], WS, WH, [1, 0]); // (hidden behind pane; keeps the gap dark if any)
@@ -333,7 +421,7 @@ export async function build(ctx) {
     kit.baseboards(pw, [0.65, 13.60, 2.50, 15.85], 0, 0.1, 0.014, M.paintWhite, [{ side: 'x1', from: 13.60, to: 14.36 }, { side: 'z1', from: 0.6, to: 2.6 }, { side: 'x0', from: 13.5, to: 16 }]);
     // fake frosted window on the rear wall A (no opening in the shell there)
     {
-      const x0 = 1.67, x1 = 2.29, y0 = 1.23, y1 = 2.63, z = 15.85; const fw = 0.05;
+      const x0 = 1.70, x1 = 2.30, y0 = 1.05, y1 = 2.42, z = 15.85; const fw = 0.05;
       const wg = kit.group(pw, [0, 0, 0]);
       const g = new THREE.PlaneGeometry(x1 - x0, y1 - y0); g.rotateY(Math.PI); const pane = add(wg, g, mat.frosted, [(x0 + x1) / 2, (y0 + y1) / 2, z - 0.006]); pane.castShadow = false;
       RB(wg, M.blackMetal, x0, y0, z - 0.05, x1 - x0, fw, 0.05, 0.004); RB(wg, M.blackMetal, x0, y1 - fw, z - 0.05, x1 - x0, fw, 0.05, 0.004);
@@ -345,7 +433,7 @@ export async function build(ctx) {
     const ry = Math.atan2(n[0], n[1]);
     const mid = [(P1[0] + P2[0]) / 2, (P1[1] + P2[1]) / 2];
     const vg = kit.group(pw, [mid[0] + n[0] * 0.004, 0, mid[1] + n[1] * 0.004], ry, 'vanity');
-    const VW = 0.92, VD = 0.47, VT = 0.86, BT = 0.17; const vx = -0.04;
+    const VW = 0.82, VD = 0.45, VT = 0.86, BT = 0.15; const vx = 0;
     const basin = kit.group(vg, [vx, 0, 0]);
     // hollow trough basin: deck, front/sides rims, bowl floor
     RB(basin, mat.ceramic, -VW / 2, VT - BT, 0.01, VW, 0.035, VD, 0.012);
@@ -395,11 +483,11 @@ export async function build(ctx) {
       phys.dynamic(cand, { mass: 0.3, shape: 'hull' });
     }
     // arched mirror (rounded rectangle, thin brass frame) with a live reflection
-    const MW = 0.64, MH = 1.02, MY = 1.33, MR = 0.09;
+    const MW = 0.65, MH = 0.95, MY = 1.15, MR = 0.08;
     const rr = (w, h, r) => { const s = new THREE.Shape(); const x = -w / 2, y = -h / 2; s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r); s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h); s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r); s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y); return s; };
     {
-      const mg = kit.group(vg, [vx + 0.02, MY + MH / 2, 0.012]);
-      const outer = rr(MW + 0.024, MH + 0.024, MR + 0.012); outer.holes.push(new THREE.Path(rr(MW, MH, MR).getPoints(32).reverse()));
+      const mg = kit.group(vg, [vx, MY + MH / 2, 0.012]);
+      const outer = rr(MW + 0.018, MH + 0.018, MR + 0.009); outer.holes.push(new THREE.Path(rr(MW, MH, MR).getPoints(32).reverse()));
       add(mg, new THREE.ExtrudeGeometry(outer, { depth: 0.025, bevelEnabled: true, bevelSize: 0.003, bevelThickness: 0.003, bevelSegments: 2, curveSegments: 16 }), mat.brushedBrass, [0, 0, 0]);
       add(mg, new THREE.ShapeGeometry(rr(MW, MH, MR), 16), M.matteBlack, [0, 0, 0.004]);
       const mirror = new Reflector(new THREE.ShapeGeometry(rr(MW - 0.004, MH - 0.004, MR), 16), { textureWidth: 512, textureHeight: 768, color: 0xc8c8c8, clipBias: 0.003 });
@@ -409,8 +497,8 @@ export async function build(ctx) {
       mirror.visible = near(); ctx.onUpdate(() => { mirror.visible = near(); });
     }
     // brass sconces with clear glass cylinders either side of the mirror
-    for (const sx of [-0.5, 0.52]) {
-      const sg = kit.group(vg, [vx + sx, 1.76, 0.004]);
+    for (const sx of [-0.49, 0.49]) {
+      const sg = kit.group(vg, [vx + sx, 1.55, 0.004]);
       add(sg, kit.cyl(0.055, 0.055, 0.012, 32), mat.brushedBrass, [0, 0, 0.006], [Math.PI / 2, 0, 0]);
       add(sg, kit.tube([[0, 0, 0.01], [0, 0, 0.06], [0, 0.03, 0.075], [0, 0.07, 0.075]], 0.008, 16), mat.brushedBrass, [0, 0, 0]);
       add(sg, kit.cyl(0.03, 0.022, 0.035, 24), mat.brushedBrass, [0, 0.085, 0.075]);
@@ -419,7 +507,7 @@ export async function build(ctx) {
       add(sg, kit.cyl(0.004, 0.004, 0.13, 8), mat.filament, [0, 0.18, 0.075], [0, 0, 0], { shadow: false });
     }
     // the warm sconce glow (one small non-shadow light)
-    const pl = new THREE.PointLight(0xffd6a0, 2.2, 3.2, 2); pl.position.set(mid[0] + n[0] * 0.35, 1.95, mid[1] + n[1] * 0.35); pw.add(pl);
+    const pl = new THREE.PointLight(0xffecd8, 3.2, 3.4, 2); pl.position.set(mid[0] + n[0] * 0.35, 1.95, mid[1] + n[1] * 0.35); pw.add(pl);
     // ceiling: can, exhaust grille, speaker
     kit.canLights(pw, [[1.75, 14.55]], 3.05);
     add(pw, kit.rbox(0.25, 0.012, 0.25, 0.003), mat.grille, [1.45, 3.045, 15.05]);
@@ -456,68 +544,98 @@ export async function build(ctx) {
     const plateAt = (x, y, z, ry) => { const g = kit.group(of, [x, y, z], ry); add(g, kit.rbox(0.075, 0.12, 0.008, 0.003), mat.plate, [0, 0, 0.004]); add(g, kit.rbox(0.035, 0.065, 0.006, 0.002), mat.plate, [0, 0, 0.01]); };
     plateAt(19.68, 1.12, 7.20, 0); plateAt(22.80, 1.15, 9.85, -Math.PI / 2);
     for (const x of [19.2, 19.45]) { const g = kit.group(of, [x, 0.3, 7.20]); add(g, kit.rbox(0.075, 0.12, 0.008, 0.003), mat.plate, [0, 0, 0.004]); for (const y of [-0.025, 0.025]) add(g, kit.rbox(0.035, 0.03, 0.006, 0.004), mat.plate, [0, y, 0.01]); }
-    // large framed B&W surf photograph on the left (garage-side) wall
+    // warm cream paint on the office walls (p35 reads ~#EDE6DA, not cold white)
     {
-      const art = kit.canvasTex(1024, 840, (g, w, h) => {
-        const r = kit.rng(12);
-        const grd = g.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, '#5c5c5c'); grd.addColorStop(0.55, '#8f8f8f'); grd.addColorStop(1, '#b8b8b8'); g.fillStyle = grd; g.fillRect(0, 0, w, h);
-        for (let i = 0; i < 2600; i++) { const y = Math.pow(r(), 0.8) * h; const x = r() * w; const l = 10 + r() * 60 * (0.3 + y / h); g.strokeStyle = r() < 0.5 ? `rgba(30,30,30,${0.15 + r() * 0.25})` : `rgba(230,230,230,${0.12 + r() * 0.25})`; g.lineWidth = 1 + (y / h) * 2; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l / 2, y - 3 - r() * 3, x + l, y); g.stroke(); }
-        // foam / wake band
-        for (let i = 0; i < 1400; i++) { const x = r() * w, y = h * (0.6 + r() * 0.22 + 0.06 * Math.sin(x / 140)); g.fillStyle = `rgba(250,250,250,${0.2 + r() * 0.5})`; g.beginPath(); g.ellipse(x, y, 4 + r() * 18, 2 + r() * 5, 0, 0, 7); g.fill(); }
-        g.fillStyle = 'rgba(20,20,20,0.85)'; g.fillRect(0, 0, w, 26);
-        // elephant on a surfboard (silhouette)
-        g.fillStyle = '#efefef'; g.beginPath(); g.ellipse(250, 568, 120, 14, -0.05, 0, 7); g.fill();
-        g.fillStyle = '#141414'; g.beginPath(); g.ellipse(222, 470, 62, 42, 0, 0, 7); g.fill();
-        g.beginPath(); g.ellipse(160, 452, 32, 34, 0, 0, 7); g.fill();
-        g.beginPath(); g.ellipse(178, 450, 22, 30, 0.3, 0, 7); g.fill();
-        g.lineWidth = 11; g.strokeStyle = '#141414'; g.beginPath(); g.moveTo(138, 470); g.quadraticCurveTo(122, 520, 132, 548); g.stroke();
-        for (const lx of [178, 200, 238, 262]) g.fillRect(lx, 490, 15, 70);
-        g.fillStyle = '#e8e8e8'; for (let i = 0; i < 40; i++) { g.beginPath(); g.arc(320 + r() * 120, 560 + r() * 20, 2 + r() * 6, 0, 7); g.fill(); }
-        g.fillStyle = '#1a1a1a'; for (const [x, y] of [[880, 620], [910, 650], [850, 660]]) { g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.fillRect(x - 2, y, 4, 14); }
-      });
-      const fg = kit.group(of, [20.18, 1.875, 7.20]);
-      const FW = 1.22, FH = 1.0;
-      RB(fg, std({ color: 0xf5f4f0, roughness: 0.45 }), -FW / 2, -FH / 2, 0, FW, FH, 0.045, 0.006);
-      add(fg, new THREE.PlaneGeometry(FW - 0.07, FH - 0.07), std({ map: art, roughness: 0.35 }), [0, 0, 0.0465]);
+      const cream = std({ color: 0xf1ece4, roughness: 0.9 });
+      panel(of, [17.00, 7.20], [22.80, 7.20], 0, 3.05, [0, 1], cream, 0.003);
+      panel(of, [22.80, 10.60], [17.00, 10.60], 0, 3.05, [0, -1], cream, 0.003);
+      panel(of, [22.80, 7.20], [22.80, 7.85], 0, 3.05, [-1, 0], cream, 0.003);
+      panel(of, [22.80, 9.55], [22.80, 10.60], 0, 3.05, [-1, 0], cream, 0.003);
+      panel(of, [22.80, 7.85], [22.80, 9.55], 2.60, 3.05, [-1, 0], cream, 0.003);
+      // warm daylight bounce from the French door (non-shadow)
+      const wl = new THREE.PointLight(0xffeedd, 3.0, 4.6, 1.8); wl.position.set(22.1, 1.6, 8.7); of.add(wl);
     }
-    // wall-mounted TV on an articulating arm (right wall, z 10.60), swung toward the room
+    // large framed sepia surf photograph (elephant on a surfboard) with a white mat, on the left wall
     {
-      const arm = kit.group(of, [19.1, 1.72, 10.60]);
-      RB(arm, mat.tvBody, -0.12, -0.2, -0.02, 0.24, 0.4, 0.02, 0.005);
-      add(arm, kit.rbox(0.05, 0.05, 0.22, 0.01), mat.tvBody, [0.05, 0, -0.12]);
-      const tv = kit.group(arm, [0.08, 0, -0.24], 0.42); tv.rotation.x = -0.08;
-      add(tv, kit.rbox(1.45, 0.835, 0.03, 0.006), mat.tvBody, [-0.55, 0, 0]);
-      add(tv, new THREE.PlaneGeometry(1.43, 0.815), mat.tvScreen, [-0.55, 0, -0.0155], [0, Math.PI, 0]);
+      const art = kit.canvasTex(1024, 700, (g, w, h) => {
+        const r = kit.rng(12);
+        const grd = g.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, '#3e3933'); grd.addColorStop(0.4, '#7a7064'); grd.addColorStop(1, '#b3a897'); g.fillStyle = grd; g.fillRect(0, 0, w, h);
+        // swell lines
+        for (let i = 0; i < 3200; i++) { const y = Math.pow(r(), 0.85) * h; const x = r() * w; const l = 8 + r() * 50 * (0.3 + y / h); g.strokeStyle = r() < 0.5 ? `rgba(48,42,36,${0.12 + r() * 0.22})` : `rgba(236,228,214,${0.1 + r() * 0.22})`; g.lineWidth = 1 + (y / h) * 1.6; g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + l / 2, y - 2 - r() * 3, x + l, y); g.stroke(); }
+        // breaking foam band across the lower third
+        for (let i = 0; i < 2200; i++) { const x = r() * w, y = h * (0.66 + r() * 0.2 + 0.05 * Math.sin(x / 120)); g.fillStyle = `rgba(246,240,228,${0.15 + r() * 0.45})`; g.beginPath(); g.ellipse(x, y, 3 + r() * 14, 1.5 + r() * 4, 0, 0, 7); g.fill(); }
+        // elephant standing on a surfboard (left third), spray behind
+        const ex = 300, ey = 470; g.fillStyle = '#eeeae0'; g.beginPath(); g.ellipse(ex + 20, ey + 22, 150, 13, -0.04, 0, 7); g.fill();
+        g.fillStyle = '#1e1a16';
+        g.beginPath(); g.ellipse(ex + 25, ey - 70, 78, 48, 0, 0, 7); g.fill();                 // body
+        g.beginPath(); g.ellipse(ex - 52, ey - 92, 38, 40, 0, 0, 7); g.fill();                 // head
+        g.beginPath(); g.ellipse(ex - 36, ey - 92, 26, 34, 0.35, 0, 7); g.fill();              // ear
+        g.lineWidth = 13; g.strokeStyle = '#1e1a16'; g.beginPath(); g.moveTo(ex - 78, ey - 80); g.quadraticCurveTo(ex - 100, ey - 30, ex - 86, ey + 2); g.stroke(); // trunk
+        for (const lx of [-30, -8, 48, 72]) g.fillRect(ex + lx, ey - 40, 17, 52);           // legs
+        g.lineWidth = 3; g.beginPath(); g.moveTo(ex + 100, ey - 80); g.lineTo(ex + 112, ey - 52); g.stroke(); // tail
+        g.fillStyle = 'rgba(244,238,226,0.8)'; for (let i = 0; i < 70; i++) { g.beginPath(); g.arc(ex + 140 + r() * 140, ey + 10 - r() * 40, 2 + r() * 7, 0, 7); g.fill(); }
+        // surfer on a second board to the right, small in the foam
+        g.fillStyle = '#efeadf'; g.beginPath(); g.ellipse(760, 560, 60, 7, 0.05, 0, 7); g.fill();
+        g.fillStyle = '#1e1a16'; g.beginPath(); g.arc(752, 498, 9, 0, 7); g.fill(); g.fillRect(744, 506, 16, 34); g.fillRect(740, 538, 8, 20); g.fillRect(758, 538, 8, 20);
+        g.lineWidth = 5; g.beginPath(); g.moveTo(746, 514); g.lineTo(722, 528); g.moveTo(758, 514); g.lineTo(784, 504); g.stroke();
+        // print grain + vignette
+        const vg = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.7); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(40,30,20,0.35)'); g.fillStyle = vg; g.fillRect(0, 0, w, h);
+      });
+      const fg = kit.group(of, [20.05, 1.84, 7.20]);
+      const FW = 1.25, FH = 0.95, FR = 0.022, MT = 0.085;
+      const frameM = std({ color: 0xf4f2ec, roughness: 0.4 });
+      RB(fg, frameM, -FW / 2, -FH / 2, 0, FR, FH, 0.035, 0.004); RB(fg, frameM, FW / 2 - FR, -FH / 2, 0, FR, FH, 0.035, 0.004);
+      RB(fg, frameM, -FW / 2 + FR, -FH / 2, 0, FW - 2 * FR, FR, 0.035, 0.004); RB(fg, frameM, -FW / 2 + FR, FH / 2 - FR, 0, FW - 2 * FR, FR, 0.035, 0.004);
+      add(fg, new THREE.PlaneGeometry(FW - 2 * FR, FH - 2 * FR), std({ color: 0xf7f5ef, roughness: 0.85 }), [0, 0, 0.012]); // mat
+      add(fg, new THREE.PlaneGeometry(FW - 2 * FR - 2 * MT, FH - 2 * FR - 2 * MT), std({ map: art, roughness: 0.5 }), [0, 0, 0.0135]);
+      add(fg, new THREE.PlaneGeometry(FW - 2 * FR, FH - 2 * FR), physMat({ color: 0xffffff, transparent: true, opacity: 0.05, roughness: 0.02, depthWrite: false }), [0, 0, 0.03]).castShadow = false;
+    }
+    // 75" thin-bezel TV on an articulating arm (right wall, z 10.60), swung out toward the desk/camera
+    {
+      const P0 = [18.0, 1.70, 10.60];
+      const mount = kit.group(of, P0);
+      RB(mount, mat.tvBody, -0.08, -0.14, -0.02, 0.16, 0.28, 0.02, 0.005);
+      add(mount, kit.rbox(0.06, 0.05, 0.12, 0.01), mat.tvBody, [0, 0, -0.08]);
+      const tv = kit.group(mount, [0, 0, -0.15], 0.30);
+      const TW = 1.68, TH = 0.97;
+      add(tv, kit.rbox(TW, TH, 0.028, 0.004), mat.tvBody, [TW / 2 + 0.02, 0, 0]);
+      add(tv, kit.rbox(0.5, 0.35, 0.05, 0.02), mat.tvBody, [TW / 2, 0, 0.035]);
+      add(tv, new THREE.PlaneGeometry(TW - 0.016, TH - 0.016), mat.tvScreen, [TW / 2 + 0.02, 0, -0.0145], [0, Math.PI, 0]);
       phys.solidGroup(tv);
     }
-    // rug: ivory with charcoal hatch in diagonal blocks
+    // rug: cream ground with soft charcoal hatch in diagonal blocks (wool, Carpet016 pile)
     {
-      const RW = 3.0, RD = 2.7;
-      const rugMap = kit.canvasTex(900, 810, (g, w, h) => {
+      const RW = 3.0, RD = 2.4;
+      const rugMap = kit.canvasTex(1000, 800, (g, w, h) => {
         const img = g.createImageData(w, h); const d = img.data; const r = kit.rng(9);
         const per = 0.042, blk = 0.62;
         for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
           const uu = (i / w) * RW, vv = (j / h) * RD; const p = (uu + vv) * 0.7071, q = (uu - vv) * 0.7071;
           const a = Math.floor(p / blk), b = Math.floor(q / blk); const t = ((a + 2 * b) % 3 + 3) % 3;
           const s = t === 0 ? q : t === 1 ? p : (uu * 0.38 + vv * 0.92);
-          const f = (s / per) - Math.floor(s / per) + 0.08 * Math.sin(uu * 90 + vv * 70);
-          const line = (f % 1) < 0.36; const nz = (r() - 0.5) * 40;
-          const k = (j * w + i) * 4; const base = line ? 52 : 226;
-          d[k] = base + nz + (line ? 0 : 4); d[k + 1] = base + nz; d[k + 2] = base + nz - (line ? 0 : 10); d[k + 3] = 255;
+          const f = (s / per) - Math.floor(s / per) + 0.1 * Math.sin(uu * 90 + vv * 70) + (r() - 0.5) * 0.18;
+          const fr = ((f % 1) + 1) % 1; const line = Math.min(1, 1.7 * Math.max(0, 1 - Math.abs(fr - 0.22) / 0.24)); // soft-edged stripe
+          const nz = (r() - 0.5) * 26; const k = (j * w + i) * 4;
+          const base = [232, 226, 214], ink = [58, 56, 53];
+          for (let c = 0; c < 3; c++) d[k + c] = base[c] + (ink[c] - base[c]) * Math.min(1, line * 1.25) + nz;
+          d[k + 3] = 255;
         }
         g.putImageData(img, 0, 0);
       });
-      const rugMat = std({ map: rugMap, roughness: 0.97, normalMap: kit.noiseNormal(256, 3, 96, 6), normalScale: new THREE.Vector2(0.9, 0.9) });
-      rugMat.normalMap.repeat.set(4, 4);
+      const cRep = [RW / 0.5, RD / 0.5];
+      const rugMat = physMat({ map: rugMap, roughness: 1, sheen: 0.35, sheenRoughness: 0.8, sheenColor: new THREE.Color(0xd8d2c6),
+        normalMap: kit.tex('assets/acg/Carpet016/Carpet016_NormalGL.jpg', { repeat: cRep }), normalScale: new THREE.Vector2(1.1, 1.1),
+        aoMap: kit.tex('assets/acg/Carpet016/Carpet016_AmbientOcclusion.jpg', { repeat: cRep }), aoMapIntensity: 0.8 });
       const rg = kit.group(of, [19.85, 0, 8.90], 0.03);
-      add(rg, kit.rbox(RW, 0.014, RD, 0.006), rugMat, [0, 0.007, 0]).castShadow = false;
+      const rug = add(rg, kit.rbox(RW, 0.014, RD, 0.006), rugMat, [0, 0.007, 0]); rug.castShadow = false;
     }
     // glass desk on a polished chrome frame
     const desk = kit.group(of, [20.0, 0, 8.42], 0.137, 'desk');
     {
       const DW = 1.5, DD = 0.76, DT = 0.755, b = 0.045;
       const top = add(desk, kit.rbox(DW, 0.012, DD, 0.004), mat.deskGlass, [0, DT + 0.006, 0]); top.castShadow = false;
-      add(desk, kit.box(DW, 0.012, 0.004), mat.deskGlassEdge, [0, DT + 0.006, DD / 2]);
+      for (const sz of [-1, 1]) add(desk, kit.box(DW - 0.004, 0.012, 0.004), mat.deskGlassEdge, [0, DT + 0.006, sz * (DD / 2 - 0.001)]);
+      for (const sx of [-1, 1]) add(desk, kit.box(0.004, 0.012, DD - 0.004), mat.deskGlassEdge, [sx * (DW / 2 - 0.001), DT + 0.006, 0]);
       const ch = M.chrome;
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) RB(desk, ch, sx * (DW / 2 - 0.03) - b / 2, 0, sz * (DD / 2 - 0.03) - 0.0125, b, DT, 0.025, 0.006);
       for (const sz of [-1, 1]) RB(desk, ch, -DW / 2 + 0.01, DT - 0.04, sz * (DD / 2 - 0.03) - 0.0125, DW - 0.02, 0.04, 0.025, 0.006);
@@ -547,16 +665,16 @@ export async function build(ctx) {
     }
     // black velvet swivel barrel chair with a patterned throw pillow, by the French door
     {
-      const vel = std({ color: 0x141416, roughness: 0.75, ...(() => { const p = kit.pbrMaps('velour_velvet', '1k', { repeat: [3, 3] }); return { normalMap: p.normalMap }; })(), normalScale: new THREE.Vector2(0.5, 0.5) });
-      const c = kit.group(of, [21.95, 0, 7.92], -1.1, 'loungeChair');
+      const vel = kit.fabric.velvet('#0d0d0f', { scale: 3, sheenColor: '#2c2c31' });
+      const c = kit.group(of, [21.9, 0, 7.98], -1.1, 'loungeChair'); c.scale.setScalar(1.18);
       add(c, kit.cyl(0.24, 0.26, 0.03, 40), mat.blackPowder, [0, 0.015, 0]);
       add(c, kit.cyl(0.05, 0.05, 0.14, 20), mat.blackPowder, [0, 0.1, 0]);
       add(c, kit.lathe([[0, 0], [0.3, 0], [0.34, 0.06], [0.35, 0.16], [0.32, 0.2], [0, 0.21]], 48), vel, [0, 0.16, 0]);
       add(c, kit.cushion(0.56, 0.1, 0.5, 0.08, 0.04), vel, [0, 0.42, 0.03]);
       // barrel back: annular sector extruded upward, rounded by the bevel
-      const s = new THREE.Shape(); const R0 = 0.38, R1 = 0.27, a0 = -0.35 * Math.PI, a1 = 1.35 * Math.PI;
+      const s = new THREE.Shape(); const R0 = 0.38, R1 = 0.25, a0 = -0.3 * Math.PI, a1 = 1.3 * Math.PI;
       s.absarc(0, 0, R0, a0, a1, false); s.absarc(0, 0, R1, a1, a0, true);
-      const bg = new THREE.ExtrudeGeometry(s, { depth: 0.38, bevelEnabled: true, bevelSize: 0.04, bevelThickness: 0.05, bevelSegments: 4, curveSegments: 40 });
+      const bg = new THREE.ExtrudeGeometry(s, { depth: 0.38, bevelEnabled: true, bevelSize: 0.055, bevelThickness: 0.07, bevelSegments: 6, curveSegments: 48 });
       bg.rotateX(Math.PI / 2); bg.translate(0, 0.78, 0); add(c, bg, vel, [0, 0, 0], [0, Math.PI, 0]);
       phys.solidGroup(c);
       const pil = kit.canvasTex(256, 256, (g, w, h) => {
@@ -570,10 +688,10 @@ export async function build(ctx) {
       const p = kit.group(of, [22.42, 0, 7.62], 0, 'plant');
       add(p, kit.lathe([[0, 0], [0.16, 0], [0.2, 0.08], [0.21, 0.42], [0.2, 0.44], [0.18, 0.43], [0, 0.4]], 40), mat.pot, [0, 0, 0]);
       add(p, kit.cyl(0.18, 0.18, 0.01, 24), std({ color: 0x2e241b, roughness: 1 }), [0, 0.415, 0]);
-      const canes = [[0.03, 0.0, 1.05, -0.05, 0.02], [-0.05, 0.04, 1.45, 0.04, -0.05], [0.02, -0.06, 1.8, -0.03, 0.06]];
+      const canes = [[0.03, 0.0, 0.62, -0.12, 0.05], [-0.05, 0.04, 0.95, 0.1, -0.12], [0.02, -0.06, 1.15, -0.06, 0.14], [0.05, 0.05, 0.8, 0.16, 0.1], [-0.04, -0.03, 1.25, 0.02, -0.02]];
       canes.forEach(([x, z, hgt, lx, lz], i) => {
-        add(p, kit.tube([[x, 0.4, z], [x + lx * 0.5, 0.4 + hgt * 0.5, z + lz * 0.5], [x + lx, 0.4 + hgt, z + lz]], 0.018 - i * 0.002, 12), mat.cane, [0, 0, 0]);
-        leafHead(p, x + lx, 0.4 + hgt - 0.05, z + lz, 46, 0.5, 0.05, 30 + i);
+        add(p, kit.tube([[x, 0.4, z], [x + lx * 0.4, 0.4 + hgt * 0.5, z + lz * 0.4], [x + lx, 0.4 + hgt, z + lz]], 0.016 - i * 0.0015, 12), mat.cane, [0, 0, 0]);
+        leafHead(p, x + lx, 0.4 + hgt - 0.05, z + lz, 70, 0.62, 0.06, 30 + i);
       });
       phys.solidGroup(p);
     }
