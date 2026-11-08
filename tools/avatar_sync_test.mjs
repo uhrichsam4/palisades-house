@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Avatar sync test: A imports a custom model (shots/avatar_models/Xbot.glb) and B must download it P2P and show it.
+//   --lib=<id>  instead: A picks built-in library character <id> (src/avatars/library.js) and B must load it from the site.
 //   node tools/recreate_test.mjs [--full]   (default builds only the family room: ?only=family)
 // A and B walk into the family-room demo area, both press R at once (must get different seats), A presses
 // Enter, both must play the audio with start times within 150 ms; B must see A's avatar sitting at A's seat.
@@ -43,6 +44,25 @@ try {
   let connected = false;
   for (let i = 0; i < 90; i++) { const [a, b] = await Promise.all([A.page.evaluate(() => window.__mp.peers.size), B.page.evaluate(() => window.__mp.peers.size)]); if (a >= 1 && b >= 1) { connected = true; break; } await sleep(1000); }
   res.connected = connected; if (!connected) throw new Error('no peer connection');
+  if (opt.lib) {
+    res.lib = opt.lib;
+    res.local = await A.page.evaluate(async (id) => {
+      const L = await import('/src/avatars/library.js'); const M = await import('/src/avatars/index.js');
+      const ent = L.libraryEntry(id); if (!ent) throw new Error('unknown library id ' + id);
+      const desc = { k: 'b', id, ht: ent.height, fl: false };
+      M.store.setMine(desc); await window.__mp.avatars.select(desc);
+      return { id, name: ent.name, mine: window.__mp.avatars.mine };
+    }, opt.lib);
+    const want = 'b:' + opt.lib + ':';
+    // fox and other static models have rigged=false; check the creature swap by its descriptor key instead
+    res.localKind = await A.page.evaluate(() => ({ rigged: !!window.__player.creature.rigged, custom: 'rigged' in window.__player.creature }));
+    const t0 = Date.now(); let seen = null;
+    for (let i = 0; i < 60; i++) { seen = await B.page.evaluate((want) => { const r = [...window.__mp.peers.values()][0]; return r && r._avKey?.startsWith(want) && r._custom ? { key: r._avKey, rigged: !!r.creature?.rigged, desc: window.__mp.avatars.descOf.get([...window.__mp.peers.keys()][0]) } : null; }, want); if (seen) break; await sleep(1000); }
+    await sleep(1500); // let applyRemote finish swapping the creature in
+    seen = seen && await B.page.evaluate(() => { const r = [...window.__mp.peers.values()][0]; return { key: r._avKey, rigged: !!r.creature?.rigged, swapped: !!r.creature && 'rigged' in r.creature }; });
+    res.remote = seen; res.loadS = +((Date.now() - t0) / 1000).toFixed(1);
+    res.localRigged = res.localKind.custom; res.remoteRigged = !!seen?.swapped;
+  } else {
   const file = path.join(ROOT, 'shots', 'avatar_models', opt.model || 'Xbot.glb');
   const b64 = fs.readFileSync(file).toString('base64');
   res.local = await A.page.evaluate(async ({ b64, name }) => {
@@ -66,11 +86,15 @@ try {
   const t0 = Date.now(); let seen = false;
   for (let i = 0; i < 60; i++) { seen = await B.page.evaluate(() => { const r = [...window.__mp.peers.values()][0]; return !!(r && r.creature && r.creature.rigged); }); if (seen) break; await sleep(1000); }
   res.remoteRigged = seen; res.transferS = +((Date.now() - t0) / 1000).toFixed(1);
+  }
   await B.page.evaluate(() => { const r = [...window.__mp.peers.values()][0]; window.__player.teleport(r.pos.x + 0.2, r.pos.y, r.pos.z - 3, Math.PI); window.__player.state.thirdPerson = false; });
   await A.page.evaluate(() => { window.__player.state.thirdPerson = false; });
   await sleep(1500);
-  await B.page.evaluate(() => { const r = [...window.__mp.peers.values()][0]; const c = window.__dbg.camera; c.position.set(r.pos.x + 1.6, r.pos.y + 1.4, r.pos.z - 2.2); c.lookAt(r.pos.x, r.pos.y + 0.9, r.pos.z); window.__dbg.paused = true; window.__dbg.render(); });
-  await B.page.screenshot({ path: path.join(ROOT, 'shots', 'avatar_sync_b.png') });
+  await B.page.evaluate(() => { const r = [...window.__mp.peers.values()][0]; const c = window.__dbg.camera;
+    const p = r.creature?.root ? r.creature.root.getWorldPosition(new c.position.constructor()) : r.pos; // the drawn body, not the network target
+    const me = window.__player.state.pos; const dx = me.x - p.x, dz = me.z - p.z, L = Math.hypot(dx, dz) || 1, D = 2.0; // look from B's side (B stands in free space)
+    c.position.set(p.x + dx / L * D, p.y + 1.2, p.z + dz / L * D); c.lookAt(p.x, p.y + 0.7, p.z); c.updateMatrixWorld(); window.__dbg.paused = true; window.__dbg.render(); });
+  await B.page.screenshot({ path: path.join(ROOT, 'shots', opt.lib ? `avatar_sync_lib_${opt.lib}.png` : 'avatar_sync_b.png') });
   await B.page.evaluate(() => { window.__dbg.paused = false; });
   res.errors = [...A.logs, ...B.logs].slice(0, 8);
   bad = !(res.localRigged && res.remoteRigged) || res.errors.length > 0;

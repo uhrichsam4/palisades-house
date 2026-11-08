@@ -9,7 +9,7 @@
 // directory (src/net/lobbies.js) by ONE member: the smallest peer id among members that know the meta.
 // Any networking failure leaves single-player untouched.
 // Re-create scenes (src/recreate.js): state messages carry an optional pose `q` (1 sit, 2 lie, 3 lean;
-// missing = standing) and seat key `c` ('sceneId:i'); seated peers are snapped. The 'rc' action carries
+// missing = standing), seat key `c` ('sceneId:i') and wave-emote counter `e` (B; a change plays the wave); seated peers are snapped. The 'rc' action carries
 // seat claims / releases / play / stop; startRecreate() runs last, then startVideos() (src/videos.js).
 // Avatars: remote avatars are made in addRemote() below (createAvatar from ./avatar.js).
 import * as THREE from 'three';
@@ -103,6 +103,7 @@ export async function start(ctx) {
     if (typeof msg.h === 'number' && Math.abs(msg.h - r.hue) > 1e-3) { r.hue = msg.h; r.creature.setHue(msg.h); }
     const off = now - msg.t; r.off = r.off === null || off < r.off ? off : r.off + (off - r.off) * 0.02;
     r.buf.push({ t: msg.t, p: msg.p, v: Array.isArray(msg.v) ? msg.v : [0, 0, 0], y: +msg.y || 0, g: msg.g, s: msg.s, q: msg.q | 0 }); if (r.buf.length > 40) r.buf.shift();
+    if (Number.isInteger(msg.e)) r.emote = msg.e; // wave emote counter (B); older clients never send it
     const seat = typeof msg.c === 'string' ? msg.c.slice(0, 64) : null; if (seat !== r.seat) { r.seat = seat; rcHooks.onPeerSeat?.(id, seat); }
     r.last = now;
   }
@@ -162,6 +163,7 @@ export async function start(ctx) {
     const m = { t: performance.now(), p: [r3(p.x), r3(p.y), r3(p.z)], v: [r3(v.x), r3(v.y), r3(v.z)], y: r3(s.facing), g: !!s.grounded, s: !!s.swimming, n: me.name, h: me.hue };
     const q = POSE_CODE[s.pose]; if (q) m.q = q;
     if (rcHooks.seatKey) m.c = rcHooks.seatKey;
+    if (s.emote) m.e = s.emote;
     return m;
   }
   function sendState(force) { if (actions && (force || peers.size || room)) { try { actions.state.send(stateMsg()); } catch {} } }
@@ -266,7 +268,7 @@ export async function start(ctx) {
       if (now - r.last > 15000) { removeRemote(r.id); continue; }
       if (r.buf) sampleRemote(r, now);
       r.body.setNextKinematicTranslation({ x: r.pos.x, y: r.pos.y + 0.83, z: r.pos.z });
-      r.creature.update(dt, { pos: r.pos, vel: r.vel, yaw: r.yaw, grounded: r.grounded, swimming: r.swimming, pose: r.pose });
+      r.creature.update(dt, { pos: r.pos, vel: r.vel, yaw: r.yaw, grounded: r.grounded, swimming: r.swimming, pose: r.pose, emote: r.emote | 0 });
     }
   });
 

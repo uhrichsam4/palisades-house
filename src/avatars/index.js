@@ -12,10 +12,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { createAvatar, POSES } from '../avatar.js';
+import { bindRig, createAnimator, avatarLod, placeRoot } from './anim.js';
 import { makeNameTag } from './nametag.js';
 export { makeNameTag };
 
-export const LIMITS = { maxBytes: 30e6, maxTris: 300000 };
+export const LIMITS = { maxBytes: 120e6, maxTris: 2500000, warnTris: 300000 };
 const MAX_TEX = 2048;
 const SLOTS = ['hips', 'spine', 'chest', 'neck', 'head',
   'upperArmL', 'lowerArmL', 'handL', 'upperArmR', 'lowerArmR', 'handR',
@@ -26,7 +27,8 @@ const REQUIRED = ['hips', 'upperArmL', 'lowerArmL', 'upperArmR', 'lowerArmR', 'u
 // Tokenise a bone name (camelCase, digits, separators), pull out the side, drop rig prefixes, look up the rest.
 const PREFIX = new Set(['mixamorig', 'mixamo', 'def', 'org', 'mch', 'bip', 'biped', 'valvebiped', 'j', 'b', 'c', 'jnt', 'joint', 'bone', 'bn', 'cc', 'base', 'armature', 'rig', 'character', 'ik', 'fk', 'skel', 'sk', 'ue', 'pl']);
 const ALIAS = {
-  hips: ['hips', 'hip', 'pelvis'],
+  hips: ['hips', 'hip', 'pelvis'], // UE/UAL: pelvis, thigh, calf, upperarm, lowerarm; Bip01: Pelvis, Thigh, Calf, UpperArm, Forearm
+
   neck: ['neck', 'neck1'], head: ['head'],
   upperArm: ['arm', 'upperarm', 'uparm', 'shoulderarm'], lowerArm: ['forearm', 'lowerarm', 'elbow', 'lowarm'], hand: ['hand', 'wrist'],
   upperLeg: ['upleg', 'upperleg', 'thigh', 'femur'], lowerLeg: ['leg', 'lowerleg', 'calf', 'shin', 'knee', 'lowleg'], foot: ['foot', 'ankle'],
@@ -34,6 +36,7 @@ const ALIAS = {
 function classify(name) {
   const toks = name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([a-zA-Z])(\d)/g, '$1 $2').replace(/(\d)([a-zA-Z])/g, '$1 $2')
     .split(/[^a-zA-Z0-9]+/).filter(Boolean).map(t => t.toLowerCase());
+  if (toks.includes('ik') || toks.includes('ctrl') || toks.includes('target') || toks.includes('pole')) return null; // UE ik_foot_l, IK/control helpers
   let side = '';
   const rest = [];
   toks.forEach((t, i) => {
@@ -156,6 +159,7 @@ export async function parseAvatar(arrayBuffer, fmt) {
   if (!meshes) throw new Error('The file has no meshes (is it an animation-only file?).');
   const tris = countTris(scene);
   if (tris > LIMITS.maxTris) throw new Error(`Model has ${tris.toLocaleString()} triangles; the limit is ${LIMITS.maxTris.toLocaleString()}. Decimate it first.`);
+  if (tris > LIMITS.warnTris) warnings.push(`Heavy model (${Math.round(tris / 1000)}K triangles): it works, but may lower FPS for everyone when several players use big models.`);
   downscaleTextures(scene, warnings);
   scene.updateMatrixWorld(true);
   const rig = mapRigByNames(scene, exact);
@@ -169,8 +173,7 @@ export async function parseAvatar(arrayBuffer, fmt) {
 }
 
 // ------------------------------------------------------------------ the avatar instance
-const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3();
-const DOWN_OUT = 0.1; // arms hang slightly away from the body
+const _v = new THREE.Vector3();
 
 export function createCustomAvatar(ctx, asset, { name = '', local = false, hue = 0.55, height = 1.75, flip = false } = {}) {
   const { scene } = ctx;
@@ -202,30 +205,9 @@ export function createCustomAvatar(ctx, asset, { name = '', local = false, hue =
   holder.rotation.y = yawFix;
   fit();
 
-  // ---- rest data for rotations expressed in character (root) axes
-  const rootInvQ = new THREE.Quaternion(); // root is identity at build time
-  const rest = {};
-  const restWorldQ = (o) => o.getWorldQuaternion(new THREE.Quaternion()).premultiply(rootInvQ);
-  const posR = (o) => o.getWorldPosition(new THREE.Vector3());
-  if (rigOK) for (const [slot, b] of Object.entries(bones)) {
-    const W = restWorldQ(b); rest[slot] = { b, q0: b.quaternion.clone(), W, Wi: W.clone().invert(), p0: b.position.clone() };
-  }
-  let hipsRestY = 0.92, parentInv = null, hipsRestPos = null, D = {};
-  if (rigOK) {
-    hipsRestPos = posR(bones.hips); hipsRestY = hipsRestPos.y;
-    parentInv = bones.hips.parent.matrixWorld.clone().invert();
-    for (const side of ['L', 'R']) {
-      const sx = side === 'L' ? -1 : 1; const target = new THREE.Vector3(sx * Math.sin(DOWN_OUT), -Math.cos(DOWN_OUT), 0);
-      const pu = posR(bones['upperArm' + side]), pl = posR(bones['lowerArm' + side]);
-      const ph = bones['hand' + side] ? posR(bones['hand' + side]) : null;
-      const du = pl.clone().sub(pu).normalize(); const df = ph ? ph.clone().sub(pl).normalize() : du.clone();
-      const Du = new THREE.Quaternion().setFromUnitVectors(du, target); const Df = new THREE.Quaternion().setFromUnitVectors(df, target);
-      D[side] = { Du, DuI: Du.clone().invert(), Df };
-    }
-  }
-  // set a bone so that its world rotation = R * restWorld (R in character axes), given parents already posed
-  const setRot = (slot, R) => { const r = rest[slot]; if (!r) return; r.b.quaternion.copy(r.q0).multiply(_q.copy(r.Wi).multiply(R).multiply(r.W)); };
-  const setRotChild = (slot, Rparent, Rworld) => { _q2.copy(Rparent).invert().multiply(Rworld); setRot(slot, _q2); };
+  // ---- retargeted clips + locomotion state machine (src/avatars/anim.js); bound while root is at identity
+  const anim = rigOK ? createAnimator(bindRig(root, bones)) : null;
+  const restHipsY = anim ? anim.rig.hipsY : height * 0.53;
 
   // VRM node constraints (e.g. twist bones that carry the arm skin): rebuild on this clone, run every frame
   let cons = null;
@@ -240,81 +222,28 @@ export function createCustomAvatar(ctx, asset, { name = '', local = false, hue =
   }
   scene.add(root);
 
-  // ---- joints: same 18-vector as the mannequin
-  const BLEND = 0.3; let pose = 'stand', blendT = 1, from = null, phase = 0, visible = true; // set below: local starts hidden
-  const cur = new Float32Array(18), tgt = new Float32Array(18), last = new Float32Array(18);
-  let extra = { lean: 0, bob: 0 };
-  function setPose(p) { p = POSES[p] ? p : 'stand'; if (p === pose) return; from = last.slice(); pose = p; blendT = 0; }
-  const RA = new THREE.Quaternion(), RK = new THREE.Quaternion(), RH = new THREE.Quaternion(), tmp = new THREE.Quaternion();
-  function write(j) {
-    last.set(j);
-    if (!rigOK) { // static mode: bob + tilt the whole model
-      holder.position.y = baseY + (j[0] - 0.92) * (pose === 'stand' ? 1 : 0);
-      holder.rotation.x = -extra.lean; return;
-    }
-    // hips: height map (mannequin 0.12 ↔ 0.92  ->  0.12 ↔ rest hips height) and pitch
-    const y = 0.12 + (j[0] - 0.12) * (hipsRestY - 0.12) / 0.8;
-    // parentInv maps root space -> hips-parent local (root was identity when it was captured)
-    rest.hips.b.position.copy(_v.set(hipsRestPos.x, y, hipsRestPos.z).applyMatrix4(parentInv));
-    RH.setFromEuler(_e.set(j[1] - extra.lean, 0, 0));
-    setRot('hips', RH);
-    const limbs = [['upperArmL', 'lowerArmL', 'L', true], ['upperArmR', 'lowerArmR', 'R', true], ['upperLegL', 'lowerLegL', 'L', false], ['upperLegR', 'lowerLegR', 'R', false]];
-    limbs.forEach(([up, lo, side, arm], i) => {
-      const o = 2 + i * 4;
-      RA.setFromEuler(_e.set(j[o], j[o + 1], j[o + 2], 'XYZ'));
-      RK.setFromEuler(_e.set(arm ? Math.abs(j[o + 3]) : j[o + 3], 0, 0));
-      // parents of the limb roots are posed by the hips rotation (RH) only: spine/chest stay at rest
-      if (arm) {
-        const d = D[side];
-        const Rup = tmp.copy(RH).multiply(RA).multiply(d.Du);            // world (char) rotation of the upper arm
-        setRotChild(up, RH, Rup);
-        const Rlo = new THREE.Quaternion().copy(RH).multiply(RA).multiply(RK).multiply(d.Df);
-        setRotChild(lo, Rup, Rlo);
-      } else {
-        const Rup = tmp.copy(RH).multiply(RA);
-        setRotChild(up, RH, Rup);
-        setRotChild(lo, Rup, new THREE.Quaternion().copy(Rup).multiply(RK));
-      }
-    });
-  }
-    const baseY = holder.position.y;
+  const baseY = holder.position.y; let visible = true, phase = 0, staticPose = 'stand'; // set below: local starts hidden
+  function setPose(p) { if (anim) anim.setPose(p); else staticPose = POSES[p] && p !== 'stand' ? p : 'stand'; }
+  const curPose = () => (anim ? anim.pose : staticPose);
 
-  function update(dt, { pos, vel, yaw = 0, grounded = true, swimming = false, pose: p } = {}) {
-    if (p !== undefined) setPose(p);
+  function update(dt, inp = {}) {
+    if (inp.pose !== undefined) setPose(inp.pose);
     root.visible = visible; if (!visible) return;
-    if (pos) root.position.copy(pos); root.rotation.y = yaw;
-    extra.lean = 0;
-    if (pose === 'stand') {
-      const speed = vel ? Math.hypot(vel.x, vel.z) : 0;
-      const amp = swimming ? 0.5 : Math.min(0.75, speed * 0.22);
-      phase += dt * (swimming ? 3.2 : 2.2 + speed * 2.1);
-      const s = Math.sin(phase);
-      const J = tgt; J.fill(0);
-      if (swimming) {
-        J.set([0, 0, -0.9 + s * 0.4], 2); J.set([0, 0, 0.9 - s * 0.4], 6);
-        J[10] = s * 0.5; J[13] = 0.4; J[14] = -s * 0.5; J[17] = 0.4;
-      } else {
-        J[10] = s * amp; J[14] = -s * amp;
-        J[13] = Math.max(0, -s) * amp * 1.2; J[17] = Math.max(0, s) * amp * 1.2;
-        J[2] = -s * amp * 0.8; J[4] = -0.08; J[6] = s * amp * 0.8; J[8] = 0.08;
-        J[5] = -0.25 - amp * 0.3; J[9] = -0.25 - amp * 0.3;
-        if (!grounded) { J[10] = -0.5; J[14] = 0.2; J[13] = 0.6; }
-        extra.lean = rigOK ? Math.min(0.12, speed * 0.02) : Math.min(0.15, speed * 0.04);
-      }
-      J[0] = 0.92 + (swimming ? 0 : Math.abs(Math.cos(phase)) * amp * 0.04 * (rigOK ? 1 : 2));
-    } else {
-      tgt.set(POSES[pose]); if (pose === 'lean') tgt[0] = 0.92;
-      phase += dt * 1.6; tgt[1] += Math.sin(phase) * 0.012;
+    const pos = inp.pos, yaw = inp.yaw || 0;
+    if (anim) {
+      const lod = local ? 0 : avatarLod(ctx.camera, pos);
+      const r = anim.update(dt, inp, lod);
+      if (pos) placeRoot(root, pos, yaw, r);
+      if (cons && lod !== 2) { root.updateMatrixWorld(true); cons.update(); }
+    } else { // static mode (no humanoid rig): bob + tilt the whole model
+      const v = inp.vel, speed = v ? Math.hypot(v.x, v.z) : 0; phase += dt * (2.2 + speed * 2.1);
+      holder.position.y = baseY + (staticPose === 'stand' && !inp.swimming ? Math.abs(Math.cos(phase)) * Math.min(0.75, speed * 0.22) * 0.08 : 0);
+      holder.rotation.x = staticPose === 'stand' ? -Math.min(0.15, speed * 0.04) : 0;
+      if (pos) root.position.copy(pos); root.rotation.set(0, yaw, 0);
     }
-    if (blendT < 1 && from) {
-      blendT = Math.min(1, blendT + dt / BLEND); const f = blendT * blendT * (3 - 2 * blendT);
-      for (let i = 0; i < 18; i++) cur[i] = from[i] + (tgt[i] - from[i]) * f;
-      write(cur);
-    } else write(tgt);
-    if (cons) { root.updateMatrixWorld(true); cons.update(); }
     if (tag) {
-      const hy = rigOK ? 0.12 + (last[0] - 0.12) * (hipsRestY - 0.12) / 0.8 : hipsRestY;
-      tag.position.y = hy + (height - hipsRestY) + 0.25 - (pose === 'lie' ? 0.8 : 0);
+      const hy = anim ? anim.hipsY : restHipsY;
+      tag.position.y = hy + (height - restHipsY) + 0.25 - (curPose() === 'lie' ? 0.8 : 0);
     }
   }
 
@@ -326,7 +255,7 @@ export function createCustomAvatar(ctx, asset, { name = '', local = false, hue =
   function dispose() { scene.remove(root); tag?.disposeTag(); /* geometry/materials are shared with the template */ }
   update(0, { pos: new THREE.Vector3() }); // apply the rest pose once
   if (local) setVisible(false); // player.js decides (third-person only); never shown at the origin during the title menu
-  return { root, setVisible, update, setName, setHue, setPose, get pose() { return pose; }, dispose, rigged: rigOK };
+  return { root, setVisible, update, setName, setHue, setPose, get pose() { return curPose(); }, emote: (n) => anim?.emote(n), get animator() { return anim; }, dispose, rigged: rigOK };
 }
 
 // ------------------------------------------------------------------ storage
@@ -352,14 +281,14 @@ const CSS = `
   font:400 14px/1.4 Geist,-apple-system,Inter,"Segoe UI",sans-serif;letter-spacing:-.02em;color:#f7f7f7;animation:av-fade .3s var(--ease-soft) both}
 .av-back.av-closing{animation:av-fade .25s var(--ease-soft) reverse forwards;pointer-events:none}
 .av-card{position:relative;background:#1e1e1e;border:1px solid rgba(247,247,247,.06);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:10px;
-  box-shadow:0 2px 6px -2px rgba(0,0,0,.2),0 24px 60px -12px rgba(0,0,0,.5);width:340px;overflow:hidden;animation:av-rise .5s var(--ease-out-expo) both}
+  box-shadow:0 2px 6px -2px rgba(0,0,0,.2),0 24px 60px -12px rgba(0,0,0,.5);width:340px;max-height:calc(100vh - 24px);overflow:hidden auto;scrollbar-width:none;box-sizing:border-box;animation:av-rise .5s var(--ease-out-expo) both}
 .av-closing .av-card{animation:av-sink .25s var(--ease-soft) forwards}
 .av-card::after{content:"";position:absolute;inset:0;pointer-events:none;background:url(${GRAIN});opacity:.06;mix-blend-mode:overlay}
 .av-head{display:flex;justify-content:space-between;align-items:flex-start}
 .av-title{font-size:22px;font-weight:500;letter-spacing:-.05em;line-height:1.05}
 .av-sub,.av-chip,.av-row label,.av-row span{font:600 10.5px/1 "Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:-.4px;text-transform:uppercase}
 .av-sub{color:rgba(247,247,247,.32);margin-top:5px}.av-sub b{color:#f2c84b;font-weight:600}
-.av-card canvas{width:312px;height:312px;border-radius:6px;background:#191919;border:1px solid rgba(247,247,247,.06)}
+.av-card canvas{flex:none;width:312px;height:312px;border-radius:6px;background:#191919;border:1px solid rgba(247,247,247,.06)}
 .av-drop{box-shadow:0 0 0 1px #f2c84b}
 .av-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .av-row label{min-width:56px;color:rgba(247,247,247,.32)}.av-row span{color:rgba(247,247,247,.66);min-width:44px;text-align:right}
@@ -382,27 +311,59 @@ const CSS = `
 .av-help{font-size:12px;color:rgba(247,247,247,.32);letter-spacing:-.01em}
 .av-msg{font-size:12px;white-space:pre-wrap;display:flex;flex-direction:column;gap:3px}.av-msg:empty{display:none}
 .av-err{color:#ff8a7a}.av-warn{color:rgba(242,200,75,.85)}.av-info{color:rgba(247,247,247,.66)}
+.av-body{display:flex;flex-direction:column;gap:10px;min-height:0}
+.av-left,.av-right{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
+.av-card>*,.av-left>*,.av-right>*{flex-shrink:0}
+.av-libh{position:sticky;top:-14px;z-index:2;display:flex;flex-direction:column;gap:8px;margin:0 -3px;padding:2px 3px 4px;background:#1e1e1e}
+.av-libh .av-row{justify-content:space-between}
+.av-row .av-chip,.av-row .av-chip span{min-width:0;text-align:left}
+.av-lib{flex:none;display:grid;grid-template-columns:repeat(5,1fr);grid-auto-rows:74px;gap:5px;max-height:172px;overflow-y:auto;padding:3px;margin:-3px;scrollbar-width:thin;scrollbar-color:#3a3a3a transparent}
+@media (min-width:900px){
+  .av-card{width:min(800px,calc(100vw - 24px));overflow:hidden}
+  .av-body{flex-direction:row;gap:16px;flex:1 1 auto}
+  .av-left{flex:none;width:312px;overflow:hidden auto;scrollbar-width:none}
+  .av-right{flex:1 1 0}
+  .av-libh{position:static}
+  .av-lib{flex:1 1 0;min-height:400px;max-height:none;grid-auto-rows:96px;align-content:start}}
+.av-card .av-tile{position:relative;padding:0;overflow:hidden;background:#262626;border-radius:6px;
+  transition:transform .3s var(--ease-out-expo),background .25s var(--ease-soft),box-shadow .25s var(--ease-soft)}
+.av-card .av-tile:hover{transform:translateY(-2px);background:#2c2c2c}
+.av-card .av-tile:active{transform:scale(.97);transition:transform .2s var(--ease-soft)}
+.av-tile img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s var(--ease-soft)}.av-tile img.ok{opacity:1}
+.av-tile i{position:absolute;left:0;right:0;bottom:0;padding:12px 4px 3px;background:linear-gradient(transparent,rgba(20,20,20,.9));font:600 8.5px/1 "Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  letter-spacing:-.4px;text-transform:uppercase;font-style:normal;color:rgba(247,247,247,.66);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.av-tile[data-on]{box-shadow:0 0 0 1px #f2c84b}.av-tile[data-on] i{color:#f2c84b}
+.av-tile[data-pv]{box-shadow:0 0 0 1px rgba(247,247,247,.55)}.av-tile[data-pv] i{color:#f7f7f7}
+.av-pend{display:none}.av-pend.on{display:flex;animation:av-rise .3s var(--ease-out-expo) both}
 @keyframes av-fade{from{opacity:0}}
 @keyframes av-rise{from{opacity:0;transform:translateY(6%) scale(.96)}}
 @keyframes av-sink{to{opacity:0;transform:translateY(4%) scale(.97)}}
 @keyframes av-slot{from{transform:translateY(110%)}}
 @media (prefers-reduced-motion:reduce){.av-card,.av-closing .av-card{animation:av-fade .2s linear both}.av-closing .av-card{animation-direction:reverse}
-  .av-roll .ch>b{animation:none}.av-card button,.av-seg::before{transition:none}.av-card button:active{transform:none}}`;
+  .av-roll .ch>b{animation:none}.av-card button,.av-seg::before{transition:none}.av-card button:active{transform:none}
+  .av-card .av-tile,.av-card .av-tile:active{transition:none}.av-card .av-tile:hover,.av-card .av-tile:active{transform:none}.av-pend.on{animation:none}}`;
 let cssDone = false;
 const FMT = (n) => { const m = /\.(glb|vrm|fbx)$/i.exec(n || ''); return m ? m[1].toLowerCase() : null; };
 
 export function openAvatarPanel({ onChange } = {}) {
+  const libP = import('./library.js'); // built-in characters (dynamic: no static import cycle with library.js)
   if (!cssDone) { const st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st); cssDone = true; }
   const back = document.createElement('div'); back.className = 'av-back';
   back.innerHTML = `<div class="av-card"><div class="av-head"><div><div class="av-title">Your avatar</div><div class="av-sub">No01 / <b>AVATAR</b> · PREVIEW</div></div>
     <button class="x" data-a="x" aria-label="Close"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l8 8M10 2l-8 8"/></svg></button></div>
+    <div class="av-body"><div class="av-left">
     <canvas width="624" height="624"></canvas><div class="av-chips"></div>
-    <div class="av-row"><div class="av-seg" data-on="m" role="tablist"><button data-a="def" role="tab">Default</button><button data-a="cus" role="tab">Custom</button></div>
-    <button class="pri" data-a="imp">Import model…</button><button data-a="turn">Turn around</button></div>
+    <div class="av-row"><button data-a="turn">Turn around</button></div>
     <div class="av-row" data-r="ht"><label>Height</label><input type="range" min="1.4" max="2.2" step="0.01"><span></span></div>
     <div class="av-row" data-r="hue"><label>Shirt</label><input type="range" min="0" max="1" step="0.01"></div>
-    <div class="av-help">Works best with a humanoid rig, e.g. VRoid Studio (.vrm) or Mixamo (.fbx with skin). Drop a .glb, .vrm or .fbx here.</div>
-    <div class="av-msg"></div><input type="file" accept=".glb,.vrm,.fbx" hidden></div>`;
+    <div class="av-msg"></div></div>
+    <div class="av-right"><div class="av-libh"><div class="av-row"><span class="av-chip"><i>CHARACTERS::</i><span class="av-libn"></span></span></div>
+    <div class="av-row"><div class="av-seg" data-on="m" role="tablist"><button data-a="def" role="tab">Default</button><button data-a="cus" role="tab">Custom</button></div>
+    <button class="pri" data-a="imp">Import model…</button></div></div>
+    <div class="av-lib" role="listbox" aria-label="Characters"></div>
+    <div class="av-row av-pend"><button class="pri" data-a="use">Use character</button><button data-a="cancel">Cancel</button></div>
+    <div class="av-help">Or import your own: works best with a humanoid rig, e.g. VRoid Studio (.vrm) or Mixamo (.fbx with skin). Drop a .glb, .vrm or .fbx here.</div>
+    </div></div><input type="file" accept=".glb,.vrm,.fbx" hidden></div>`;
   document.body.appendChild(back);
   const $ = (s) => back.querySelector(s); const card = $('.av-card'); const canvas = $('canvas'); const msg = $('.av-msg'); const chipsEl = $('.av-chips'); const file = $('input[type=file]');
   const htIn = $('[data-r=ht] input'), htOut = $('[data-r=ht] span'), hueIn = $('[data-r=hue] input');
@@ -426,21 +387,48 @@ export function openAvatarPanel({ onChange } = {}) {
   const turn = new THREE.Group(); sc.add(turn);
   const pctx = { scene: turn };
   let lastC = null, av = null, asset = null, desc = store.mine() || { k: 'm', h: 0.55 }, t0 = performance.now(), last = t0, raf = 0, closed = false;
+  const isModel = (d) => d.k === 'c' || d.k === 'b';
+  // library preview: a click previews in the turntable; "Use" commits. pending = {desc, asset} to return to on Cancel.
+  let pending = null, lib = null, pick = 0;
+  const libEl = $('.av-lib'), pendEl = $('.av-pend');
+  const markTiles = () => { for (const t of libEl.children) {
+    const id = t.dataset.id, cur = pending ? pending.desc : desc, on = cur.k === 'b' && cur.id === id;
+    t.toggleAttribute('data-on', on); t.toggleAttribute('data-pv', !!pending && desc.k === 'b' && desc.id === id); t.setAttribute('aria-selected', String(on)); } };
+  const setPending = (p) => { pending = p; pendEl.classList.toggle('on', !!p); if (p && lib) $('[data-a=use]').textContent = 'Use ' + (lib.libraryEntry(desc.id)?.name || 'character'); };
+  libP.then((m) => { if (closed) return; lib = m; $('.av-libn').textContent = String(m.LIBRARY.length);
+    for (const ent of m.LIBRARY) { const b = document.createElement('button'); b.className = 'av-tile'; b.dataset.a = 'lib'; b.dataset.id = ent.id; b.title = ent.name; b.setAttribute('role', 'option');
+      const img = new Image(); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.onload = () => img.classList.add('ok'); img.src = m.libraryUrl(ent.thumb);
+      const i = document.createElement('i'); i.textContent = ent.name; b.append(img, i); libEl.appendChild(b); }
+    markTiles(); }).catch(e => say([['err', 'Character library failed to load: ' + e.message]]));
+  async function previewLib(id) {
+    if (!lib) return; const ent = lib.libraryEntry(id); if (!ent) return; const my = ++pick;
+    say([['info', `Loading ${ent.name}…`]]);
+    try {
+      const a = await lib.loadLibraryAsset(id); if (closed || my !== pick) return;
+      const prev = pending || { desc: { ...desc }, asset };
+      asset = a; desc = { k: 'b', id, ht: ent.height, fl: false }; setPending(prev); build();
+      say([...describe(a, true).map(w => /^No humanoid rig/.test(w[1]) ? ['info', 'No humanoid rig: moves as a whole.'] : w), ['info', ent.credit]]);
+    } catch (e) { if (my === pick) say([['err', e.message || String(e)]]); }
+  }
   const build = () => {
     av?.dispose(); av = null;
-    if (desc.k === 'c' && asset) av = createCustomAvatar(pctx, asset, { height: desc.ht || 1.75, flip: !!desc.fl, local: true });
+    if (isModel(desc) && asset) av = createCustomAvatar(pctx, asset, { height: desc.ht || 1.75, flip: !!desc.fl, local: true });
     else av = createAvatar(pctx, { hue: desc.h ?? 0.55, local: true });
     av.setVisible(true); // local avatars start hidden; the preview shows its own
-    const ht = desc.k === 'c' ? desc.ht || 1.75 : 1.87; cam.position.set(0, ht * 0.62, -ht * 2.4); cam.lookAt(0, ht * 0.5, 0);
+    const ht = isModel(desc) ? desc.ht || 1.75 : 1.87, span = asset && isModel(desc) && !asset.rig.humanoid ? ht * 2 : ht; // static models (fox) are long, not tall
+    cam.position.set(0, ht * 0.62 + (span - ht) * 0.25, -span * 2.4); cam.lookAt(0, ht * 0.5, 0);
     htIn.value = desc.ht || 1.75; htOut.textContent = (+htIn.value).toFixed(2) + ' m'; hueIn.value = desc.h ?? 0.55;
-    if (desc.k !== 'c') chips([['RIG', 'MANNEQUIN'], ['SHIRT', Math.round((desc.h ?? 0.55) * 360) + '°']]); else if (asset) describe(asset);
-    $('.av-seg').dataset.on = desc.k === 'c' ? 'c' : 'm';
-    $('[data-r=ht]').style.display = desc.k === 'c' ? '' : 'none'; $('[data-r=hue]').style.display = desc.k === 'c' ? 'none' : ''; $('[data-a=turn]').style.display = desc.k === 'c' ? '' : 'none';
+    if (!isModel(desc)) chips([['RIG', 'MANNEQUIN'], ['SHIRT', Math.round((desc.h ?? 0.55) * 360) + '°']]); else if (asset) describe(asset);
+    $('.av-seg').dataset.on = isModel(desc) ? 'c' : 'm';
+    $('[data-r=ht]').style.display = isModel(desc) && (desc.ht || 1.75) >= 1.4 ? '' : 'none'; $('[data-r=hue]').style.display = isModel(desc) ? 'none' : ''; $('[data-a=turn]').style.display = isModel(desc) ? '' : 'none';
+    markTiles();
   };
-  const commit = () => { store.setMine(desc); onChange?.(desc, desc.k === 'c' ? asset : null); };
+  const commit = () => { store.setMine(desc); onChange?.(desc, isModel(desc) ? asset : null); };
+  const commitIf = () => { if (!pending) commit(); }; // tweaks to a previewed character wait for Use
   const kfmt = (n) => n >= 1000 ? Math.round(n / 1000) + 'K' : String(n);
   const describe = (a, roll = false) => { const m = Object.keys(a.rig.bones).length;
-    chips([['RIG', a.rig.humanoid ? `HUMANOID ${m}/17` : 'STATIC'], ['TRIS', kfmt(a.stats.tris)], ['FILE', a.fmt.toUpperCase()], ['SIZE', (a.stats.bytes / 1e6).toFixed(1) + 'MB']], roll);
+    const ent = desc.k === 'b' && lib ? lib.libraryEntry(desc.id) : null;
+    chips([...(ent ? [['CHAR', ent.name]] : []), ['RIG', a.rig.humanoid ? `HUMANOID ${m}/17` : 'STATIC'], ['TRIS', kfmt(a.stats.tris)], ...(ent ? [] : [['FILE', a.fmt.toUpperCase()]]), ['SIZE', (a.stats.bytes / 1e6).toFixed(1) + 'MB']], roll);
     return a.warnings.map(w => ['warn', w]); };
   const loop = () => {
     if (closed) return; raf = requestAnimationFrame(loop);
@@ -456,6 +444,7 @@ export function openAvatarPanel({ onChange } = {}) {
       const a = await parseAvatar(buf, fmt);
       let id = desc.id;
       if (isNew) id = await store.putFile(buf, { name: metaName, fmt });
+      if (isNew) { pick++; setPending(null); }
       asset = a; desc = { k: 'c', id, f: fmt, sz: buf.byteLength, ht: isNew ? 1.75 : desc.ht || 1.75, fl: isNew ? false : !!desc.fl };
       lastC = { desc: { ...desc }, asset: a }; build(); say(describe(a, true)); if (isNew) commit();
     } catch (e) { say([['err', e.message || String(e)]]); if (!isNew) { desc = { k: 'm', h: 0.55 }; build(); } }
@@ -470,13 +459,16 @@ export function openAvatarPanel({ onChange } = {}) {
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
     if (a === 'x') close();
     else if (a === 'imp') file.click();
-    else if (a === 'turn' && desc.k === 'c') { desc.fl = !desc.fl; build(); commit(); }
-    else if (a === 'def') { if (desc.k === 'c') lastC = { desc: { ...desc }, asset }; desc = { k: 'm', h: desc.h ?? 0.55 }; asset = null; build(); say([]); commit(); }
-    else if (a === 'cus' && desc.k !== 'c') { if (lastC?.asset) { desc = { ...lastC.desc, h: desc.h }; asset = lastC.asset; build(); describe(asset, true); commit(); } else file.click(); }
+    else if (a === 'lib') previewLib(e.target.closest('[data-id]').dataset.id);
+    else if (a === 'use' && pending) { setPending(null); lastC = { desc: { ...desc }, asset }; commit(); build(); say(describe(asset)); }
+    else if (a === 'cancel' && pending) { pick++; desc = pending.desc; asset = pending.asset; setPending(null); build(); say([]); }
+    else if (a === 'turn' && isModel(desc)) { desc.fl = !desc.fl; build(); commitIf(); }
+    else if (a === 'def') { pick++; if (pending) { desc = pending.desc; asset = pending.asset; setPending(null); } if (isModel(desc)) lastC = { desc: { ...desc }, asset }; desc = { k: 'm', h: desc.h ?? 0.55 }; asset = null; build(); say([]); commit(); }
+    else if (a === 'cus' && !isModel(desc)) { if (lastC?.asset) { desc = { ...lastC.desc, h: desc.h }; asset = lastC.asset; build(); describe(asset, true); commit(); } else file.click(); }
   });
   file.onchange = () => { if (file.files[0]) importFile(file.files[0]); file.value = ''; };
   htIn.oninput = () => { htOut.textContent = (+htIn.value).toFixed(2) + ' m'; };
-  htIn.onchange = () => { desc.ht = +htIn.value; build(); commit(); };
+  htIn.onchange = () => { desc.ht = +htIn.value; build(); commitIf(); };
   hueIn.oninput = () => { desc.h = +hueIn.value; av?.setHue(desc.h); chips([['RIG', 'MANNEQUIN'], ['SHIRT', Math.round(desc.h * 360) + '°']]); };
   hueIn.onchange = () => commit();
   card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('av-drop'); });
@@ -491,5 +483,7 @@ export function openAvatarPanel({ onChange } = {}) {
   }
   build(); loop();
   if (desc.k === 'c' && desc.id) store.get(desc.id).then(r => r ? loadBytes(r.bytes, desc.f, false) : say([['warn', 'Saved model not found; using the default.']]));
+  else if (desc.k === 'b') libP.then(m => m.loadLibraryAsset(desc.id)).then(a => { if (closed || desc.k !== 'b') return; asset = a; lastC = { desc: { ...desc }, asset: a }; build(); say(describe(a, true)); })
+    .catch(e => { if (closed) return; say([['warn', 'Saved character failed to load; using the default. ' + (e.message || '')]]); desc = { k: 'm', h: 0.55 }; build(); });
   return { close };
 }

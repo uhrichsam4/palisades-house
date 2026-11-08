@@ -55,7 +55,7 @@ const goNear = (page, id) => page.evaluate((id) => {
   const V = window.__videos, c = V.cards.find(c => c.spot.id === id), s = c.spot, at = c.at;
   let fx = s.cam.look[0] - s.cam.pos[0], fz = s.cam.look[2] - s.cam.pos[2]; const l = Math.hypot(fx, fz); fx /= l; fz /= l;
   const x = at.x - fx * 1.4, z = at.z - fz * 1.4, floor = s.level ? 3.35 : 0;
-  const P = window.__player; P.teleport(x, floor + 0.02, z, Math.atan2(-(at.x - x), -(at.z - z)));
+  const P = window.__player; P.state.thirdPerson = false; P.teleport(x, floor + 0.02, z, Math.atan2(-(at.x - x), -(at.z - z)));
   P.state.pitch = Math.atan2(at.y - (floor + 1.62), 1.4);
   return [x, z];
 }, id);

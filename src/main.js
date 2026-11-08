@@ -268,8 +268,8 @@ async function main() {
   else { camView = 'menu'; menuCam(0); document.body.classList.add('menu-open'); }
   function flyToSpawn() {
     const s = spawnFor(mp?.connected ? mp.selfId : 'local');
-    player.teleport(s[0], s[1], s[2], Math.PI); player.state.pitch = -0.05; player.state.keys.clear(); player.state.thirdPerson = false;
-    const to = { pos: new THREE.Vector3(s[0], s[1] + 1.62, s[2]), quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.05, Math.PI, 0, 'YXZ')), fov: 70 };
+    player.teleport(s[0], s[1], s[2], Math.PI); player.state.pitch = -0.05; player.state.keys.clear(); player.state.thirdPerson = true; // Fortnite-style third person by default (V = first person)
+    const to = { pos: new THREE.Vector3(s[0], s[1] + 2.0, s[2] - 3.0), quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12, Math.PI, 0, 'YXZ')), fov: 70 };
     camTween = { a: camPose(), b: () => to, t: 0, dur: 2.2, then: () => { camView = 'play'; } }; camView = 'fly';
   }
   function flyToMenu() { player.state.keys.clear(); menuT0 = camT; camTween = { a: camPose(), b: () => orbitPose(camT), t: 0, dur: 2.0, then: () => { camView = 'menu'; } }; camView = 'fly'; }

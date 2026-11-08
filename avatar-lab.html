@@ -1,75 +1,121 @@
 <!doctype html>
-<!-- Dev only: custom-avatar lab. Loads test models from shots/avatar_models/ (local, never committed)
-     and shows each one idle / walk / sit / lie, with the mannequin as the first row.
-     ?panel=1 opens the avatar modal instead. Results in window.__lab. -->
+<!-- Dev only: avatar animation lab. Loads test models from shots/avatar_models/ (local, never committed) and shows
+     each one (mannequin first) in idle / walk / run / jump / swim / sit / crouch / wave, plus a side-view filmstrip
+     of one walk cycle. Poses are warmed up deterministically, then frozen (?live=1 keeps animating).
+     window.__lab: { ready, models[], errors[], check[], rows, view(row, 'states'|'strip') } — tools/avatar_test.mjs
+     calls view() per row and screenshots. ?panel=1 opens the avatar modal instead. -->
 <html><head><meta charset="utf-8"><title>Avatar lab</title><link rel="icon" href="data:,">
-<style>html,body{margin:0;height:100%;background:#1c2128;overflow:hidden}canvas{display:block}</style>
+<style>html,body{margin:0;height:100%;background:#1c2128;overflow:hidden}canvas{display:block}
+#lbl{position:fixed;left:10px;top:8px;font:600 15px/1.3 ui-monospace,Menlo,monospace;color:#f2c84b;white-space:pre}</style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/three-addons/" } }
 </script>
-</head><body>
+</head><body><div id="lbl"></div>
 <script type="module">
 import * as THREE from 'three';
 import { createAvatar } from './src/avatar.js';
 import { parseAvatar, createCustomAvatar, openAvatarPanel } from './src/avatars/index.js';
+import { loadAnimLibrary } from './src/avatars/anim.js';
 
-const lab = window.__lab = { ready: false, models: [], errors: [] };
+const lab = window.__lab = { ready: false, models: [], errors: [], check: [] };
 const q = new URLSearchParams(location.search);
 if (q.get('panel')) { openAvatarPanel({ onChange: (d) => console.log('avatar', JSON.stringify(d)) }); lab.ready = true; }
 else {
-const FILES = (q.get('files') || 'Xbot.glb,Soldier.glb,Michelle.glb,Samba Dancing.fbx,VRM1_Constraint_Twist_Sample.vrm').split(',');
-const POSES = [['idle', 'stand', 0], ['walk', 'stand', 1.6], ['sit', 'sit', 0], ['lie', 'lie', 0]];
+const FILES = (q.get('files') || 'Xbot.glb,Soldier.glb,Michelle.glb,Samba Dancing.fbx,VRM1_Constraint_Twist_Sample.vrm,enemy_01.glb,Workspace_6__rigged.glb,woman-base.glb,ped_01.glb').split(',').filter(Boolean);
+const lib = await loadAnimLibrary(); if (!lib) lab.errors.push('animation library did not load');
+// states: [name, input(t) for the warm-up, warm-up seconds]
+const V = (x, y, z) => ({ x, y, z });
+const STATES = [
+  ['idle', () => ({ vel: V(0, 0, 0) }), 1.0],
+  ['walk', () => ({ vel: V(0, 0, -1.25) }), 1.5],
+  ['run', () => ({ vel: V(0, 0, -4.2) }), 1.5],
+  ['jump', (t) => t < 0.6 ? { vel: V(0, 0, 0) } : { vel: V(0, 4.5 - (t - 0.6) * 9.8, 0), grounded: false }, 0.85],
+  ['fall', (t) => t < 0.4 ? { vel: V(0, 0, 0) } : { vel: V(0, -3, 0), grounded: false }, 1.2],
+  ['swim', () => ({ vel: V(0, 0, -1.4), swimming: true, grounded: false }), 2.0],
+  ['tread', () => ({ vel: V(0, 0, 0), swimming: true, grounded: false }), 1.5],
+  ['sit', () => ({ vel: V(0, 0, 0), pose: 'sit' }), 1.0],
+  ['crouch', () => ({ vel: V(0, 0, -0.8), crouch: true }), 1.5],
+  ['wave', (t) => ({ vel: V(0, 0, 0), emote: t > 0.3 ? 1 : 0 }), 1.6],
+];
+const STRIP = 8;
 const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(1); renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x2a313b);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 1.5));
 const sun = new THREE.DirectionalLight(0xffffff, 2.4); sun.position.set(-6, 12, -8); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, far: 40 }); scene.add(sun);
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x77808c, roughness: 0.95 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-// seats for the sit column
-const rows = FILES.length + 1, DX = 1.6, DZ = 3.0;
-// orthographic, from the front (models face −z) and a little to the side, ~25° down; ?side=1 for a side view
-const cz = (rows - 1) * DZ / 2, cx = DX * 1.5, span = 6.2;
-const asp = innerWidth / innerHeight; const cam = new THREE.OrthographicCamera(-span * asp, span * asp, span, -span, 0.1, 100);
-const yawC = q.get('side') ? -Math.PI / 2 + 0.2 : 0.35;
-cam.position.set(cx - Math.sin(yawC) * 30, 10 + 0.9, cz - Math.cos(yawC) * 30); cam.lookAt(cx, 0.9, cz);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, far: 60 }); scene.add(sun); scene.add(sun.target);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x77808c, roughness: 0.95 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+// grid lines on the floor: foot sliding / ground contact are easier to judge
+const grid = new THREE.GridHelper(400, 400, 0x5d6672, 0x5d6672); grid.position.y = 0.001; scene.add(grid);
+const waterMat = new THREE.MeshStandardMaterial({ color: 0x2fb7c9, transparent: true, opacity: 0.55, roughness: 0.1, depthWrite: false });
+const DX = 2.1, DZ = 4.0, STRIP_Z0 = 200, SX = 1.0;
 const ctx = { scene };
-const avs = [];
-const place = (make, row, label) => {
-  POSES.forEach(([nm, pose, speed], col) => {
-    const av = make(`${label} · ${nm}`);
-    const pos = new THREE.Vector3(col * DX, 0, row * DZ);
-    if (pose === 'sit') { const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), new THREE.MeshStandardMaterial({ color: 0x9a7b5a })); seat.position.set(pos.x, 0.225, pos.z + 0.08); seat.castShadow = seat.receiveShadow = true; scene.add(seat); pos.y = 0.45; }
-    avs.push({ av, pos, pose, speed });
+const cells = []; const rowNames = [];
+function place(make, row, label) {
+  rowNames[row] = label;
+  STATES.forEach(([nm, inp, warm], col) => {
+    const av = make(`${label} · ${nm}`); const pos = new THREE.Vector3(col * DX, 0, row * DZ);
+    if (nm === 'sit') { const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.5), new THREE.MeshStandardMaterial({ color: 0x9a7b5a })); seat.position.set(pos.x, 0.225, pos.z + 0.08); seat.castShadow = seat.receiveShadow = true; scene.add(seat); pos.y = 0.45; }
+    if (nm === 'swim' || nm === 'tread') { pos.y = 0.0; const w = new THREE.Mesh(new THREE.PlaneGeometry(DX * 0.95, 2.6), waterMat); w.rotation.x = -Math.PI / 2; w.position.set(pos.x, 1.45, pos.z); w.renderOrder = 5; scene.add(w); }
+    cells.push({ av, pos, nm, inp, warm, row, col });
   });
-};
+  for (let i = 0; i < STRIP; i++) { // walk cycle filmstrip, side view
+    const av = make(`${label} · walk ${i}`); const pos = new THREE.Vector3(i * SX, 0, STRIP_Z0 + row * DZ);
+    cells.push({ av, pos, nm: 'strip' + i, inp: () => ({ vel: V(0, 0, -1.25) }), warm: 1.5 + (i / STRIP) * (lib ? lib.clips.walk.dur : 1.33) * (1.25 / 1.25), row, col: i, yaw: -Math.PI / 2 });
+  }
+}
 place((n) => createAvatar(ctx, { hue: 0.55, name: n }), 0, 'mannequin');
 for (let i = 0; i < FILES.length; i++) {
   const f = FILES[i]; const fmt = f.split('.').pop().toLowerCase();
   const info = { file: f };
   try {
     const t = performance.now();
-    const buf = await (await fetch('shots/avatar_models/' + encodeURIComponent(f))).arrayBuffer();
-    const asset = await parseAvatar(buf, fmt);
+    const res = await fetch('shots/avatar_models/' + encodeURIComponent(f)); if (!res.ok) throw new Error('HTTP ' + res.status);
+    const asset = await parseAvatar(await res.arrayBuffer(), fmt);
     Object.assign(info, { ms: Math.round(performance.now() - t), humanoid: asset.rig.humanoid, source: asset.rig.source, bones: asset.rig.bones, missing: asset.rig.missing, broken: asset.rig.broken, stats: asset.stats, warnings: asset.warnings, srcHeight: +asset.height.toFixed(3) });
-    place((n) => createCustomAvatar(ctx, asset, { name: n, height: 1.75 }), i + 1, f.replace(/\.\w+$/, ''));
+    place((n) => createCustomAvatar(ctx, asset, { name: n, height: 1.75 }), lab.models.length + 1, f.replace(/\.\w+$/, ''));
   } catch (e) { info.error = String(e?.stack || e); lab.errors.push(f + ': ' + e.message); }
   lab.models.push(info);
 }
-const clock = new THREE.Clock(); let frames = 0;
-const tick = () => {
-  const dt = Math.min(0.05, clock.getDelta());
-  for (const a of avs) a.av.update(dt, { pos: a.pos, vel: { x: 0, z: a.speed }, yaw: 0, grounded: true, pose: a.pose });
-  renderer.render(scene, cam); frames++;
-  if (frames === 60) {
-    // facing check: head (or top) should be in front (−z) of nothing in particular; report hand x for L/R sanity + feet height
-    lab.check = avs.filter((_, i) => i % 4 === 0).map(a => { const b = new THREE.Box3().setFromObject(a.av.root, true); return { minY: +b.min.y.toFixed(3), maxY: +b.max.y.toFixed(3) }; });
-    lab.ready = true;
-  }
-  requestAnimationFrame(tick);
+lab.rows = rowNames.length;
+// deterministic warm-up at 60 Hz, then freeze
+const DT = 1 / 60;
+for (const c of cells) {
+  const steps = Math.round(c.warm / DT);
+  for (let i = 0; i < steps; i++) { const inp = c.inp(i * DT); c.av.update(DT, { pos: c.pos, yaw: c.yaw ?? 0, grounded: true, pose: 'stand', crouch: false, swimming: false, ...inp }); }
+}
+// ground-contact check: lowest skinned vertex per cell (precise box)
+const box = new THREE.Box3();
+for (const c of cells) {
+  if (!['idle', 'walk', 'run', 'crouch', 'wave', 'sit'].includes(c.nm) && !c.nm.startsWith('strip')) continue;
+  c.av.root.updateMatrixWorld(true); box.setFromObject(c.av.root, true);
+  // ignore the name tag sprite (setFromObject skips sprites without geometry bounds? it does include them; use mesh-only)
+  const b = new THREE.Box3(); c.av.root.traverse(o => { if (o.isMesh && !o.isSprite) { const bb = new THREE.Box3().setFromObject(o, true); b.union(bb); } });
+  lab.check.push({ row: rowNames[c.row], state: c.nm, minY: +(b.min.y - (c.nm === 'sit' ? 0 : c.pos.y)).toFixed(3), maxY: +(b.max.y - c.pos.y).toFixed(3) });
+}
+const asp = innerWidth / innerHeight;
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+const lbl = document.getElementById('lbl');
+lab.view = (row, mode = 'states') => {
+  const strip = mode === 'strip';
+  const w = strip ? STRIP * SX + 0.6 : STATES.length * DX + 0.2; const half = Math.max(w / asp / 2, 1.25);
+  Object.assign(cam, { left: -half * asp, right: half * asp, top: half, bottom: -half }); cam.updateProjectionMatrix();
+  const cx = strip ? (STRIP - 1) * SX / 2 : (STATES.length - 1) * DX / 2, cz = (strip ? STRIP_Z0 : 0) + row * DZ;
+  const yawC = strip ? -Math.PI / 2 + 0.12 : 0.3, cy = 0.95;
+  cam.position.set(cx - Math.sin(yawC) * 30, cy + 30 * Math.tan(0.16), cz - Math.cos(yawC) * 30); cam.lookAt(cx, cy, cz);
+  sun.position.set(cx - 6, 12, cz - 8); sun.target.position.set(cx, 0, cz);
+  for (const c of cells) c.av.root.visible = c.row === row && (strip ? c.nm.startsWith('strip') : !c.nm.startsWith('strip'));
+  lbl.textContent = rowNames[row] + (strip ? '  ·  walk cycle (8 frames, side view)' : '  ·  ' + STATES.map(s => s[0]).join(' / '));
+  renderer.render(scene, cam);
 };
-tick();
+lab.view(0);
+lab.ready = true;
+if (q.get('live')) {
+  const clock = new THREE.Clock(); let t = 0;
+  const tick = () => { const dt = Math.min(0.05, clock.getDelta()); t += dt; for (const c of cells) if (c.av.root.visible) c.av.update(dt, { pos: c.pos, yaw: c.yaw ?? 0, grounded: true, pose: 'stand', ...c.inp(c.warm + (t % 2)) }); renderer.render(scene, cam); requestAnimationFrame(tick); };
+  tick();
+}
 }
 </script>
 </body></html>
