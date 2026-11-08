@@ -86,7 +86,7 @@ function roomBox(probe) {
   return new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
 }
 
-export async function buildRoomProbes(ctx, { size = 128, passes = 2, intensity = 1.0, onStatus } = {}) {
+export async function buildRoomProbes(ctx, { size = 128, passes = 2, intensity = 1.0, onStatus, background = false } = {}) {
   const { renderer, scene } = ctx; const t0 = performance.now();
   const probes = probePoints();
   scene.updateMatrixWorld(true);
@@ -125,7 +125,8 @@ export async function buildRoomProbes(ctx, { size = 128, passes = 2, intensity =
     for (const p of used) {
       cam.position.copy(p.pos); cam.update(renderer, scene);
       next.set(p.id, pmrem.fromCubemap(rt.texture).texture);
-      if (performance.now() - t0 > 200) await new Promise(r => setTimeout(r, 0)); // keep the page responsive
+      if (background) await new Promise(r => requestAnimationFrame(() => r())); // one probe per frame: walking stays smooth
+      else if (performance.now() - t0 > 200) await new Promise(r => setTimeout(r, 0));
     }
     for (const [id, tex] of next) for (const m of byProbe.get(id) || []) { m.envMap = tex; m.envMapIntensity = (m.envMapIntensity ?? 1) * (pass === 0 ? intensity : 1); m.needsUpdate = true; }
     for (const t of textures.values()) t.dispose(); textures = next;

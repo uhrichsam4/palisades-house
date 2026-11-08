@@ -12,7 +12,9 @@ export async function createPhysics() {
   let acc = 0;
   const stepHooks = [];
 
-  const fixed = (desc) => world.createCollider(desc);
+  const tags = new Map(); // collider handle -> who made it (for the walkability audit)
+  let curTag = 'core';
+  const fixed = (desc) => { const c = world.createCollider(desc); tags.set(c.handle, curTag); return c; };
   const phys = {
     RAPIER, world, dynamics,
     // wall piece from a segment (see shell.js): p0,p1 Vector2 on face line, N Vector2 normal, depth, y range
@@ -59,6 +61,9 @@ export async function createPhysics() {
       const inv = new THREE.Matrix4().copy(group.matrixWorld).invert(); const bb = new THREE.Box3();
       group.traverse(o => { if (o.isMesh) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); const b = o.geometry.boundingBox.clone().applyMatrix4(_m.multiplyMatrices(inv, o.matrixWorld)); bb.union(b); } });
       if (bb.isEmpty()) return null; const c = bb.getCenter(new THREE.Vector3()), s = bb.getSize(new THREE.Vector3());
+      // A group spread over a big area (e.g. a whole kitchen run + far wall panels) must not become one giant
+      // invisible box: fall back to one box per mesh. Real furniture is < 3.5 m in plan.
+      if (Math.max(s.x, s.z) > 3.5) return phys.solid(group);
       return phys.boxLocal(group, c.x, c.y, c.z, s.x / 2, s.y / 2, s.z / 2);
     },
     // Dynamic prop: mesh (or group) becomes a rigid body. shape: 'box' | 'ball' | 'hull'.
@@ -84,6 +89,15 @@ export async function createPhysics() {
       const d = { body, collider: col, obj, offset, parent }; dynamics.push(d); return d;
     },
     remove(collider) { if (collider) world.removeCollider(collider, true); },
+    tags,
+    // phys.tagged('piece:kitchen') -> same API, but every collider it creates is labelled with that tag
+    tagged(tag) {
+      const wrap = (fn) => (...a) => { const prev = curTag; curTag = tag; try { return fn(...a); } finally { curTag = prev; } };
+      const t = Object.create(phys);
+      for (const k of ['boxFromSeg', 'boxLocal', 'boxAABB', 'trimesh', 'solid', 'solidGroup']) t[k] = wrap(phys[k]);
+      t.dynamic = (obj, o) => { const d = phys.dynamic(obj, o); tags.set(d.collider.handle, tag + ' (dynamic)'); return d; };
+      return t;
+    },
     onStep(fn) { stepHooks.push(fn); },
     step(dt) {
       acc += Math.min(dt, 0.1); let n = 0;

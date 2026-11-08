@@ -142,20 +142,21 @@ async function main() {
   }));
   const ownCeilings = Object.values(mods).flatMap(m => m.ownCeiling || []);
   status('Building shell…');
-  const shell = buildShell({ ...ctxBase, ownCeilings, skipRoofs: params.get('noroof') === '1' });
+  const shell = buildShell({ ...ctxBase, phys: phys.tagged('shell'), ownCeilings, skipRoofs: params.get('noroof') === '1' });
   ctxBase.shell = shell; ctxBase.doors = shell.doors;
   status('Furnishing rooms…');
   await Promise.all(Object.entries(mods).map(async ([p, mod]) => {
     if (!mod.build) return;
     const root = new THREE.Group(); root.name = 'piece:' + p; scene.add(root);
-    try { await mod.build({ ...ctxBase, root, piece: p }); }
+    try { await mod.build({ ...ctxBase, phys: phys.tagged('piece:' + p), root, piece: p }); }
     catch (e) { console.error('[piece build]', p, e); window.__errors.push(p + ': ' + (e.stack || e.message)); }
   }));
   await envP;
-  if (!params.get('noprobes')) { // per-room light probes with one bounce (see lighting.js)
-    try { await buildRoomProbes(ctxBase, { intensity: LIGHT.probeIntensity, onStatus: status }); }
-    catch (e) { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); }
-  }
+  // per-room light probes with one bounce (see lighting.js). Photo shots wait for them; visitors start
+  // walking right away while the probes bake in the background (rooms brighten up once they're done).
+  const probesJob = () => buildRoomProbes(ctxBase, { intensity: LIGHT.probeIntensity, onStatus: SHOT ? status : (m) => { const el = document.getElementById('where'); if (el && !el.dataset.busy) el.dataset.busy = 1; }, background: !SHOT })
+    .catch(e => { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); });
+  if (!params.get('noprobes') && SHOT) await probesJob();
   setupPost();
 
   // views registry
@@ -193,6 +194,7 @@ async function main() {
   ctxBase.player = player;
   try { const game = await import('./multiplayer.js'); await game.start({ ...ctxBase, player }); } catch (e) { console.warn('[game] not loaded:', e.message); }
   document.getElementById('loading')?.classList.add('done');
+  if (!params.get('noprobes')) setTimeout(probesJob, 500); // bake room lighting while the visitor walks
   status('');
   // P = path-traced photo mode (freezes the camera, accumulates samples until P again)
   let photo = null;
@@ -206,6 +208,7 @@ async function main() {
     const now = performance.now(); const dt = Math.min((now - last) / 1000, 0.1); last = now; t += dt;
     if (photo && photo.active) { photo.render(); if (photo.ready) status('Photo mode (path traced) · ' + photo.samples + ' samples · P to exit'); return; }
     animateDoors(dt);
+    autoOpenDoors(player.position);
     player.update(dt);
     phys.step(dt);
     for (const u of updates) u(dt, t);
@@ -214,6 +217,35 @@ async function main() {
   });
   window.__ready = true;
 }
+
+// Walkability audit: sweep a player-sized capsule over every room's floor and every interior opening;
+// report blocked floor area per room and which colliders (by piece) block it. tools/walk_audit.mjs calls it.
+window.__audit = () => {
+  const phys = ctxBase.phys, R = phys.RAPIER, world = phys.world; world.step(); // build the query BVH
+  const cap = new R.Capsule(0.55, 0.28), rot = { x: 0, y: 0, z: 0, w: 1 };
+  const hitAt = (x, y, z) => { const hits = []; world.intersectionsWithShape({ x, y, z }, rot, cap, (c) => { if (!c.parent() || c.parent().isFixed()) hits.push(c); return true; }); return hits; };
+  const desc = (c) => { const t = c.translation(); const sh = c.shape; const he = sh.halfExtents ? [sh.halfExtents.x, sh.halfExtents.y, sh.halfExtents.z].map(v => +(2 * v).toFixed(2)) : (sh.radius ? ['r', +sh.radius.toFixed(2)] : 'mesh');
+    return { tag: phys.tags.get(c.handle) || '?', at: [t.x, t.y, t.z].map(v => +v.toFixed(2)), size: he }; };
+  const rooms = {};
+  for (const [id, r] of Object.entries(P.ROOMS)) {
+    const [x0, z0, x1, z1] = r.rect; const fy = P.LEVELS[r.level].floor; const yc = fy + 0.06 + 0.28 + 0.55;
+    let n = 0, blocked = 0; const by = new Map();
+    for (let x = x0 + 0.32; x <= x1 - 0.32; x += 0.3) for (let z = z0 + 0.32; z <= z1 - 0.32; z += 0.3) {
+      n++; const h = hitAt(x, yc, z); if (!h.length) continue; blocked++;
+      for (const c of h) { const k = c.handle; const e = by.get(k) || { c, cells: 0 }; e.cells++; by.set(k, e); }
+    }
+    const top = [...by.values()].sort((a, b) => b.cells - a.cells).slice(0, 6).map(e => ({ ...desc(e.c), m2: +(e.cells * 0.09).toFixed(2) }));
+    rooms[id] = { blockedPct: n ? Math.round(100 * blocked / n) : 0, cells: n, top };
+  }
+  const openings = [];
+  for (const o of P.OPENINGS) {
+    if (!['door', 'doorway', 'french', 'slider'].includes(o.type)) continue;
+    const fy = P.LEVELS[o.level].floor; const h = hitAt(o.at[0], fy + 0.89, o.at[1]).filter(c => !(phys.tags.get(c.handle) || '').startsWith('shell') || true);
+    if (h.length) openings.push({ id: o.id, type: o.type, blockers: h.map(desc) });
+  }
+  const sanity = { insideWall: hitAt(0.5, 1.2, 10.0).map(desc), insideStairBase: hitAt(10.56, 0.95, 7.5).map(desc), colliders: world.colliders.len() };
+  return { rooms, openings, sanity };
+};
 
 function render() { if (composer) composer.render(); else renderer.render(scene, camera); }
 
@@ -224,6 +256,15 @@ function useNearestDoor(pos) {
   if (!best) return; best.target = best.target > 0.5 ? 0 : 1;
   if (best.target > 0.5 && best.collider) { ctxBase.phys.remove(best.collider); best.collider = null; }
   if (best.target < 0.5) best.pendingClose = true;
+}
+// Doors swing open on their own when someone walks up (E still toggles). Closed doors match the photos,
+// but nobody should get stuck behind one.
+function autoOpenDoors(pos) {
+  for (const d of ctxBase.doors || []) {
+    if (d.target > 0.5) continue;
+    const near = Math.hypot(d.world.x - pos.x, d.world.z - pos.z) < 1.25 && Math.abs(d.world.y - (pos.y + 1)) < 1.2;
+    if (near) { d.target = 1; if (d.collider) { ctxBase.phys.remove(d.collider); d.collider = null; } d.pendingClose = false; }
+  }
 }
 function animateDoors(dt) {
   for (const d of ctxBase.doors || []) {

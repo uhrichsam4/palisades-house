@@ -17,7 +17,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   const body = world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn[0], spawn[1] + halfH + radius, spawn[2]));
   const collider = world.createCollider(R.ColliderDesc.capsule(halfH, radius).setFriction(0.0), body);
   const cc = world.createCharacterController(0.02);
-  cc.enableAutostep(0.26, 0.18, true); cc.enableSnapToGround(0.3); cc.setMaxSlopeClimbAngle((50 * Math.PI) / 180);
+  cc.enableAutostep(0.36, 0.15, true); cc.enableSnapToGround(0.3); cc.setMaxSlopeClimbAngle((50 * Math.PI) / 180); // step-up 0.36: stairs 0.197, theater riser 0.30, pool steps
   cc.setApplyImpulsesToDynamicBodies(true); cc.setCharacterMass(70);
 
   const state = {
