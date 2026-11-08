@@ -146,8 +146,8 @@ export const ROOMS = {
 // owner = the piece that may edit the line. panes = [cols, rows] of glazing bars.
 export const OPENINGS = [
   // ---------------- ground, exterior
-  { id: 'g-door-1', owner: 'exterior', level: 0, type: 'garage', at: [20.45, 0.35], w: 2.75, sill: 0, head: 2.45 },
-  { id: 'g-door-2', owner: 'exterior', level: 0, type: 'garage', at: [15.25, 0.35], w: 5.50, sill: 0, head: 2.45 },
+  { id: 'g-door-1', owner: 'exterior', level: 0, type: 'garage', at: [20.40, 0.35], w: 3.00, sill: 0, head: 2.45 },
+  { id: 'g-door-2', owner: 'exterior', level: 0, type: 'garage', at: [15.30, 0.35], w: 6.00, sill: 0, head: 2.45 },
   { id: 'entry', owner: 'foyer', level: 0, type: 'french', at: [9.80, 4.43], w: 1.60, sill: 0, head: 2.95, panes: [2, 4], open: 0 },
   { id: 'game-b1', owner: 'game', level: 0, type: 'window', at: [5.85, 3.98], w: 0.85, sill: 1.00, head: 2.55, panes: [1, 2] },
   { id: 'game-b2', owner: 'game', level: 0, type: 'window', at: [6.75, 3.53], w: 0.88, sill: 1.00, head: 2.55, panes: [1, 2] },
@@ -183,8 +183,8 @@ export const OPENINGS = [
   { id: 'bA-side', owner: 'bedA', level: 1, type: 'window', at: [11.12, 2.40], w: 1.20, sill: 0.95, head: 2.30, panes: [2, 1] },
   { id: 'bathA-front', owner: 'bedA', level: 1, type: 'window', at: [16.80, 0.35], w: 0.70, sill: 1.10, head: 2.30, panes: [1, 2] },
   { id: 'bB-front', owner: 'bedB', level: 1, type: 'skylight', at: [20.40, 0.35], w: 1.80, sill: 0.95, head: 2.30, panes: [2, 1] }, // p27: wardrobe wall has no window (not cut)
-  { id: 'bB-side', owner: 'bedB', level: 1, type: 'window', at: [23.10, 3.35], w: 1.45, sill: 1.02, head: 2.25, panes: [2, 1] },
-  { id: 'bathB-win', owner: 'bedB', level: 1, type: 'window', at: [23.10, 7.85], w: 0.60, sill: 1.10, head: 2.15, panes: [1, 1] },
+  { id: 'bB-side', owner: 'bedB', level: 1, type: 'window', at: [23.10, 3.12], w: 1.60, sill: 1.32, head: 2.16, panes: [2, 1] },
+  { id: 'bathB-win', owner: 'bedB', level: 1, type: 'window', at: [23.10, 7.12], w: 0.60, sill: 1.00, head: 1.85, panes: [1, 1] }, // p29: left of the toilet, shower beyond
   { id: 'pc-win', owner: 'primarybath', level: 1, type: 'window', at: [23.10, 12.30], w: 0.90, sill: 1.10, head: 2.30, panes: [1, 1] },
   { id: 'pb-rear', owner: 'primarybath', level: 1, type: 'window', at: [18.10, 21.65], w: 1.85, sill: 1.00, head: 2.35, panes: [2, 1] },
   { id: 'pb-rear2', owner: 'primarybath', level: 1, type: 'window', at: [19.95, 21.65], w: 0.55, sill: 1.00, head: 2.35, panes: [1, 1] },
@@ -196,26 +196,26 @@ export const OPENINGS = [
   { id: 'gb-b1', owner: 'theater', level: 1, type: 'window', at: [5.85, 3.98], w: 0.75, sill: 0.80, head: 2.30, panes: [1, 2] },
   { id: 'gb-b2', owner: 'theater', level: 1, type: 'window', at: [6.75, 3.53], w: 1.05, sill: 0.80, head: 2.30, panes: [1, 2] },
   { id: 'gb-b3', owner: 'theater', level: 1, type: 'window', at: [7.65, 3.98], w: 0.75, sill: 0.80, head: 2.30, panes: [1, 2] },
-  { id: 'bC-front', owner: 'bedC', level: 1, type: 'window', at: [2.65, 7.07], w: 2.40, sill: 1.15, head: 2.45, panes: [3, 1] },
-  { id: 'bC-sw', owner: 'bedC', level: 1, type: 'window', at: [0.35, 12.30], w: 1.10, sill: 0.95, head: 2.30, panes: [2, 1] },
-  { id: 'bathC-rear', owner: 'bedC', level: 1, type: 'window', at: [7.42, 13.60], w: 0.70, sill: 1.00, head: 2.45, panes: [1, 1] },
+  { id: 'bC-front', owner: 'bedC', level: 1, type: 'window', at: [2.55, 7.07], w: 2.40, sill: 1.15, head: 2.60, panes: [3, 1] }, // p30: head hidden behind the roman shade
+  { id: 'bC-sw', owner: 'bedC', level: 1, type: 'window', at: [0.35, 12.70], w: 0.90, sill: 0.95, head: 2.30, panes: [2, 1] },
+  { id: 'bathC-rear', owner: 'bedC', level: 1, type: 'window', at: [6.85, 13.60], w: 0.70, sill: 1.00, head: 2.45, panes: [1, 1] }, // p31: left wall, between vanity and door
   { id: 'gal-front', owner: 'foyer', level: 1, type: 'window', at: [9.80, 4.43], w: 1.60, sill: 0.60, head: 2.30, panes: [2, 1] },
   // ---------------- upper, interior
   { id: 'bA-d', owner: 'bedA', level: 1, type: 'door', at: [11.27, 5.20], w: 0.85, sill: 0, head: 2.30 },
   { id: 'bathA-d', owner: 'bedA', level: 1, type: 'door', at: [17.00, 4.525], w: 0.70, sill: 0, head: 2.30 },
   { id: 'bB-d', owner: 'bedB', level: 1, type: 'door', at: [17.425, 5.30], w: 0.85, sill: 0, head: 2.30, open: 0 },
   { id: 'clB-d', owner: 'bedB', level: 1, type: 'door', at: [19.925, 6.60], w: 0.70, sill: 0, head: 2.30, open: 0 }, // closet opens off bath B (p28 wall is blank)
-  { id: 'bathB-d', owner: 'bedB', level: 1, type: 'door', at: [21.00, 6.075], w: 0.80, sill: 0, head: 2.30, open: 0 },
+  { id: 'bathB-d', owner: 'bedB', level: 1, type: 'door', at: [20.45, 6.075], w: 0.75, sill: 0, head: 2.30, open: 0 }, // p29: vanity on this wall east of the door
   { id: 'th-d', owner: 'theater', level: 1, type: 'door', at: [12.40, 10.225], w: 0.90, sill: 0, head: 2.30 },
   { id: 'pr-d', owner: 'primary', level: 1, type: 'door', at: [12.60, 11.675], w: 0.95, sill: 0, head: 2.30, open: 0 },
   { id: 'vest-d', owner: 'primarybath', level: 1, type: 'door', at: [16.45, 11.675], w: 0.85, sill: 0, head: 2.30, open: 0 },
   { id: 'pr-vest-d', owner: 'primarybath', level: 1, type: 'door', at: [15.465, 12.90], w: 0.85, sill: 0, head: 2.30 },
   { id: 'vest-bath-d', owner: 'primarybath', level: 1, type: 'doorway', at: [16.45, 14.425], w: 0.95, sill: 0, head: 2.30 },
   { id: 'vest-pc-d', owner: 'primarybath', level: 1, type: 'door', at: [19.85, 14.28], w: 0.85, sill: 0, head: 2.35, open: 0 },
-  { id: 'gb-d', owner: 'theater', level: 1, type: 'door', at: [8.225, 6.10], w: 0.80, sill: 0, head: 2.30 },
+  { id: 'gb-d', owner: 'theater', level: 1, type: 'door', at: [8.225, 5.25], w: 0.80, sill: 0, head: 2.30 },
   { id: 'hC-gal', owner: 'bedC', level: 1, type: 'doorway', at: [8.225, 8.80], w: 1.40, sill: 0, head: 2.30 },
-  { id: 'bC-d', owner: 'bedC', level: 1, type: 'door', at: [5.235, 8.60], w: 0.85, sill: 0, head: 2.30 },
-  { id: 'bathC-d', owner: 'bedC', level: 1, type: 'door', at: [7.62, 10.325], w: 0.80, sill: 0, head: 2.30 },
+  { id: 'bC-d', owner: 'bedC', level: 1, type: 'door', at: [5.235, 7.95], w: 0.85, sill: 0, head: 2.30 },
+  { id: 'bathC-d', owner: 'bedC', level: 1, type: 'door', at: [8.225, 11.15], w: 0.80, sill: 0, head: 2.30 }, // p31: entered from the upper hall, vanity faces the door
 ];
 
 // Roof massing (simplified; the exterior piece refines). Heights are absolute y.

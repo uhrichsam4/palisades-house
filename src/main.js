@@ -27,6 +27,7 @@ import * as T from './kit/textures.js';
 import * as G from './kit/geo.js';
 import * as RM from './kit/room.js';
 import { loadModel, fitTo } from './kit/models.js';
+import { fabric } from './kit/fabrics.js';
 
 const params = new URLSearchParams(location.search);
 const viewId = params.get('view'); const camParam = params.get('cam'); const topLevel = params.get('top');
@@ -124,7 +125,7 @@ function setupPost() {
 const updates = [];
 const ctxBase = {
   THREE, scene, renderer, camera, params, shot: SHOT, plan: P, LIGHT, sun, hemi,
-  kit: { M, ...T, ...G, ...RM, loadModel, fitTo, outdoor },
+  kit: { M, ...T, ...G, ...RM, loadModel, fitTo, outdoor, fabric },
   ENV,
   onUpdate: (fn) => updates.push(fn),
 };
