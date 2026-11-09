@@ -136,7 +136,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
   const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _bb = new THREE.Box3(), _c = new THREE.Vector3(), _sph = new THREE.Sphere();
   const hide = (e, why) => { if (e.why & why) return; if (!e.why) { e.o.layers.disable(0); e.o.layers.enable(LAYER_HIDE); } e.why |= why; };
   const show = (e, why) => { if (!(e.why & why)) return; e.why &= ~why; if (!e.why) { e.o.layers.enable(0); e.o.layers.disable(LAYER_HIDE); } };
-  function showAll() { for (const e of all) { if (e.why) { e.why = 1; show(e, 1); } } hiddenRoom.clear(); lastVisKey = ''; }
+  function showAll() { if (api?.props) for (const t of api.props) if (t.cv === false) { t.cv = true; t.b.setVisibleAt(t.id, true); } for (const e of all) { if (e.why) { e.why = 1; show(e, 1); } } hiddenRoom.clear(); lastVisKey = ''; }
 
   function eligible(o) {
     if (!o.isMesh || o.isSkinnedMesh || o.isBatchedMesh || o.isReflector) return false;
@@ -166,7 +166,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
         if (_bb.max.x < x0 - m || _bb.min.x > x1 + m || _bb.max.z < z0 - m || _bb.min.z > z1 + m || _bb.max.y < fy - 0.1 || _bb.min.y > top + 0.1) continue;
         sp.push(id); }
       if (FP.outside(_bb) || _bb.max.y > 9.6) sp.push('OUT');
-      e.room = sp.length ? sp.join('|') : null;
+      e.room = sp.length ? (r.name === 'shell' || /^(roof|soffit|fascia|wall|slab|ext)/i.test(o.name || '') ? 'S' : 'D') + sp.join('|') : null;
       const rad = _bb.getBoundingSphere(_sph).radius;
       if (rad < 0.35 && !o.isInstancedMesh) { e.far = 15 + rad * 30; small.push(e); }
       if (rad < 0.06 && o.castShadow && !e.late) o.castShadow = false; // tiny casters: shadow is sub-texel anyway
@@ -177,7 +177,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
   }
   const stats = { scanned: 0, roomObjs: 0, small: 0, visibleRooms: 0, start: '' };
 
-  const visible = new Set(); const queue = []; const rects = new Map(); const _v4 = new THREE.Vector4();
+  const visible = new Set(), detail = new Set(); const queue = []; const rects = new Map(); const _v4 = new THREE.Vector4();
   // NDC rect of a box; null if any corner is at/behind the camera plane (then the caller keeps the parent rect)
   function projRect(b) {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -188,7 +188,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
     }
     return [Math.max(-1, x0 - 0.01), Math.min(1, x1 + 0.01), Math.max(-1, y0 - 0.01), Math.min(1, y1 + 0.01)];
   }
-  function flood() {
+  function flood(visible, maxOut = 0) {
     visible.clear(); queue.length = 0;
     const p = camera.getWorldPosition(_c);
     const lvs = Math.abs(p.y - FLOOR1) < 0.6 ? [0, 1] : [p.y < FLOOR1 ? 0 : 1];
@@ -209,6 +209,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
       for (const pt of G.adj.get(r) || []) {
         const nb = pt.a === r ? pt.b : pt.a;
         if (pt.test && !pt.test()) continue;
+        if (maxOut && r === 'OUT' && pt.box.distanceToPoint(p) > maxOut) continue; // far window seen from outside: structure only
         let q;
         if (noFrustum || pt.box.distanceToPoint(p) < 0.8) q = R.slice();
         else { if (!_fr.intersectsBox(pt.box)) continue; q = projRect(pt.box); if (!q) q = R.slice(); else { q[0] = Math.max(q[0], R[0]); q[1] = Math.min(q[1], R[1]); q[2] = Math.max(q[2], R[2]); q[3] = Math.min(q[3], R[3]); if (q[0] >= q[1] || q[2] >= q[3]) continue; } }
@@ -224,17 +225,20 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
   function update() {
     if (!enabled) return;
     frame++;
-    const vis = flood();
+    const vis = flood(visible);
+    // camera outside: furniture/decor of rooms whose window is > FAR_OUT m away is dropped (walls/floors stay)
+    const det = vis && vis.has('OUT') && !roomsAt(_c.x, _c.z, _c.y < FLOOR1 ? 0 : 1, 0.45).length ? flood(detail, api.farOut) : vis;
     // room culling: only touch lists whose state changed
     let changed = false;
     for (const [room, list] of byRoom) {
-      const want = vis ? !room.split('|').some(r => vis.has(r)) : false;
+      const S = room.charCodeAt(0) === 83 ? vis : det; // 'S…' = structural (shell), 'D…' = detail
+      const want = vis ? !room.slice(1).split('|').some(r => S.has(r)) : false;
       if (want && !hiddenRoom.has(room)) { hiddenRoom.add(room); for (const e of list) hide(e, 1); changed = true; }
       else if (!want && hiddenRoom.has(room)) { hiddenRoom.delete(room); for (const e of list) show(e, 1); changed = true; }
     }
     // small-object draw distance (hysteresis 1 m), every 4th frame
     if (frame % 4 === 0) { const p = _c;
-      for (const e of small) { const d = e.ctr.distanceTo(p); if (d > e.far + 1) hide(e, 2); else if (d < e.far) show(e, 2); } }
+      const k = api.smallScale || 1; for (const e of small) { const d = e.ctr.distanceTo(p), f = e.far * k; if (d > f + 1) hide(e, 2); else if (d < f) show(e, 2); } }
     // anything hidden that has moved since the scan leaves culling for good
     { let moved = false; const full = frame % 60 === 0 || changed;
       for (const e of full ? all : late) {
@@ -242,8 +246,16 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
         const m = e.o.matrixWorld.elements; if (Math.abs(m[12] - e.pos.x) + Math.abs(m[13] - e.pos.y) + Math.abs(m[14] - e.pos.z) > 0.03 || !e.o.parent) { e.why = 1; show(e, 1); e.room = null; e.far = 0; moved = true; }
       }
       if (moved) prune(); }
+    // throwable-prop instances (BatchedMesh, perf.js): per instance, by the room its centre is in right now
+    if (api.props && (changed || frame % 6 === 0)) for (const t of api.props) {
+      const m = t.o.matrixWorld.elements, x = m[12], y = m[13], z = m[14]; let v = true;
+      if (det) { const sp = roomsAt(x, z, y < FLOOR1 - 0.1 ? 0 : 1, 0.4); _bb.min.set(x - 0.2, y - 0.2, z - 0.2); _bb.max.set(x + 0.2, y + 0.2, z + 0.2);
+        if (FP.outside(_bb)) sp.push('OUT'); if (y < FLOOR1 + 0.3 && y > P.LEVELS[0].ceil - 0.3) sp.push(...roomsAt(x, z, 1, 0.4), ...roomsAt(x, z, 0, 0.4));
+        v = !sp.length || sp.some(r => det.has(r)); }
+      if (t.cv !== v) { t.cv = v; t.b.setVisibleAt(t.id, v); }
+    }
     stats.visibleRooms = vis ? vis.size : -1;
-    if (changed) { const key = vis ? [...vis].sort().join(',') : 'all'; if (key !== lastVisKey) { lastVisKey = key; onChange?.(); } }
+    if (changed) { const key = vis ? [...vis].sort().join(',') + '/' + [...det].sort().join(',') : 'all'; if (key !== lastVisKey) { lastVisKey = key; onChange?.(); } }
   }
   // drop moved entries from their lists lazily
   const prune = () => { for (const [k, l] of byRoom) byRoom.set(k, l.filter(e => e.room === k)); small = small.filter(e => e.far); all = all.filter(e => e.room || e.far); late = late.filter(e => e.room || e.far); };
@@ -253,7 +265,7 @@ export function createCuller({ scene, camera, phys = null, doors = [], mirrorRoo
   const add0 = scene.add.bind(scene); scene.add = (...objs) => { const r = add0(...objs); if (api.auto) later(600); return r; };
   setTimeout(() => rescan(), 3000); setTimeout(() => rescan(), 10000);
   const api = {
-    auto: true, update, rescan, showAll, stats, graph: G,
+    auto: true, farOut: 14, update, rescan, showAll, stats, graph: G,
     get enabled() { return enabled; }, set enabled(v) { enabled = !!v; if (!enabled) showAll(); },
     // run fn with nothing culled (probe capture, path tracer)
     without(fn) { const was = enabled; enabled = false; showAll(); try { return fn(); } finally { enabled = was; } },

@@ -68,7 +68,7 @@ export function createHud({ quality, mp, menu, params }) {
     const d = new Date(); rollText(C.time.v, d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toUpperCase());
     show(C.fps, fpsOn || performance.now() < gfxUntil);
     if (performance.now() < gfxUntil) { C.fps.el.firstChild.textContent = 'GFX::'; rollText(C.fps.v, (quality.auto ? 'AUTO ' : '') + quality.tier.name.toUpperCase()); }
-    else if (fpsOn) { C.fps.el.firstChild.textContent = 'FPS::'; rollText(C.fps.v, String(quality.fps)); }
+    else if (fpsOn) { C.fps.el.firstChild.textContent = 'FPS::'; rollText(C.fps.v, quality.fps + ' RES::' + Math.round(100 * quality.pixelRatio / (devicePixelRatio || 1)) + '%'); }
     const on = !!mp?.connected;
     rollText(C.online.v, String(on ? mp.members.size + 1 : 1));
     C.lobby.el.firstChild.textContent = on ? 'LOBBY::' : ''; rollText(C.lobby.v, on ? String(mp.room).toUpperCase() : 'SOLO');

@@ -19,7 +19,7 @@ import { N8AOPass } from 'n8ao';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { buildRoomProbes, bindRoomProbes } from './lighting.js';
-import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics } from './perf.js';
+import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics, createBlobShadows, createGpuTimer } from './perf.js';
 import { createCuller } from './cull.js';
 import * as P from './plan.js';
 import { PIECES } from './rooms/index.js';
@@ -127,6 +127,7 @@ function setupPost() {
   setAO(SHOT ? 'Ultra' : 'Medium');
   composer.addPass(n8); window.__n8 = n8;
   const b = LIGHT.bloom; passes.bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), b.strength, b.radius, b.threshold); composer.addPass(passes.bloom); // bright windows bloom a little, like a camera
+  { const bs = passes.bloom.setSize.bind(passes.bloom); passes.bloom.setSize = (w, h) => { const k = passes.bloom.shift || 1; bs(Math.max(1, w >> k), Math.max(1, h >> k)); }; } // half-res bloom chain (quarter at Ultra lever stage 1+): a soft glow, no visible loss
   passes.out = new OutputPass(); // + camera-style white balance (luminance-preserving), before tone mapping
   passes.out.uniforms.wb = { value: new THREE.Vector3(...LIGHT.whiteBalance) };
   passes.out.material.fragmentShader = passes.out.material.fragmentShader
@@ -142,19 +143,34 @@ function setAO(mode) {
   if (!mode) { n8.enabled = false; passes.render.enabled = true; return; }
   n8.enabled = true; passes.render.enabled = false;
   n8.setQualityMode(mode); // (vendor/n8ao.js is patched so half-res AO works on three r187)
-  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: !SHOT && mode !== 'High' && mode !== 'Ultra', depthAwareUpsampling: true, denoiseRadius: 10 });
+  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: !SHOT && ((mode !== 'High' && mode !== 'Ultra') || qStage >= 1), depthAwareUpsampling: true, denoiseRadius: 10 });
 }
 // quality tier + render resolution (walk mode; see perf.js)
-function applyQuality(tier, pr) {
+// stage = Ultra 120 Hz lever (perf.js createQuality): 1 AO half-res + quarter bloom, 2 2k shadow map + slower door
+// shadow refresh, 3 small-object cull distance x0.6, 4 probe bake paused. The tier's look (every effect) stays.
+let qStage = 0;
+function applyQuality(tier, pr, stage = 0) {
+  qStage = stage;
   renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight, false);
+  const ms = stage >= 2 ? 2048 : 4096;
+  if (sun.shadow.mapSize.x !== ms) { sun.shadow.mapSize.set(ms, ms); sun.shadow.map?.dispose(); sun.shadow.map = null; renderer.shadowMap.needsUpdate = true; }
+  if (shadows) shadows.movingHz = stage >= 2 ? 4 : 8;
+  if (cull) cull.smallScale = stage >= 3 ? 0.6 : 1;
+  window.__probesPaused = stage >= 4;
   if (!composer) return;
-  setAO(tier.ao); passes.bloom.enabled = tier.bloom;
+  setAO(tier.ao); passes.bloom.enabled = tier.bloom; passes.bloom.shift = stage >= 1 ? 2 : 1;
   passes.smaa.enabled = tier.aa === 'smaa' && pr < 1.5; passes.fxaa.enabled = tier.aa === 'fxaa'; // dense pixels: SMAA buys little
   composer.setPixelRatio(pr); composer.setSize(innerWidth, innerHeight);
 }
 
 // ---------------------------------------------------------------- boot
 const updates = [];
+// main-loop profiler: window.__prof.on = true, then window.__prof.report() -> ms/frame per section and per onUpdate source
+function srcLabel(fn) { try { const l = (new Error().stack || '').split('\n').slice(2).find(x => /\/src\//.test(x) && !/main\.js/.test(x)) || ''; const m = l.match(/src\/([^?:)]+)[^:]*:(\d+)/); return (m ? m[1] + ':' + m[2] : 'main') + (fn.name ? ' ' + fn.name : ''); } catch { return '?'; } }
+const PROF = window.__prof = { on: false, frames: 0, acc: new Map(), t0: 0,
+  add(k, ms) { this.acc.set(k, (this.acc.get(k) || 0) + ms); },
+  reset() { this.frames = 0; this.acc.clear(); this.t0 = performance.now(); },
+  report() { const n = Math.max(1, this.frames); return { frames: this.frames, wallMsPerFrame: +((performance.now() - this.t0) / n).toFixed(2), rows: [...this.acc].map(([k, v]) => [k, +(v / n).toFixed(3)]).sort((a, b) => b[1] - a[1]) }; } };
 let shadows = null, cull = null, mirrorRooms = new Set();
 const T0 = performance.now(); window.__timing = {};
 const mark = (k) => { window.__timing[k] = Math.round(performance.now() - T0); };
@@ -162,7 +178,7 @@ const ctxBase = {
   THREE, scene, renderer, camera, params, shot: SHOT, plan: P, LIGHT, sun, hemi,
   kit: { M, ...T, ...G, ...RM, loadModel, fitTo, outdoor, fabric },
   ENV,
-  onUpdate: (fn) => updates.push(fn),
+  onUpdate: (fn) => { updates.push(fn); fn.__src = srcLabel(fn); },
 };
 
 async function main() {
@@ -200,7 +216,7 @@ async function main() {
   }
   // throwable props: one multi-draw per material instead of one draw per prop
   const propBatch = batchDynamics(scene, phys); ctxBase.propBatch = propBatch; window.__propBatch = { batches: propBatch.batches, instances: propBatch.instances };
-  updates.push(() => propBatch.sync());
+  { const f = () => propBatch.sync(); f.__src = 'perf.js propBatch.sync'; updates.push(f); }
   await envP; mark('env');
   // per-room light probes with one bounce (see lighting.js). Photo shots wait for them; visitors start
   // walking right away while the probes bake in the background (rooms brighten up once they're done).
@@ -253,7 +269,11 @@ async function main() {
   ctxBase.quality = quality; window.__quality = quality;
   shadows = createShadowScheduler(renderer);
   // room/portal culling (src/cull.js): walk mode only; photo shots never cull
-  if (!params.get('nocull')) { cull = createCuller({ scene, camera, phys, doors: ctxBase.doors || [], mirrorRooms, onChange: () => shadows.poke() }); window.__cull = cull; }
+  // the static sun shadow map is drawn with EVERY caster, culled or not: three builds the main-pass lists before
+  // the shadow pass, so the camera may see layer 30 (= culled) just for the shadow pass. Culling therefore never
+  // changes shadows and never forces a refresh.
+  { const sm = renderer.shadowMap, r0 = sm.render.bind(sm); sm.render = (lights, sc, cam) => { const had = cam.layers.isEnabled(30); if (cull?.enabled && !had) cam.layers.enable(30); try { r0(lights, sc, cam); } finally { if (!had) cam.layers.disable(30); } }; }
+  if (!params.get('nocull')) { cull = createCuller({ scene, camera, phys, doors: ctxBase.doors || [], mirrorRooms }); cull.props = ctxBase.propBatch?.tracked || null; window.__cull = cull; }
   THREE.DefaultLoadingManager.onLoad = ((prev) => () => { prev?.(); shadows.poke(); })(THREE.DefaultLoadingManager.onLoad); // late model loads cast shadows too
   const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => useNearestDoor(pos), onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => { const b = document.body.classList; return b.contains('ui-open') || b.contains('menu-open') || b.contains('paused'); } }, { spawn: SPAWN, yaw: Math.PI });
   ctxBase.player = player;
@@ -296,26 +316,54 @@ async function main() {
     if (!photo) { const { createPhotoMode } = await import('./pathtrace.js'); photo = createPhotoMode(ctxBase); }
     if (photo.active) { photo.exit(); if (cull) cull.enabled = true; status(''); } else { if (cull) cull.enabled = false; status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
   });
-  let last = performance.now(), t = 0;
-  renderer.setAnimationLoop(() => {
+  let last = performance.now(), t = 0, awakePrev = 0, lastWork = 0; const gpuT = createGpuTimer(renderer.getContext()); window.__gpuTimer = gpuT;
+  let blobs = null; try { blobs = createBlobShadows({ scene, phys }); window.__blobs = blobs; } catch (e) { console.warn('[blobs]', e); }
+  const FLOG = window.__frameLog = { buf: new Float32Array(8192), n: 0 }; // loop frame intervals (ms), for tools/fps120.mjs
+  const frameFn = () => {
     if (window.__dbg.paused) { last = performance.now(); return; }
-    const now = performance.now(); const dt = Math.min((now - last) / 1000, 0.1); last = now; t += dt;
+    const now = performance.now(); FLOG.buf[FLOG.n++ & 8191] = now - last; const dt = Math.min((now - last) / 1000, 0.1); last = now; t += dt;
     if (photo && photo.active) { photo.render(); if (photo.ready) status('Photo mode (path traced) · ' + photo.samples + ' samples · P to exit'); return; }
-    quality.frame(dt * 1000);
+    gpuT.begin();
+    const pf = PROF.on; let tq = pf ? performance.now() : 0; const lap = (k) => { if (!pf) return; const n = performance.now(); PROF.add(k, n - tq); tq = n; };
+    if (pf) PROF.frames++;
+    quality.frame(dt * 1000, lastWork, gpuT.ms); lap('quality.frame');
     const doorsMoving = animateDoors(dt);
     camT += dt;
     if (camView === 'play') { autoOpenDoors(player.position); player.update(dt); }
     else if (camView === 'menu') menuCam(dt);
     else if (camView === 'fly') flyCam(dt);
-    phys.step(dt);
-    for (const u of updates) u(dt, t);
-    pool?.update(dt, camera.position);
-    let moving = doorsMoving || (window.__mp?.peers?.size > 0) || (player.state.thirdPerson && player.state.velOut?.lengthSq() > 1e-4); // own avatar casts too
-    if (!moving) for (const d of phys.dynamics) if (!d.body.isSleeping()) { moving = true; break; }
-    shadows.tick(moving);
-    render();
-    hud(player);
-  });
+    lap('player.update+doors');
+    phys.step(dt); lap('phys.step');
+    if (pf) for (const u of updates) { u(dt, t); lap('upd ' + (u.__src || 'main')); }
+    else for (const u of updates) u(dt, t);
+    pool?.update(dt, camera.position); lap('lightPool.update');
+    // static sun shadows (perf.js): doors re-render it while swinging; a prop going back to sleep pokes it once;
+    // avatars and other movers have blob shadows instead
+    let awake = 0; for (const d of phys.dynamics) if (!d.body.isSleeping()) awake++;
+    if (awake < awakePrev) shadows.poke(); awakePrev = awake;
+    blobs?.update(dt, () => shadows.poke());
+    shadows.tick(doorsMoving); lap('shadows.tick+blobs');
+    if (pf) { const sh = renderer.shadowMap.needsUpdate; cull?.update(); lap('cull.update'); render(true); lap(sh ? 'render (incl. shadow refresh)' : 'render (no shadow)'); PROF.add('shadow refreshes/frame', sh ? 1 : 0); }
+    else render();
+    hud(player); lap('hud');
+    gpuT.end(); lastWork = performance.now() - now;
+  };
+  // ---- frame-rate setting (settings.fpsCap): '60' / '120' = rAF loop that skips frames to hold the cap;
+  // 'uncapped' = MessageChannel loop (a macrotask per frame, so input / network / chat events interleave between
+  // frames; no busy-waiting), paused while the tab is hidden. Physics is fixed-step and net sends are 18 Hz, so
+  // nothing speeds up with the frame rate.
+  const mc = new MessageChannel(); let loopMode = null, capMs = 0, lastShown = 0;
+  const pump = () => { if (loopMode !== 'uncapped' || document.hidden) return; if (window.__dbg.paused) { frameFn(); setTimeout(pump, 50); return; } frameFn(); mc.port2.postMessage(0); };
+  mc.port1.onmessage = pump;
+  const capped = () => { const n = performance.now(); if (n - lastShown < capMs - 1.5) return; lastShown = n; frameFn(); };
+  function setLoop(cap) {
+    cap = String(cap || 'uncapped'); if (cap === loopMode) return; loopMode = cap;
+    if (cap === 'uncapped') { capMs = 0; quality.capMs = 0; renderer.setAnimationLoop(null); mc.port2.postMessage(0); }
+    else { capMs = 1000 / +cap; quality.capMs = capMs; renderer.setAnimationLoop(capped); }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && loopMode === 'uncapped') { last = performance.now(); mc.port2.postMessage(0); } });
+  setLoop(params.get('fpscap') || settings.get().fpsCap); settings.onChange((st) => setLoop(params.get('fpscap') || st.fpsCap));
+  window.__loop = { get mode() { return loopMode; }, set: setLoop };
   window.__ready = true;
 }
 
@@ -373,7 +421,9 @@ function flyCam(dt) {
   if (k0 >= 1) { camTween = null; tw.then?.(); }
 }
 
-function render() { cull?.update(); if (composer) composer.render(); else renderer.render(scene, camera); }
+function render(culled = false) {
+  if (!culled) cull?.update();
+  if (composer) composer.render(); else renderer.render(scene, camera); }
 // handles for tools/perf.mjs (frame-cost measurement); paused stops the walk loop so frames can be timed one by one
 window.__dbg = { renderer, scene, camera, sun, LIGHT, render: () => render(), get composer() { return composer; }, get n8() { return n8; }, paused: false };
 

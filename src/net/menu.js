@@ -53,6 +53,8 @@ export function createMenu({ mp, quality, perfHud, enterGame, toMenu }) {
       <section data-panel="settings">
         <h2>Settings</h2>
         <label class="gm-field"><span>Graphics quality</span><select id="gs-quality"><option value="auto">Auto</option><option value="ultra">Ultra</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+        <div class="gm-field"><span>Frame rate</span><div class="gm-seg" id="gs-cap" role="radiogroup"><button type="button" data-cap="60" aria-pressed="false">60</button><button type="button" data-cap="120" aria-pressed="false">120</button><button type="button" data-cap="uncapped" aria-pressed="true">Uncapped</button></div></div>
+        <p class="gm-hint" id="gs-cap-hint" style="margin:-6px 0 4px;font-size:12px;opacity:.65">Renders as fast as your computer can. Your screen still shows up to its refresh rate. Uses more battery.</p>
         <div class="gm-field"><span>Theme</span><div id="gs-theme"></div></div>
         <label class="gm-check"><input type="checkbox" id="gs-fps"> Show FPS</label>
         <label class="gm-field"><span>Mouse sensitivity <b id="gs-sensv"></b></span><input id="gs-sens" type="range" min="0.2" max="3" step="0.05"></label>
@@ -149,11 +151,13 @@ export function createMenu({ mp, quality, perfHud, enterGame, toMenu }) {
   // ---------------------------------------------------------------- settings
   function syncSettings() {
     const s = settings.get();
+    for (const b of root.querySelectorAll('[data-cap]')) b.setAttribute('aria-pressed', String(b.dataset.cap === s.fpsCap)); $('gs-cap-hint').hidden = s.fpsCap !== 'uncapped'; $('gs-cap').__pill?.update();
     $('gs-quality').value = s.quality; $('gs-fps').checked = !!s.fps; $('gs-sens').value = s.sens; $('gs-vol').value = s.vol;
     $('gs-sensv').textContent = (+s.sens).toFixed(2) + '×'; $('gs-volv').textContent = Math.round(s.vol * 100) + '%';
   }
   $('gs-theme').replaceWith(themeToggle('gm-theme'));
   $('gs-quality').addEventListener('change', () => settings.set({ quality: $('gs-quality').value }));
+  slidePill($('gs-cap'), 'button'); for (const b of root.querySelectorAll('[data-cap]')) b.addEventListener('click', () => settings.set({ fpsCap: b.dataset.cap }));
   $('gs-fps').addEventListener('change', () => settings.set({ fps: $('gs-fps').checked }));
   $('gs-sens').addEventListener('input', () => settings.set({ sens: +$('gs-sens').value }));
   $('gs-vol').addEventListener('input', () => settings.set({ vol: +$('gs-vol').value }));

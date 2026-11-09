@@ -143,7 +143,7 @@ async function bakeProbes(ctx, used, byProbe, clones, { size = 128, passes = 2, 
           renderer.setRenderTarget(prevT, prevFace, prevMip); renderer.xr.enabled = prevXr;
         };
         if (beforeCapture) beforeCapture(p.pos, draw); else draw();
-        if (background) await frame();
+        if (background) { await frame(); while (window.__probesPaused) await frame(); } // Ultra 120 Hz lever 4 (perf.js)
       }
       rt.texture.needsPMREMUpdate = true;
       next.set(p.id, pmrem.fromCubemap(rt.texture).texture);
