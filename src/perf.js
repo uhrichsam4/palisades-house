@@ -322,6 +322,74 @@ export function createLightPool(scene, { points = 3, spots = 2 } = {}) {
   return { sources: srcs.length, slots, assign, update: updateTracked, around, resize, get size() { return [slots.point.length, slots.spot.length]; }, snap(pos) { lastPos.copy(pos); assign(pos, true); upd(0, pos); } };
 }
 
+// ---------------------------------------------------------------- flat faint glass: one pass instead of two
+// three.js draws a transparent DoubleSide material in TWO passes (back faces, then front faces) and flips
+// material.side + needsUpdate between them, so every such draw re-derives the shader program key (getParameters +
+// getProgram) twice, in every scene render (N8AO renders the scene 3x per frame): ~1 ms CPU/frame at the pool.
+// For a FLAT pane (every mesh using the material is a single plane: geometry thinner than 1 mm) each pixel only ever
+// sees one face, so one pass draws exactly the same image. Glass with depth (boxes, bottles, merged panes) keeps the
+// two-pass sort. Faint (opacity <= 0.4), depth-write-off only. Idempotent; main.js runs it after load and late loads.
+export function singlePassFaintGlass(scene, maxOpacity = 0.4) {
+  const ok = new Map(); const _s = new THREE.Vector3();
+  scene.traverse(o => { if (!o.material) return; for (const m of [].concat(o.material)) {
+    if (!m || m.forceSinglePass || !m.transparent || m.side !== THREE.DoubleSide || m.depthWrite !== false || m.opacity > maxOpacity || m.isShaderMaterial) continue;
+    let flat = false; const g = o.geometry;
+    if (o.isMesh && !o.isInstancedMesh && !o.isBatchedMesh && !o.isSkinnedMesh && !Array.isArray(o.material) && g?.attributes?.position) { if (!g.boundingBox) g.computeBoundingBox(); g.boundingBox.getSize(_s); flat = Math.min(_s.x, _s.y, _s.z) < 0.001; }
+    ok.set(m, (ok.get(m) ?? true) && flat);
+  } });
+  let n = 0; for (const [m, flat] of ok) if (flat) { m.forceSinglePass = true; n++; }
+  return n;
+}
+
+// ---------------------------------------------------------------- N8AO transparency passes without full-scene walks
+// N8AO (transparencyAware) re-renders the scene twice per frame (depth-write-off and depth-write-on transparents).
+// Its stock renderTransparency does 4 scene.traverse() calls + a Map over all ~5k objects, and each of the two
+// renders walks every object again (projectObject) just to skip the hidden opaque ones. This keeps the exact same
+// selection rules and visibility (own flag, ancestors, culler layers) but renders only the selected objects plus the
+// lights: the scene's children are swapped for that short list for the two renders (same Scene object, so the
+// renderer's per-scene light state is shared and no program keys change). The candidate list (objects with a
+// transparent material or cannotReceiveAO, every light) is refreshed every 30 frames; the tests run per frame.
+// Must run with scene.matrixWorldAutoUpdate off (matrices are already current); it enforces that around its renders.
+export function fastN8Transparency(n8) {
+  if (!n8 || typeof n8.renderTransparency !== 'function') return false;
+  // cand: objects that may pass a transparency test (transparent single material, or cannotReceiveAO); lights: all.
+  // Refreshed every 30 frames; the tests themselves run per frame, so a material turning opaque drops out at once.
+  let cand = [], lights = [], age = 1e9; const sel = [], selSet = new Set(), hidden = [], black = new THREE.Color(0, 0, 0), _c = new THREE.Color();
+  const maybe = (i) => !!(i.material.transparent || i.userData.cannotReceiveAO);
+  // stock rule: an object renders if it and every ancestor is visible, where each material-bearing ancestor also has
+  // to pass the pass's test (stock hides every material object that fails it, which hides its subtree)
+  const chainOk = (o, root, test) => { if (!o.visible) return false; for (let p = o.parent; p && p !== root; p = p.parent) if (!p.visible || (p.material && !test(p))) return false; return true; };
+  const notUnderSel = (o, root) => { for (let p = o.parent; p && p !== root; p = p.parent) if (selSet.has(p)) return false; return true; };
+  n8.renderTransparency = function (e) {
+    const S = this.scene;
+    if (++age > 30) { age = 0; cand = []; lights = []; S.traverse(i => { if (i.isLight) lights.push(i); else if (i.material && maybe(i)) cand.push(i); }); }
+    const bg = S.background, cc = e.getClearColor(_c).clone(), ca = e.getClearAlpha(), acd = e.autoClearDepth, kids = S.children, mwa = S.matrixWorldAutoUpdate;
+    const lightsNow = lights.filter(l => l.parent && chainOk(l, S, () => true));
+    const pass = (test) => {
+      sel.length = 0; selSet.clear();
+      for (let k = 0; k < cand.length; k++) { const i = cand[k]; if (i.parent && test(i) && chainOk(i, S, test)) { sel.push(i); selSet.add(i); } }
+      const list = sel.filter(i => notUnderSel(i, S));
+      // descendants of picked objects that fail the test: hidden like stock does (rare: e.g. a lamp inside a glass shade)
+      for (const o of list) if (o.children.length) o.traverse(c => { if (c !== o && c.material && c.visible && !test(c)) { c.visible = false; hidden.push(c); } });
+      S.children = lightsNow.concat(list);
+      try { e.clear(true, true, true); this.depthCopyPass.render(e); e.render(S, this.camera); }
+      finally { S.children = kids; for (const c of hidden) c.visible = true; hidden.length = 0; }
+    };
+    try {
+      S.background = null; S.matrixWorldAutoUpdate = false; e.autoClearDepth = false; e.setClearColor(black, 0);
+      this.depthCopyPass.material.uniforms.depthTexture.value = this.beautyRenderTarget ? this.beautyRenderTarget.depthTexture : this.depthTexture; // N8AOPass vs N8AOPostPass
+      this.depthCopyPass.material.uniforms.reverseDepthBuffer.value = this.configuration.depthBufferType === 3; // n8ao enum {Default:1, Log:2, Reverse:3}
+      e.setRenderTarget(this.transparencyRenderTargetDWFalse);
+      pass(i => !!(i.material.transparent && !i.material.depthWrite && !i.userData.treatAsOpaque || i.userData.cannotReceiveAO));
+      e.setRenderTarget(this.transparencyRenderTargetDWTrue);
+      pass(i => !!(i.material.transparent && i.material.depthWrite && !i.userData.treatAsOpaque));
+    } finally {
+      S.children = kids; e.setClearColor(cc, ca); S.background = bg; e.autoClearDepth = acd; S.matrixWorldAutoUpdate = mwa;
+    }
+  };
+  return true;
+}
+
 // ---------------------------------------------------------------- dynamic props -> BatchedMesh
 // Throwable props (pillows, books, vases, balls…) can't be merged because physics moves them, so each was its
 // own draw call (~450 in the house). Here every prop mesh becomes an instance in a per-material BatchedMesh

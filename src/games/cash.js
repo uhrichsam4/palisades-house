@@ -21,6 +21,7 @@ function wave(S, c) {
 
 export default {
   id: 'cash', title: 'Cash Grab', min: 1, dur: 60000, timeLabel: '1:00',
+  clearOnEnd: true, // polish: games/index.js calls cleanup() as soon as the round ends (props don't linger through results)
   rules: 'Cash rains on the house. Walk into stacks to grab them; gold briefcases are $50K. Most cash in 60 s wins.',
   startArea: [11.8, 20.6],
   setup(S) { S.data = { items: [], next: 1, ev: [], evn: 1, waveAt: 0 }; },

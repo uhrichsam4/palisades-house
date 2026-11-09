@@ -41,6 +41,20 @@ export function startTaps(ctx, mp) {
     return donors.get(room) || null;
   }
 
+  // contain pass: the shower enclosure as a world box (glass / walls / tub sides around the spray), from fixed-collider
+  // rays across the stall at two heights; the spray particles stop at it (water.js uBoxMin/uBoxMax). Once per fixture.
+  function enclosure(f) {
+    const ph = ctx.phys; if (!ph?.world) return null; const R = ph.RAPIER;
+    const FL = R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+    const hx = f.dir[0], hz = f.dir[2], hl = Math.hypot(hx, hz) || 1; const o = { x: f.tip[0] + (hx / hl) * 0.12, z: f.tip[2] + (hz / hl) * 0.12 };
+    const lim = { '-x': 2.5, '+x': 2.5, '-z': 2.5, '+z': 2.5 }; const ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 });
+    for (const y of [f.tip[1] - 0.35, f.land + 1.2]) for (const [k, dx, dz] of [['-x', -1, 0], ['+x', 1, 0], ['-z', 0, -1], ['+z', 0, 1]]) {
+      ray.origin.x = o.x; ray.origin.y = y; ray.origin.z = o.z; ray.dir.x = dx; ray.dir.y = 0; ray.dir.z = dz;
+      let h = null; try { h = ph.world.castRay(ray, 2.5, true, FL); } catch {} const d = h ? (h.timeOfImpact ?? h.toi) : 2.5;
+      if (d > 0.05) lim[k] = Math.min(lim[k], d); // starting inside the wall the fixture hangs on: ignore that side
+    }
+    return [[o.x - lim['-x'], f.land - 0.02, o.z - lim['-z']], [o.x + lim['+x'], f.tip[1] + 0.6, o.z + lim['+z']]];
+  }
   function apply(id, on, s, b) {
     const t = taps.get(id); if (!t) return false;
     clock = Math.max(clock, s);
@@ -49,7 +63,7 @@ export function startTaps(ctx, mp) {
     if (t.on === !!on) return true;
     t.on = !!on; const tm = now();
     if (t.on) {
-      if (!t.fx) { t.fx = createTapFx(t.f, { uTime }); t.donor = donorFor(t.f.room); scene.add(t.fx.group); }
+      if (!t.fx) { if ((t.f.kind === 'shower' || t.f.kind === 'hand') && !t.f.box) t.f.box = enclosure(t.f); t.fx = createTapFx(t.f, { uTime }); t.donor = donorFor(t.f.room); scene.add(t.fx.group); }
       t.fx.group.visible = true; uTime.value = tm; t.fx.setOn(true, tm);
       t.voice ??= createVoice(t.f.kind, t.f.tip);
       t.voice.start(); audioAcc = 1; // first loudness update right away
@@ -118,7 +132,7 @@ export function startTaps(ctx, mp) {
     state: () => Object.fromEntries([...taps.values()].map(t => [t.f.id, t.on])),
     running: () => [...running].map(t => t.f.id),
     get frameMs() { return frameMs; },
-    info(id) { const t = taps.get(id); if (!t) return null; const ac = audioContext(); return { on: t.on, s: t.s, b: t.b, visible: !!t.fx?.group.visible, alive: !!t.fx && t.fx.alive(now()), audio: t.voice ? { nodes: t.voice.nodes, active: t.voice.active, gain: +t.voice.gain.toFixed(3), target: +t.voice.target.toFixed(3), walls: t.voice.walls, ctx: ac?.state } : null }; },
+    info(id) { const t = taps.get(id); if (!t) return null; const ac = audioContext(); return { box: t.f.box || null, on: t.on, s: t.s, b: t.b, visible: !!t.fx?.group.visible, alive: !!t.fx && t.fx.alive(now()), audio: t.voice ? { nodes: t.voice.nodes, active: t.voice.active, gain: +t.voice.gain.toFixed(3), target: +t.voice.target.toFixed(3), walls: t.voice.walls, ctx: ac?.state } : null }; },
   };
   window.__taps = api;
   const q = ctx.params?.get?.('taps') ?? new URLSearchParams(location.search).get('taps');

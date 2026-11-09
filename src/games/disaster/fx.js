@@ -33,9 +33,11 @@ function makePool(scene, max, additive, name) {
   const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; pts.name = name; pts.renderOrder = additive ? 7 : 6;
   pts.userData.keep = true; pts.userData.noProbe = true; pts.userData.noCull = true; pts.visible = false; scene.add(pts);
   // sim state
-  const S = { p: new Float32Array(max * 3), v: new Float32Array(max * 3), life: new Float32Array(max), max: new Float32Array(max), s0: new Float32Array(max), s1: new Float32Array(max), k: new Uint8Array(max), n: 0 };
-  function emit(x, y, z, vx, vy, vz, life, s0, s1, kind) {
-    if (S.n >= max) return; const i = S.n++; const j = i * 3;
+  // b (contain pass): optional box [x0, y0, z0, x1, y1, z1] the particle stays in (a burning room: smoke pools under its
+  // ceiling and against its walls instead of drifting through them)
+  const S = { p: new Float32Array(max * 3), v: new Float32Array(max * 3), life: new Float32Array(max), max: new Float32Array(max), s0: new Float32Array(max), s1: new Float32Array(max), k: new Uint8Array(max), b: new Array(max).fill(null), n: 0 };
+  function emit(x, y, z, vx, vy, vz, life, s0, s1, kind, b = null) {
+    if (S.n >= max) return; const i = S.n++; const j = i * 3; S.b[i] = b;
     S.p[j] = x; S.p[j + 1] = y; S.p[j + 2] = z; S.v[j] = vx; S.v[j + 1] = vy; S.v[j + 2] = vz;
     S.life[i] = 0; S.max[i] = life; S.s0[i] = s0; S.s1[i] = s1; S.k[i] = kind;
   }
@@ -48,10 +50,15 @@ function makePool(scene, max, additive, name) {
       if (additive) { vy += dt * 2.2; vx *= 1 - dt * 1.5; vz *= 1 - dt * 1.5; } // flames: buoyant, damped
       else if (k === 2) { vy -= dt * 6; } // dust/debris puffs fall a bit
       else { vy += dt * 0.25; vx += wind[0] * dt * 0.6; vz += wind[1] * dt * 0.6; vx *= 1 - dt * 0.4; vz *= 1 - dt * 0.4; vy *= 1 - dt * 0.3; }
-      const x = S.p[j] + vx * dt, y = S.p[j + 1] + vy * dt, z = S.p[j + 2] + vz * dt;
+      let x = S.p[j] + vx * dt, y = S.p[j + 1] + vy * dt, z = S.p[j + 2] + vz * dt;
+      const b = S.b[i]; if (b) {
+        if (x < b[0]) { x = b[0]; vx = 0; } else if (x > b[3]) { x = b[3]; vx = 0; }
+        if (y < b[1]) { y = b[1]; vy = 0; } else if (y > b[4]) { y = b[4]; vy = 0; vx *= 1 + dt; vz *= 1 + dt; } // spreads along the ceiling
+        if (z < b[2]) { z = b[2]; vz = 0; } else if (z > b[5]) { z = b[5]; vz = 0; }
+      }
       // compact into slot w
       S.p[o] = x; S.p[o + 1] = y; S.p[o + 2] = z; S.v[o] = vx; S.v[o + 1] = vy; S.v[o + 2] = vz;
-      S.life[w] = L; S.max[w] = S.max[i]; S.s0[w] = S.s0[i]; S.s1[w] = S.s1[i]; S.k[w] = k;
+      S.life[w] = L; S.max[w] = S.max[i]; S.s0[w] = S.s0[i]; S.s1[w] = S.s1[i]; S.k[w] = k; S.b[w] = b;
       const f = L / S.max[i];
       pos[o] = x; pos[o + 1] = y; pos[o + 2] = z;
       size[w] = S.s0[i] + (S.s1[i] - S.s0[i]) * f;

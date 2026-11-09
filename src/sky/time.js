@@ -53,7 +53,7 @@ export const PARAMS = {
   overcast: { cover: 0.97, dark: 0.50, fog: 0.002,  haze: 0.45, rain: 0,   wind: 0.35, light: 0.22, bolt: 0, snow: 0, dT: -3, cold: 0, coldT: 0,   sev: 0.1 },
   fog:      { cover: 0.80, dark: 0.30, fog: 0.045,  haze: 1.0,  rain: 0,   wind: 0.05, light: 0.28, bolt: 0, snow: 0, dT: -4, cold: 0, coldT: 0,   sev: 0.15 },
   rain:     { cover: 1.0,  dark: 0.70, fog: 0.010,  haze: 0.6,  rain: 0.55, wind: 0.45, light: 0.14, bolt: 0, snow: 0, dT: -4, cold: 0, coldT: 0,   sev: 0.4 },
-  storm:    { cover: 1.0,  dark: 0.92, fog: 0.016,  haze: 0.7,  rain: 1.0, wind: 0.95, light: 0.08, bolt: 1, snow: 0, dT: -6, cold: 0, coldT: 0,   sev: 0.8 },
+  storm:    { cover: 1.0,  dark: 0.92, fog: 0.028,  haze: 0.7,  rain: 1.0, wind: 0.95, light: 0.08, bolt: 1, snow: 0, dT: -6, cold: 0, coldT: 0,   sev: 0.8 },
   snow:     { cover: 0.96, dark: 0.35, fog: 0.007,  haze: 0.65, rain: 0,   wind: 0.25, light: 0.25, bolt: 0, snow: 0.6, dT: 0, cold: 1, coldT: -3,  sev: 0.35 },
   blizzard: { cover: 1.0,  dark: 0.55, fog: 0.035,  haze: 0.95, rain: 0,   wind: 1.0,  light: 0.12, bolt: 0, snow: 1.0, dT: 0, cold: 1, coldT: -12, sev: 1.0 },
 };

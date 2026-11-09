@@ -382,7 +382,35 @@ export function startCars(ctx, api) {
   function ensureVoice(car) { if (!car.voice) { try { car.voice = createVoice(car.def.name); } catch { car.voice = null; } } return car.voice; }
 
   // ---------------------------------------------------------------- lights
+  const wallRay = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }); const WALL_FLAGS = R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+  function wallsBetween(a, b) {
+    const dx = b.x - a.x, dy = b.y + 0.6 - a.y, dz = b.z - a.z, L = Math.hypot(dx, dy, dz); if (L < 1) return 0; let n = 0;
+    wallRay.origin = { x: a.x, y: a.y, z: a.z }; wallRay.dir = { x: dx / L, y: dy / L, z: dz / L };
+    try { world.intersectionsWithRay(wallRay, L - 0.5, true, (hit) => { const tag = phys.tags?.get(hit.collider.handle) || ''; if (tag === 'shell' || tag === 'core') n++; return n < 4; }, WALL_FLAGS); } catch {}
+    return n;
+  }
   let spot = null;
+  // contain pass: the headlight has no shadow map (a per-frame spot shadow pass of the house is far too expensive), so it
+  // would light rooms behind the wall it faces. Instead its range stops just past the farthest solid thing the beam
+  // reaches: a fan of 5 x 2 level rays across the cone (fixed colliders only, the car itself excluded), re-cast at
+  // ~10 Hz; the range eases out, snaps in. Nothing in front = the full 45 m.
+  const headRay = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }); let headAcc = 1, headWant = 45, headCur = 45;
+  const HEAD_FLAGS = R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+  function headRange(car, dt) {
+    headAcc += dt;
+    if (headAcc >= 0.1) {
+      headAcc = 0; let far = 0;
+      for (const h of [0.75, 1.3]) for (const a of [-0.5, -0.25, 0, 0.25, 0.5]) {
+        _v.set(0, h, -car.size.z / 2 + 0.05).applyQuaternion(car.quat).add(car.pos); _v2.set(Math.sin(a), 0, -Math.cos(a)).applyQuaternion(car.quat); _v2.y = 0; _v2.normalize();
+        headRay.origin.x = _v.x; headRay.origin.y = _v.y; headRay.origin.z = _v.z; headRay.dir.x = _v2.x; headRay.dir.y = 0; headRay.dir.z = _v2.z;
+        let hit = null; try { hit = world.castRay(headRay, 45, true, HEAD_FLAGS, undefined, undefined, car.body); } catch {}
+        far = Math.max(far, hit ? (hit.timeOfImpact ?? hit.toi) : 45); if (far >= 45) break;
+      }
+      headWant = Math.min(45, far + 0.35);
+    }
+    headCur = headWant < headCur ? headWant : headCur + (headWant - headCur) * Math.min(1, dt * 4);
+    return headCur;
+  }
   const isNight = () => { const s = window.__sky; if (!s) return false; const t = s.tod; let w = ''; try { w = s.weather || ''; } catch {} return t < 0.285 || t > 0.775 || /rain|storm|fog|snow|blizzard/.test(w); };
   function lights(car, night) {
     const active = car.mode !== 'parked' && !!car.seats[0];
@@ -500,7 +528,10 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
       if (car.voice) {
         const d = camera.position.distanceTo(car.pos); _v.set(1, 0, 0).applyQuaternion(camera.quaternion); _v2.copy(car.pos).sub(camera.position).normalize();
         const audible = car.mode !== 'parked' && !!car.seats[0] && d < 60;
-        car.voice.set(car.rpm, car.thr, car.slip, d, _v.dot(_v2), audible || car.hornOn || car.hornRemote);
+        // contain pass: muffled through walls (house shell colliders between the camera and the car, one ray at 4 Hz;
+        // each wall adds ~12 m of roll-off). Skipped for the car you sit in.
+        car.wallT = (car.wallT || 0) - dt; if (car.wallT <= 0) { car.wallT = 0.25; car.walls = mySeat?.car === car || !audible ? 0 : wallsBetween(camera.position, car.pos); }
+        car.voice.set(car.rpm, car.thr, car.slip, d + (car.walls || 0) * 12, _v.dot(_v2), audible || car.hornOn || car.hornRemote);
       } else if (car.mode !== 'parked' && car.seats[0] && camera.position.distanceTo(car.pos) < 40 && audioReady()) ensureVoice(car);
     }
 
@@ -583,7 +614,7 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
     hostAcc += dt; if (hostAcc > 5) {
       for (const car of cars) {
         const empty = car.seats.every(s => !s);
-        if (car.mode === 'parked' && empty && car.pos.distanceTo(car.homeP) > 8) car.abandonT += hostAcc; else car.abandonT = 0;
+        if (car.mode === 'parked' && empty && car.homeP && car.pos.distanceTo(car.homeP) > 8) /* polish: homeP is unset until the car is placed (threw every 5 s, killing the frame) */ car.abandonT += hostAcc; else car.abandonT = 0;
         if (car.abandonT >= 120 && isHost()) { const hp = car.home(); makeParked(car, hp.p, hp.q, true); }
       }
       hostAcc = 0;
@@ -593,7 +624,8 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
     const mine = mySeat && mySeat.i === 0 ? mySeat.car : null;
     if (mine && night && !spot) { spot = new THREE.SpotLight(0xfff2dc, 0, 45, 0.55, 0.55, 1.6); spot.castShadow = false; spot.userData.keep = true; scene.add(spot, spot.target); }
     if (spot) {
-      if (mine && night) { _v.set(0, 0.75, -mine.size.z / 2).applyQuaternion(mine.quat).add(mine.pos); spot.position.copy(_v); spot.target.position.copy(_v2.set(0, -0.6, -mine.size.z / 2 - 14).applyQuaternion(mine.quat).add(mine.pos)); spot.target.updateMatrixWorld(); spot.intensity = 900; }
+      if (mine && night) { _v.set(0, 0.75, -mine.size.z / 2).applyQuaternion(mine.quat).add(mine.pos); spot.position.copy(_v); spot.target.position.copy(_v2.set(0, -0.6, -mine.size.z / 2 - 14).applyQuaternion(mine.quat).add(mine.pos)); spot.target.updateMatrixWorld(); spot.intensity = 900;
+        spot.distance = headRange(mine, dt); }
       else spot.intensity = 0;
     }
   });
@@ -607,6 +639,7 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
     reset: () => mySeat && resetCar(mySeat.car),
     state: (c) => { const car = typeof c === 'number' ? cars[c] : cars.find(x => x.def.name === c); if (!car) return null; return { name: car.def.name, mode: car.mode, pos: car.pos.toArray().map(r3), yaw: +yawOf(car.quat).toFixed(3), speed: +car.speed.toFixed(2), steer: +car.steer.toFixed(3), contact: car.contact, seats: car.seats.map(s => (s ? realId(s.id) : null)), up: +(_v.set(0, 1, 0).applyQuaternion(car.quat).y).toFixed(3) }; },
     tris: () => cars.map(c => c?.vis.tris),
+    get headlight() { return spot ? { intensity: spot.intensity, distance: +spot.distance.toFixed(2), pos: spot.position.toArray().map(r3) } : null; }, // contain test
   };
   return dbg;
 }

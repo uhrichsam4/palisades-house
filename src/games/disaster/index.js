@@ -230,7 +230,17 @@ function announce(d) {
   A.siren(Math.min(4.5, d.annMs / 1000 + 0.5));
 }
 
+// polish: while the flood is up (camera at / under the water line) the bloom pass + exterior glow are clamped so the
+// string lights don't wash the frame out; restored when it drains / the round resets
+const FB = { p: null, s: 0, th: 0, on: false };
+function floodBloom(on) {
+  if (on === FB.on) return; const c = window.__dbg?.composer;
+  const p = FB.p || (FB.p = c?.passes?.find(x => 'strength' in x && 'threshold' in x && 'radius' in x)); if (!p) return;
+  FB.on = on; if (on) { FB.s = p.strength; FB.th = p.threshold; p.strength = FB.s * 0.3; p.threshold = Math.max(FB.th, 3); } else { p.strength = FB.s; p.threshold = FB.th; }
+  window.__sky?.setGlowCap?.(on ? 2.5 : 0);
+}
 function resetLocal(c) {
+  floodBloom(false);
   L.round = -1; L.done.clear(); L.ko = false; L.hp = 100; L.spec = false; L.live = false; L.shake = 0;
   if (c?.player?.state && c.player.state.frozen && L.koFroze) c.player.state.frozen = false; L.koFroze = false;
   L.fx?.reset(); A.stopAll();
@@ -261,7 +271,7 @@ function tick(dt, t, S, c) {
     if (!L.flood) { L.flood = floodBody(); waterBodies.push(L.flood); }
     const lv = I.ph === 'ann' ? -0.6 : I.ph === 'live' ? floodLevel(I.e, d.roundMs) : Math.max(-0.6, floodLevel(d.liveMs, d.roundMs) - (I.e - d.liveMs) / 1500);
     L.flood.level = lv; fx.flood.mesh.visible = lv > -0.55; fx.flood.mesh.position.y = lv; fx.flood.U.uTime.value = t; fx.flood.U.uAmp.value = 0.08 + 0.1 * Math.min(1, Math.max(0, I.e / 20000));
-    bedWater = fx.flood.mesh.visible ? 0.25 : 0;
+    bedWater = fx.flood.mesh.visible ? 0.25 : 0; floodBloom(fx.flood.mesh.visible);
     // buoyancy for light props below the surface
     for (const dd of phys.dynamics) { const b = dd.body; if (!b || !b.isDynamic?.()) continue; const tr = b.translation(); if (tr.y > lv + 0.05 || tr.y < lv - 4) continue; let m = 1; try { m = b.mass(); } catch {} if (m > 40) continue;
       const v = b.linvel(); const sub = Math.min(1, (lv - tr.y + 0.1) / 0.3); try { b.applyImpulse({ x: (WIND[0] * 0.05 - v.x * 0.6) * m * dt + Math.sin(t + tr.z) * 0.02 * m * dt, y: m * 9.81 * 1.5 * sub * dt - v.y * 0.8 * m * dt, z: (WIND[1] * 0.05 - v.z * 0.6) * m * dt }, true); } catch {} }
@@ -301,11 +311,12 @@ function tick(dt, t, S, c) {
     L.emitAcc += dt * 60;
     if (L.emitAcc >= 1) { L.emitAcc = 0;
       for (const [rid, k] of burning) { const R0 = P.ROOMS[rid]; const [x0, z0, x1, z1] = R0.rect; const fy = P.LEVELS[R0.level].floor; const ceil = R0.level ? 6.0 : 3.0;
+        const box = L.roomBox?.[rid] || ((L.roomBox ??= {})[rid] = [x0 + 0.25, fy + 0.05, z0 + 0.25, x1 - 0.25, ceil - 0.15, z1 - 0.25]); // contain: fire + smoke stay in this room
         const rr = mulberry(d.seed ^ rid.length * 977); // fixed flame seats per room
         const nE = Math.max(1, Math.round(per * k));
         for (let j = 0; j < nE; j++) { const s = Math.floor(Math.random() * 5); const r2 = mulberry((d.seed + s * 131 + rid.charCodeAt(0)) | 0); const sx = x0 + 0.3 + r2() * (x1 - x0 - 0.6), sz = z0 + 0.3 + r2() * (z1 - z0 - 0.6);
-          fx.fire.emit(sx + (Math.random() - 0.5) * 0.9, fy + 0.05, sz + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 1.6, (Math.random() - 0.5) * 0.4, 0.7 + Math.random() * 0.7 * k, 0.9 + k * 0.6, 0.25, j % 4 === 0 ? 1 : 0); }
-        if (fx.smoke.free > 30 && Math.random() < 0.6 + k * 0.4) fx.smoke.emit(x0 + Math.random() * (x1 - x0), ceil - 0.6 - Math.random() * 0.5 * k, z0 + Math.random() * (z1 - z0), (Math.random() - 0.5) * 0.6, 0.05, (Math.random() - 0.5) * 0.6, 7 + Math.random() * 4, 2.2, 4.2, 1);
+          fx.fire.emit(sx + (Math.random() - 0.5) * 0.9, fy + 0.05, sz + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 1.6, (Math.random() - 0.5) * 0.4, 0.7 + Math.random() * 0.7 * k, 0.9 + k * 0.6, 0.25, j % 4 === 0 ? 1 : 0, box); }
+        if (fx.smoke.free > 30 && Math.random() < 0.6 + k * 0.4) fx.smoke.emit(x0 + Math.random() * (x1 - x0), ceil - 0.6 - Math.random() * 0.5 * k, z0 + Math.random() * (z1 - z0), (Math.random() - 0.5) * 0.6, 0.05, (Math.random() - 0.5) * 0.6, 7 + Math.random() * 4, 2.2, 4.2, 1, box);
         void rr; }
     }
     const here = roomAt(p.x, p.y + 0.5, p.z); const b = burning.find(x => x[0] === here);

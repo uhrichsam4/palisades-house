@@ -203,14 +203,56 @@ export function teakBench(kit, parent, M, pos, ry, L = 2.0) {
 }
 
 export function pingPong(kit, parent, M, pos, ry) {
+  // polish: regulation look — dark blue satin top (playing surface at 0.76, matches games/pingpong/sim.js TY),
+  // white 2 cm edge lines + 3 mm centre line, steel apron, folding-leg undercarriage on castors, mesh net with
+  // white tape on two clamp posts. All static (merged by the pool piece).
   const g = kit.group(parent, pos, ry);
-  kit.add(g, kit.rbox(2.74, 0.06, 1.525, 0.01), M.concrete, [0, 0.73, 0]);
-  const line = M.tableWhite;
-  kit.add(g, kit.box(2.74, 0.004, 0.02), line, [0, 0.762, 0.752]); kit.add(g, kit.box(2.74, 0.004, 0.02), line, [0, 0.762, -0.752]);
-  kit.add(g, kit.box(0.02, 0.004, 1.525), line, [1.36, 0.762, 0]); kit.add(g, kit.box(0.02, 0.004, 1.525), line, [-1.36, 0.762, 0]);
-  kit.add(g, kit.box(2.74, 0.004, 0.006), line, [0, 0.762, 0]);
-  kit.add(g, kit.box(0.02, 0.15, 1.6), M.metal, [0, 0.835, 0]);
-  for (const sx of [-1, 1]) kit.add(g, kit.rbox(0.28, 0.70, 1.0, 0.03), M.concrete, [sx * 0.85, 0.35, 0]);
+  if (!M.ppTop) {
+    M.ppTop = kit.outdoor(new THREE.MeshStandardMaterial({ color: 0x082460, roughness: 0.78, metalness: 0.0 })); M.ppTop.envMapIntensity = 0.2; /* satin, not a sky mirror */
+    M.ppLine = kit.outdoor(new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.45 }));
+    M.ppSteel = kit.outdoor(new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.35, metalness: 0.85 }));
+    M.ppFrame = kit.outdoor(new THREE.MeshStandardMaterial({ color: 0x23272d, roughness: 0.5, metalness: 0.6 }));
+    const netMap = kit.canvasTex(256, 64, (c, w, h) => {
+      c.clearRect(0, 0, w, h); c.strokeStyle = 'rgba(20,22,26,1)'; c.lineWidth = 1.6;
+      for (let x = 0; x <= w; x += 16) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); }
+      for (let y = 0; y <= h; y += 16) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); }
+    });
+    netMap.repeat.set(9, 1);
+    M.ppNet = kit.outdoor(new THREE.MeshStandardMaterial({ map: netMap, color: 0x2a2d33, roughness: 0.9, alphaTest: 0.35, transparent: false, side: THREE.DoubleSide }));
+  }
+  const TOP = 0.76, L = 2.74, W = 1.525;
+  kit.add(g, kit.rbox(L, 0.025, W, 0.004), M.ppTop, [0, TOP - 0.0125, 0]);
+  kit.add(g, kit.box(L - 0.02, 0.05, W - 0.02), M.ppFrame, [0, TOP - 0.05, 0]);   // steel apron under the top edge
+  const ly = TOP + 0.0006, line = M.ppLine;
+  kit.add(g, kit.box(L, 0.001, 0.02), line, [0, ly, W / 2 - 0.01]); kit.add(g, kit.box(L, 0.001, 0.02), line, [0, ly, -W / 2 + 0.01]);
+  kit.add(g, kit.box(0.02, 0.001, W), line, [L / 2 - 0.01, ly, 0]); kit.add(g, kit.box(0.02, 0.001, W), line, [-L / 2 + 0.01, ly, 0]);
+  kit.add(g, kit.box(L - 0.04, 0.001, 0.006), line, [0, ly, 0]); /* 3 mm aliases into dashes at play distance */
+  // edge band: thin white lip on the long sides so the edge reads from low angles
+  for (const sz of [-1, 1]) kit.add(g, kit.box(L, 0.022, 0.004), line, [0, TOP - 0.011, sz * (W / 2 + 0.002)]);
+  for (const sx of [-1, 1]) kit.add(g, kit.box(0.004, 0.022, W), line, [sx * (L / 2 + 0.002), TOP - 0.011, 0]);
+  // net: 1.83 m long, 15.25 cm high, mesh + white tape, black clamp posts outside the table edge
+  const NH = 0.1525, NL = 1.83;
+  kit.add(g, new THREE.PlaneGeometry(NL, NH - 0.012).rotateY(Math.PI / 2), M.ppNet, [0, TOP + (NH - 0.012) / 2, 0]);
+  kit.add(g, kit.box(0.006, 0.014, NL), line, [0, TOP + NH - 0.007, 0]);
+  kit.add(g, kit.box(0.004, 0.006, NL), line, [0, TOP + 0.003, 0]);
+  for (const sz of [-1, 1]) {
+    kit.add(g, kit.cyl(0.009, 0.009, NH + 0.01, 12), M.ppSteel, [0, TOP + NH / 2, sz * NL / 2]);
+    kit.add(g, kit.box(0.04, 0.03, 0.09), M.ppFrame, [0, TOP - 0.01, sz * (W / 2 + 0.03)]);              // clamp on the table edge
+    kit.add(g, kit.box(0.02, 0.012, 0.16), M.ppSteel, [0, TOP + 0.006, sz * (W / 2 + 0.07)]);             // post arm out to the post
+  }
+  // legs: two folding A-frames (square steel tube) with cross braces and castor feet
+  for (const sx of [-1, 1]) {
+    const x = sx * 0.95;
+    for (const sz of [-1, 1]) {
+      kit.add(g, kit.box(0.035, TOP - 0.1, 0.035), M.ppFrame, [x, (TOP - 0.1) / 2 + 0.06, sz * 0.62]);
+      kit.add(g, kit.cyl(0.03, 0.03, 0.03, 14), M.ppSteel, [x, 0.035, sz * 0.62]);                       // castor housing
+      kit.add(g, kit.cyl(0.028, 0.028, 0.022, 14).rotateX(Math.PI / 2), M.matteBlack || M.ppFrame, [x, 0.028, sz * 0.62]); // wheel
+    }
+    kit.add(g, kit.box(0.03, 0.03, 1.24), M.ppFrame, [x, 0.16, 0]);
+    kit.add(g, kit.box(0.03, 0.03, 1.24), M.ppFrame, [x, TOP - 0.12, 0]);
+    kit.add(g, kit.box(0.6, 0.025, 0.025), M.ppSteel, [x * 0.68, TOP - 0.25, 0]);                       // diagonal fold strut (flat)
+  }
+  kit.add(g, kit.box(1.9, 0.03, 0.03), M.ppFrame, [0, 0.16, 0]);                                       // centre spine between the frames
   return g;
 }
 

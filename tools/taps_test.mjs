@@ -113,7 +113,7 @@ try {
         await P.evaluate(async ({ f, rect, view }) => {
           const THREE = await import('three'); const d = window.__dbg;
           const sink = f.kind === 'sink' || f.kind === 'filler';
-          const mid = new THREE.Vector3(f.tip[0] + f.dir[0] * (sink ? 0.05 : 0.35), (f.tip[1] + f.land) / 2 + (sink ? 0.0 : 0.1), f.tip[2] + f.dir[2] * (sink ? 0.05 : 0.35));
+          const mid = new THREE.Vector3(f.tip[0] + f.dir[0] * (sink ? 0.05 : 0.35), (f.tip[1] + f.land) / 2 + (sink ? 0.0 : 0.25), f.tip[2] + f.dir[2] * (sink ? 0.05 : 0.35)); // polish: aim showers higher so the head stays in frame (guest-rain)
           const meshes = window.__tapMeshes ??= (() => { const a = []; d.scene.traverse(o => { if (o.isMesh && !o.isSprite && !o.name.startsWith('tap')) a.push(o); }); return a; })();
           const rc = new THREE.Raycaster(); rc.camera = d.camera; let best = null;
           const cx = (rect[0] + rect[2]) / 2 - f.tip[0], cz = (rect[1] + rect[3]) / 2 - f.tip[2];

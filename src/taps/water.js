@@ -36,7 +36,8 @@ vec3 vel = vec3(uV0.x, vy - ${G.toFixed(2)} * tt, uV0.z);
 vec3 wob = vec3(sin(emit * 37.0 + 1.3) + 0.6 * sin(emit * 83.0 + 0.4), 0.0, cos(emit * 29.0 + 0.2) + 0.6 * cos(emit * 71.0 + 2.1)) * uWob * tt;
 vec3 sC = vec3(uV0.x * tt, -s * uH, uV0.z * tt) + wob;
 float sp = max(length(vel), 0.05);
-float rad = uR0 * sqrt(max(length(uV0), 0.05) / sp) * (1.0 + 0.10 * sin(emit * 53.0 + th * 2.0) * smoothstep(0.0, 0.3, s));
+float rad = uR0 * pow(max(length(uV0), 0.05) / sp, 0.4) // polish: softer taper than sqrt continuity (no hairline neck)
+ * (1.0 + 0.10 * sin(emit * 53.0 + th * 2.0) * smoothstep(0.0, 0.3, s));
 vec3 T = vel / sp; vec3 A = abs(T.y) < 0.95 ? vec3(0., 1., 0.) : vec3(1., 0., 0.);
 vec3 B1 = normalize(cross(A, T)); vec3 B2 = cross(T, B1);
 vec3 objectNormal = B1 * cos(th) + B2 * sin(th);
@@ -56,11 +57,14 @@ const STREAM_FB = /* glsl */`
   float ndv = abs(dot(normalize(normal), normalize(vViewPosition)));
   float core = pow(ndv, 4.0);
   // aerated tap water: milky body that carries the room's light, darker refracted rims, bright reflections
-  vec3 body = totalDiffuse * (0.18 + 0.75 * core) * streak;
-  vec3 col = body * mix(0.45, 1.0, smoothstep(0.05, 0.6, ndv)) + totalSpecular * (1.2 + 0.8 * streak);
+  // polish: brighter refracted core + glints and a fresnel rim so the stream reads at a glance
+  vec3 body = totalDiffuse * (0.32 + 0.95 * core) * streak;
+  float rim = pow(1. - ndv, 3.0);
+  float glint = smoothstep(0.62, 0.95, fl2) * smoothstep(0.2, 0.8, ndv);
+  vec3 col = body * mix(0.55, 1.1, smoothstep(0.05, 0.6, ndv)) + totalSpecular * (1.9 + 1.1 * streak) + vec3(0.85, 0.92, 1.0) * (0.22 * rim + 0.45 * glint);
   float lum = max(col.r, max(col.g, col.b));
   float fade = clamp((uTime - uOn) / 0.3, 0., 1.) * clamp(1. - (uTime - uOff) / (0.3 + uFall), 0., 1.);
-  gl_FragColor = vec4(col, clamp(0.42 * streak + 0.35 * (1. - ndv) + lum * 0.25, 0., 0.95) * fade);
+  gl_FragColor = vec4(col, clamp(0.55 * streak + 0.4 * (1. - ndv) + lum * 0.3, 0., 0.97) * fade);
 }
 `;
 
@@ -79,7 +83,7 @@ const PART_V = /* glsl */`
 #define G ${G.toFixed(2)}
 attribute vec4 aSeed;
 uniform float uTime, uOn, uOff, uMode, uSpeed, uSpread, uDisc, uNHeads, uFloor, uPeriod, uWidth, uStretch, uLandR, uFall, uSplashV, uShowerSrc;
-uniform vec3 uDir, uHead0, uHead1, uLand;
+uniform vec3 uDir, uHead0, uHead1, uLand, uBoxMin, uBoxMax; // uBox*: shower enclosure (local), spray stops at its glass/walls
 varying vec2 vUv; varying float vA;
 float h1(float n){ return fract(sin(n) * 43758.5453); }
 void spray(float k, out vec3 p0, out vec3 v, out float th){
@@ -104,10 +108,12 @@ void main(){
     vec3 p0, v; float th; spray(k, p0, v, th);
     vis = age < th; emit = uTime - age;
     pos = p0 + v * age; pos.y -= 0.5 * G * age * age; vel = v; vel.y -= G * age;
+    vis = vis && all( greaterThan( pos, uBoxMin ) ) && all( lessThan( pos, uBoxMax ) );
     a = 0.75 + 0.5 * aSeed.z;
   } else {
     vec3 land; float fall;
-    if (uShowerSrc > 0.5) { vec3 p0, v; float th; spray(k * 0.731 + 5.0, p0, v, th); land = p0 + v * th; land.y = uFloor; fall = th; }
+    if (uShowerSrc > 0.5) { vec3 p0, v; float th; spray(k * 0.731 + 5.0, p0, v, th); land = p0 + v * th; land.y = uFloor; fall = th;
+      land.xz = clamp( land.xz, uBoxMin.xz + 0.02, uBoxMax.xz - 0.02 ); } // drops that hit the glass splash at its foot
     else { float an = h1(k * 2.3) * 6.2832, rr = sqrt(h1(k * 4.1)) * uLandR; land = uLand + vec3(cos(an) * rr, 0., sin(an) * rr); fall = uFall; }
     emit = uTime - age - fall;
     if (uMode < 1.5) {
@@ -189,6 +195,51 @@ void main(){
 const RIP_V = /* glsl */`varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`;
 let ripGeo = null;
 
+// ------------------------------------------------------------------ polish: rising bath water (fillers with f.basin)
+// A disc (oval) / quad (box) whose height AND plan size are computed in the vertex shader from the fill level, so a
+// filling tub costs no CPU per frame. level = clamp(uL0 + (uTime - uT0) * uRate): uRate > 0 while on (~60 s to full),
+// < 0 while draining. uProf[i] = (y, halfX, halfZ) of the basin's inner wall at 8 heights (local to the tap group).
+const LVL_V = /* glsl */`
+uniform float uTime, uL0, uT0, uRate; uniform vec3 uProf[8];
+varying vec2 vP; varying float vLvl;
+void main(){
+  float lvl = clamp(uL0 + (uTime - uT0) * uRate, 0., 1.); vLvl = lvl;
+  if (lvl < 0.004) { gl_Position = vec4(0., 0., 2., 1.); vP = vec2(0.); return; }
+  float f = lvl * 7.; int i = int(min(floor(f), 6.)); float k = f - float(i);
+  vec3 pr = mix(uProf[i], uProf[i + 1], k);
+  vec3 p = vec3(position.x * pr.y, pr.x, position.z * pr.z); vP = position.xz;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.);
+}`;
+const LVL_F = /* glsl */`
+uniform float uTime; uniform vec2 uLandUV;
+varying vec2 vP; varying float vLvl;
+${NOISE}
+void main(){
+  float n = tp_noiseP(vP * 9. + vec2(uTime * 0.6, -uTime * 0.4), 64.) * 0.6 + tp_noiseP(vP * 23. - uTime * 1.1, 64.) * 0.4;
+  float d = length(vP - uLandUV);
+  float ring = 0.; for (int j = 0; j < 3; j++) { float ph = fract(uTime * 1.3 + float(j) / 3.); ring += exp(-pow((d - ph * 0.55) * 22., 2.)) * (1. - ph); }
+  float foam = smoothstep(0.16, 0.0, d) * (0.5 + 0.5 * n);
+  float edge = smoothstep(0.80, 1.0, length(vP)); // meniscus brightening at the wall
+  vec3 deep = vec3(0.55, 0.78, 0.80), lite = vec3(0.93, 0.98, 1.0);
+  vec3 col = mix(deep, lite, 0.35 + 0.35 * n + 0.5 * ring + foam + 0.3 * edge);
+  float a = clamp(0.28 + 0.35 * smoothstep(0., 0.6, vLvl) + 0.25 * ring + 0.6 * foam + 0.15 * edge, 0., 0.92);
+  gl_FragColor = vec4(col, a);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+function basinProfile(b, tipY) {
+  const out = [];
+  for (let i = 0; i < 8; i++) {
+    const y = b.y0 + (b.y1 - b.y0) * i / 7; let hx, hz;
+    if (b.shape === 'box') { hx = b.hx; hz = b.hz; }
+    else { const P = b.prof; let r = P[P.length - 1][0];
+      for (let j = 0; j < P.length - 1; j++) if (y <= P[j + 1][1]) { const t = Math.max(0, (y - P[j][1]) / (P[j + 1][1] - P[j][1])); r = P[j][0] + (P[j + 1][0] - P[j][0]) * t; break; }
+      r *= 0.985; hx = r; hz = r + b.dL * Math.sqrt(Math.min(1, r / 0.4)); }
+    out.push(new THREE.Vector3(b.c[1] + y - tipY, hx, hz));
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ per tap
 // fx = createTapFx(f, { uTime, donor }) ; f from fixtures.js (dir normalised). setOn(on, t). alive(t). group.
 export function createTapFx(f, shared) {
@@ -200,6 +251,7 @@ export function createTapFx(f, shared) {
   const dir = new THREE.Vector3().fromArray(f.dir).normalize();
   const mats = [];
   let maxLife = 1.5;
+  let level = null; // polish: rising bath water (fillers with a basin)
 
   if (f.kind === 'sink' || f.kind === 'filler') {
     // ---- stream
@@ -207,7 +259,7 @@ export function createTapFx(f, shared) {
     const v0 = dir.clone().multiplyScalar(f.v);
     const tFall = (v0.y + Math.sqrt(v0.y * v0.y + 2 * G * H)) / G;
     const land = new THREE.Vector3(v0.x * tFall, -H, v0.z * tFall);
-    const u = { uTime, uOn: on, uOff: off, uH: { value: H }, uR0: { value: f.r }, uWob: { value: f.kind === 'filler' ? 0.006 : 0.004 }, uV0: { value: v0 }, uFall: { value: tFall } };
+    const u = { uTime, uOn: on, uOff: off, uH: { value: H }, uR0: { value: f.r * (f.kind === 'filler' ? 2.3 : 3.0) } /* polish: 3x thicker at the spout (was a hairline) */, uWob: { value: f.kind === 'filler' ? 0.006 : 0.004 }, uV0: { value: v0 }, uFall: { value: tFall } };
     const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.04, metalness: 0, transparent: true, depthWrite: false, envMapIntensity: 1.4, side: THREE.FrontSide });
     m.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, u);
@@ -217,24 +269,39 @@ export function createTapFx(f, shared) {
         .replace('#include <clipping_planes_fragment>', 'if (vTT > uTime - uOn || vTT < uTime - uOff) discard;\n#include <clipping_planes_fragment>')
         .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n' + STREAM_FB);
     };
-    m.customProgramCacheKey = () => 'tap-stream-1';
+    m.customProgramCacheKey = () => 'tap-stream-2';
     mats.push(m); shared.stream = m;
     const mesh = new THREE.Mesh(getStreamGeo(), m); mesh.name = 'tap-stream'; mesh.renderOrder = 3; group.add(mesh);
     // ---- splash droplets + ripple at the landing point
     const big = f.kind === 'filler';
     const sp = particles(big ? 80 : 44, [land.x, land.y + 0.1, land.z, 0.35], {
-      uMode: 1, uShowerSrc: 0, uLand: land, uLandR: f.r * 1.6, uFall: tFall, uSplashV: big ? 1.0 : 0.75, uPeriod: big ? 0.32 : 0.26,
-      uWidth: big ? 0.0045 : 0.0036, uStretch: 0.016, uAlpha: 0.95, uColor: new THREE.Color(0.95, 0.97, 1.0),
+      uMode: 1, uShowerSrc: 0, uLand: land, uLandR: f.r * 4.0, uFall: tFall, uSplashV: big ? 1.1 : 0.85, uPeriod: big ? 0.32 : 0.26,
+      uWidth: big ? 0.006 : 0.005, /* polish: wider splash crown */ uStretch: 0.016, uAlpha: 0.95, uColor: new THREE.Color(0.95, 0.97, 1.0),
     });
     group.add(sp);
     ripGeo ??= new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-    const ru = { uTime, uOn: on, uOff: off, uFall: { value: tFall }, uStrength: { value: big ? 1 : 0.85 } };
+    const ru = { uTime, uOn: on, uOff: off, uFall: { value: tFall }, uStrength: { value: big ? 1.25 : 1.15 } };
     const rm = new THREE.ShaderMaterial({ uniforms: ru, vertexShader: RIP_V, fragmentShader: RIP_F, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     mats.push(rm);
-    const rip = new THREE.Mesh(ripGeo, rm); rip.name = 'tap-ripple'; const R = big ? 0.17 : 0.095; rip.scale.set(R * 2, 1, R * 2);
+    const rip = new THREE.Mesh(ripGeo, rm); rip.name = 'tap-ripple'; const R = big ? 0.24 : 0.14; // polish: larger foam ring rip.scale.set(R * 2, 1, R * 2);
     rip.position.set(land.x, land.y + 0.002, land.z); rip.renderOrder = 2; group.add(rip);
     maxLife = tFall + 0.8;
     shared.info = { tFall, land: land.clone().add(tip) };
+    if (f.basin) { // polish: the tub fills while the filler runs (~60 s) and drains when it's off (~40 s)
+      const b = f.basin;
+      const lu = { uTime, uL0: { value: 0 }, uT0: { value: 0 }, uRate: { value: 0 }, uProf: { value: basinProfile(b, f.tip[1]) },
+        uLandUV: { value: new THREE.Vector2(0, 0) } };
+      const pr = lu.uProf.value[3]; lu.uLandUV.value.set((land.x + f.tip[0] - b.c[0]) / pr.y, (land.z + f.tip[2] - b.c[2]) / pr.z);
+      const lg = b.shape === 'box' ? new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2) : new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2);
+      lg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 1.2);
+      const lm = new THREE.ShaderMaterial({ uniforms: lu, vertexShader: LVL_V, fragmentShader: LVL_F, transparent: true, depthWrite: false });
+      mats.push(lm);
+      const lvl = new THREE.Mesh(lg, lm); lvl.name = 'tap-level'; lvl.renderOrder = 1; lvl.frustumCulled = false;
+      lvl.position.set(b.c[0] - f.tip[0], 0, b.c[2] - f.tip[2]); group.add(lvl);
+      const FILL = 1 / 60, DRAIN = -1 / 40;
+      level = { u: lu, at: (t) => Math.min(1, Math.max(0, lu.uL0.value + (t - lu.uT0.value) * lu.uRate.value)),
+        set(onNow, t) { const l = this.at(t); lu.uL0.value = l; lu.uT0.value = t; lu.uRate.value = onNow ? FILL : DRAIN; } };
+    }
   } else {
     // ---- shower head / hand shower
     const hand = f.kind === 'hand';
@@ -243,7 +310,8 @@ export function createTapFx(f, shared) {
     const vy = dir.y * f.v; const tHit = (vy + Math.sqrt(vy * vy + 2 * G * -floorL)) / G;
     const reach = Math.max(1.4, Math.abs(floorL)) + (hand ? 0.8 : 0.4);
     const sph = [0, floorL / 2, 0, reach];
-    const common = { uDir: dir, uHead0: heads[0], uHead1: heads[1] || heads[0], uNHeads: heads.length, uSpeed: f.v, uSpread: hand ? 0.16 : 0.10, uDisc: f.r, uFloor: floorL };
+    const box = f.box ? [new THREE.Vector3().fromArray(f.box[0]).sub(tip), new THREE.Vector3().fromArray(f.box[1]).sub(tip)] : [new THREE.Vector3(-99, -99, -99), new THREE.Vector3(99, 99, 99)];
+    const common = { uDir: dir, uHead0: heads[0], uHead1: heads[1] || heads[0], uNHeads: heads.length, uSpeed: f.v, uSpread: hand ? 0.16 : 0.10, uDisc: f.r, uFloor: floorL, uBoxMin: box[0], uBoxMax: box[1] };
     const nSpray = Math.round((hand ? 380 : 650) * Math.min(1.6, heads.length * (f.r > 0.07 ? 1.25 : 1)));
     group.add(particles(nSpray, sph, { ...common, uMode: 0, uPeriod: tHit * 1.08 + 0.02, uWidth: hand ? 0.0024 : 0.0028, uStretch: 0.022, uAlpha: 0.5, uColor: new THREE.Color(0.86, 0.9, 0.95) }));
     group.add(particles(hand ? 110 : 220, sph, { ...common, uMode: 1, uShowerSrc: 1, uSplashV: 1.1, uPeriod: 0.34, uWidth: 0.0028, uStretch: 0.014, uAlpha: 0.55, uColor: new THREE.Color(0.85, 0.9, 0.95) }));
@@ -255,7 +323,7 @@ export function createTapFx(f, shared) {
   function particles(n, sphere, uu) {
     const u = { uTime, uOn: on, uOff: off, uMode: { value: 0 }, uSpeed: { value: 0 }, uSpread: { value: 0 }, uDisc: { value: 0 }, uNHeads: { value: 1 }, uFloor: { value: 0 }, uPeriod: { value: 1 },
       uWidth: { value: 0.003 }, uStretch: { value: 0.02 }, uLandR: { value: 0 }, uFall: { value: 0 }, uSplashV: { value: 1 }, uShowerSrc: { value: 0 },
-      uDir: { value: new THREE.Vector3(0, -1, 0) }, uHead0: { value: new THREE.Vector3() }, uHead1: { value: new THREE.Vector3() }, uLand: { value: new THREE.Vector3() },
+      uDir: { value: new THREE.Vector3(0, -1, 0) }, uHead0: { value: new THREE.Vector3() }, uHead1: { value: new THREE.Vector3() }, uLand: { value: new THREE.Vector3() }, uBoxMin: { value: new THREE.Vector3(-99, -99, -99) }, uBoxMax: { value: new THREE.Vector3(99, 99, 99) },
       uColor: { value: new THREE.Color(1, 1, 1) }, uAlpha: { value: 0.4 } };
     for (const [k, v] of Object.entries(uu)) u[k] = { value: v };
     const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: PART_V, fragmentShader: PART_F, transparent: true, depthWrite: false });
@@ -266,9 +334,10 @@ export function createTapFx(f, shared) {
   return {
     group, mats, tip,
     get running() { return off.value > 1e5; },
-    setOn(v, t) { if (v) { on.value = t; off.value = 1e6; } else if (off.value > t) off.value = t; },
+    setOn(v, t) { level?.set(v, t); if (v) { on.value = t; off.value = 1e6; } else if (off.value > t) off.value = t; },
+    get level() { return level ? level.at(uTime.value) : null; },
     // still something to draw at time t
-    alive(t) { return off.value > t || t - off.value < maxLife; },
+    alive(t) { return off.value > t || t - off.value < maxLife || (!!level && level.at(t) > 0); },
     setEnv(env, intensity) { const m = shared.stream; if (m && m.envMap !== env) m.envMap = env; if (m && intensity) m.envMapIntensity = intensity; },
     dispose() { for (const m of mats) m.dispose(); },
   };

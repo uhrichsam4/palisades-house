@@ -103,11 +103,12 @@ export function createDamage(ctx) {
   //  - closing speed: resting/settling/penetration contacts have big forces but almost no relative speed — a real
   //    impact needs the two bodies to be moving into each other at >= MIN_SPEED m/s
   // Impacts are queued and applied once per frame, outside the physics step (breaks remove/add bodies).
-  const WARMUP_MS = 25000, MIN_SPEED = 1.2; const t0 = performance.now(); const queue = [];
+  // warm-up applies only to unowned contacts (settling); thrown/driven/punched things always count
+  const WARMUP_MS = 8000, MIN_SPEED = 1.2; const t0 = performance.now(); const queue = [];
   const velOf = (h) => { const c = world.getCollider(h); const b = c && c.parent(); if (!b || !b.isValid?.() && b.isValid) return null; try { const v = b.linvel(); return v; } catch { return null; } };
   phys.onImpact?.((ev) => {
     const ea = byHandle.get(ev.a), eb = byHandle.get(ev.b); if (!ea && !eb) return;
-    if (performance.now() - t0 < WARMUP_MS) return;
+    if (performance.now() - t0 < WARMUP_MS && !(ev.ownerA?.by || ev.ownerB?.by)) return;
     const va = velOf(ev.a), vb = velOf(ev.b);
     const dx = (va?.x || 0) - (vb?.x || 0), dy = (va?.y || 0) - (vb?.y || 0), dz = (va?.z || 0) - (vb?.z || 0);
     if (dx * dx + dy * dy + dz * dz < MIN_SPEED * MIN_SPEED) return;

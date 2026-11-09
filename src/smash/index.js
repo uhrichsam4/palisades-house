@@ -14,7 +14,7 @@
 // Test hooks: window.__smash.
 import * as THREE from 'three';
 import { faceArea } from './classify.js';
-import { createFx } from './fx.js';
+import { createFx, mapTint } from './fx.js';
 import { createSound } from './sound.js';
 import { createHands } from './hands.js';
 import { createNet } from './net.js';
@@ -22,8 +22,8 @@ import { buildWalk } from './walk.js';
 
 const SND = { glass: 'glass', ceramic: 'ceramic', porcelain: 'ceramic', wood: 'wood', metal: 'metal', plastic: 'plastic', stone: 'stone', concrete: 'stone', fabric: 'thud', rubber: 'thud' };
 const FX = { // fragments, burst power (m/s), sparks, splinter stretch, life [s]
-  glass: { n: 14, pw: 2.4, sp: 46, spc: 0xdfeff2, glass: true, life: [8, 14] },
-  ceramic: { n: 10, pw: 1.8, sp: 22, life: [10, 18] }, porcelain: { n: 10, pw: 1.6, sp: 20, life: [10, 18] },
+  glass: { n: 18, pw: 2.4, sp: 46, spc: 0xdfeff2, glass: true, life: [8, 14] },
+  ceramic: { n: 16, pw: 1.8, sp: 30, life: [10, 18] }, porcelain: { n: 16, pw: 1.6, sp: 28, life: [10, 18] }, // polish: smaller, more pieces
   stone: { n: 8, pw: 1.2, sp: 16, life: [12, 20] }, concrete: { n: 8, pw: 1.0, sp: 18, life: [12, 20] },
   wood: { n: 6, pw: 1.3, sp: 12, stretch: 4.5, life: [10, 20] }, metal: { n: 4, pw: 0.8, sp: 6, life: [10, 20] },
   plastic: { n: 6, pw: 1.4, sp: 10, life: [8, 16] }, fabric: { n: 4, pw: 0.7, sp: 8, spc: 0xf4f0ea, life: [8, 14] }, rubber: { n: 4, pw: 1, sp: 4, life: [8, 12] },
@@ -102,8 +102,24 @@ export function startSmash(ctx, mp) {
   function colorOfDyn(it) {
     if (it.color) return it.color; let best = null, bv = -1;
     it.obj.traverse(o => { if (!o.isMesh) return; const m = [].concat(o.material)[0]; if (!m?.color) return; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); const v = o.geometry.boundingSphere.radius; if (v > bv) { bv = v; best = o; } });
-    const c = new THREE.Color(0xc9c2b6); if (best) { const m = [].concat(best.material)[0]; c.copy(m.color); const col = best.geometry.attributes.color; if (m.vertexColors && col) { let r = 0, g = 0, b = 0; const n = Math.min(64, col.count); for (let i = 0; i < n; i++) { const k = Math.floor(i * col.count / n); r += col.getX(k); g += col.getY(k); b += col.getZ(k); } c.r *= r / n; c.g *= g / n; c.b *= b / n; } }
+    const c = new THREE.Color(0xc9c2b6); if (best) { const m = [].concat(best.material)[0]; c.copy(m.color); const tn = mapTint(m); if (tn) c.multiply(tn); /* polish: textured items */ const col = best.geometry.attributes.color; if (m.vertexColors && col) { let r = 0, g = 0, b = 0; const n = Math.min(64, col.count); for (let i = 0; i < n; i++) { const k = Math.floor(i * col.count / n); r += col.getX(k); g += col.getY(k); b += col.getZ(k); } c.r *= r / n; c.g *= g / n; c.b *= b / n; } }
     return (it.color = c);
+  }
+  // polish: static items' prep colour ignores texture maps (wood chairs came out pale); tint lazily on first break
+  function staticColor(it) {
+    if (it.tinted || !it.color) return it.color; it.tinted = true; let best = null, bv = -1;
+    for (const o of it.meshes || []) { const m = [].concat(o.material)[0]; if (!m?.color) continue; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); const v = o.geometry.boundingSphere.radius; if (v > bv) { bv = v; best = m; } }
+    const tn = mapTint(best); if (tn) it.color = it.color.clone().multiply(tn); return it.color;
+  }
+  // polish: size-weighted colours of the item's parts (fragments pick from these), built once per item on break
+  function paletteOf(it, base) {
+    if (it.palette !== undefined) return it.palette; const ms = it.meshes ? [...it.meshes] : []; it.obj?.traverse?.(o => { if (o.isMesh && !ms.includes(o)) ms.push(o); });
+    const P = []; let sum = 0;
+    for (const o of ms) { const m = [].concat(o.material)[0]; if (!m?.color || m.transparent) continue; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      const r = o.geometry.boundingSphere.radius * o.matrixWorld.getMaxScaleOnAxis(); const w = r * r; const c = m.color.clone(); const tn = mapTint(m); if (tn) c.multiply(tn);
+      const same = P.find(p => Math.abs(p.c.r - c.r) + Math.abs(p.c.g - c.g) + Math.abs(p.c.b - c.b) < 0.08); if (same) same.w += w; else P.push({ c, w }); sum += w; }
+    if (P.length < 2) return (it.palette = null);
+    P.sort((a, b) => b.w - a.w); P.length = Math.min(P.length, 4); P.sum = P.reduce((s, p) => s + p.w, 0); return (it.palette = P);
   }
   function hideDynamic(it) {
     const d = it.d; if (!d) return null;
@@ -111,7 +127,7 @@ export function startSmash(ctx, mp) {
     for (const t of it.tracked || []) { t.b.setVisibleAt(t.id, false); const arr = prep.propBatch?.tracked; const i = arr ? arr.indexOf(t) : -1; if (i >= 0) arr.splice(i, 1); }
     it.obj.visible = false;
     const i = phys.dynamics.indexOf(d); if (i >= 0) phys.dynamics.splice(i, 1);
-    byHandle.delete(d.collider.handle); try { world.removeRigidBody(d.body); } catch {}
+    byHandle.delete(d.collider.handle); d.dead = true; try { world.removeRigidBody(d.body); } catch {} // dead: spliced above, so physics.js can't flag it; any stale holder must skip it
     it.d = null; it.deadD = d;
     return vel;
   }
@@ -120,7 +136,7 @@ export function startSmash(ctx, mp) {
     if (it.heldBy) S.net?.clearHeld(it);
     const quiet = info.remote && !info.point; // late-joiner state sync: just gone
     const cloud = it.mode === 'dynamic' ? dynCloud(it) : it.hull;
-    const color = it.mode === 'dynamic' ? colorOfDyn(it) : it.color;
+    const color = it.mode === 'dynamic' ? colorOfDyn(it) : staticColor(it);
     const bb = new THREE.Box3(); for (let i = 0; i < cloud.length; i += 3) bb.expandByPoint(_v.set(cloud[i], cloud[i + 1], cloud[i + 2]));
     const size = bb.getSize(new THREE.Vector3()); const ctr = bb.getCenter(new THREE.Vector3());
     let vel = null; if (it.mode === 'dynamic') vel = hideDynamic(it); else hideStatic(it);
@@ -133,7 +149,7 @@ export function startSmash(ctx, mp) {
     const t0 = performance.now();
     const cells = fx.fracture(cloud, { count, impact, stretchAxis: F.stretch ? axis : null, stretch: F.stretch || 1 });
     const mass = it.mass || Math.min(400, size.x * size.y * size.z * (DENSITY[it.material] || 800) * 0.2);
-    fx.spawn(cells, { color, glass: !!F.glass, mass, vel, impact, dir: info.dir, power: F.pw, life: F.life });
+    fx.spawn(cells, { color, palette: paletteOf(it, color), glass: !!F.glass, mass, vel, impact, dir: info.dir, power: F.pw, life: F.life });
     fx.clearCracks(it.id);
     if (F.glass) fx.glitter(impact, 90, { speed: F.pw * 1.2, floorY: floorBelow(ctr, bb.min.y) });
     fx.sparks(impact, F.sp, { color: F.spc ?? color.getHex(), speed: F.pw * 1.6, floorY: floorBelow(ctr, bb.min.y), size: F.glass ? 0.7 : 1 });

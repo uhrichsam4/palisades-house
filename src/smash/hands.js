@@ -75,7 +75,7 @@ body.shot #smash-ring,body.menu-open #smash-ring,body.paused #smash-ring,body.ph
     if (!it || it.broken || !it.d || it.heldBy || held || it.mass > PICKUP_MAX_KG) return false;
     const d = it.d; d.body.wakeUp(); d.body.setGravityScale(0, true); d.collider.setCollisionGroups(HELD_GROUPS);
     d.sleepSkip = false; d.body.setLinearDamping(2); d.body.setAngularDamping(6);
-    st.ignore?.add(d.collider.handle); st.holding = true; st.aim = true;
+    st.ignore?.add(d.collider.handle); st.holding = true; st.aim = true; try { d.body.enableCcd(true); } catch {} // contain: no tunnelling while carried
     held = { it, d, t: 0 }; it.heldBy = S.selfId(); it.lastMover = S.selfId(); farT = 0;
     phys.claim(d.collider, { kind: 'held', id: it.id, by: S.selfId() });
     if (ctx.interact) ctx.interact.modal = modal;
@@ -96,10 +96,17 @@ body.shot #smash-ring,body.menu-open #smash-ring,body.paused #smash-ring,body.ph
     return it;
   }
   // target in front of the hands (third person: in front of the chest along the look yaw; first person: lower right of view)
+  const holdRay = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }), HOLD_FLAGS = R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
   function holdTarget(it) {
     const r = THREE.MathUtils.clamp(Math.max(it.size[0], it.size[2]) * 0.5, 0.12, 0.55);
     if (st.thirdPerson) { const y = st.yaw; target.set(st.pos.x - Math.sin(y) * (0.42 + r), st.pos.y + 1.08 + Math.sin(st.pitch) * 0.35 + it.size[1] * 0.1, st.pos.z - Math.cos(y) * (0.42 + r)); }
     else { camera.getWorldDirection(_d); camera.getWorldPosition(_o); const rx = Math.cos(st.yaw), rz = -Math.sin(st.yaw); target.copy(_o).addScaledVector(_d, 0.5 + r).add(_v.set(rx * 0.16, -0.24, rz * 0.16)); }
+    // contain pass: never hold a prop on the far side of a wall: ray from the chest to the hold point (fixed colliders),
+    // pull the point back to just in front of the hit
+    const ox = st.pos.x, oy = st.pos.y + 1.08, oz = st.pos.z; let dx = target.x - ox, dy = target.y - oy, dz = target.z - oz; const L = Math.hypot(dx, dy, dz);
+    if (L > 1e-3) { dx /= L; dy /= L; dz /= L; holdRay.origin.x = ox; holdRay.origin.y = oy; holdRay.origin.z = oz; holdRay.dir.x = dx; holdRay.dir.y = dy; holdRay.dir.z = dz;
+      let h = null; try { h = world.castRay(holdRay, L + r, true, HOLD_FLAGS, undefined, player.collider); } catch {}
+      if (h) { const d = Math.max(0.05, (h.timeOfImpact ?? h.toi) - r - 0.03); if (d < L) target.set(ox + dx * d, oy + dy * d, oz + dz * d); } }
     return target;
   }
   phys.onStep(() => {
@@ -125,7 +132,7 @@ body.shot #smash-ring,body.menu-open #smash-ring,body.paused #smash-ring,body.ph
     const vel = { x: dir.x * speed + player.velocity.x * 0.5, y: dir.y * speed + lift, z: dir.z * speed + player.velocity.z * 0.5 };
     release(true, vel);
     d.body.setAngvel({ x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 4, z: (Math.random() - 0.5) * 6 }, true);
-    if (it.mass < 6) d.body.enableCcd(true);
+    d.body.enableCcd(true); // contain: every thrown prop (was < 6 kg only); net.js turns it off when it settles
     phys.claim(d.collider, { kind: 'thrown', id: it.id, by: S.selfId() }); it.lastMover = S.selfId(); it.flying = performance.now();
     st.emote = nextEmote(st.emote, 5); aimT = 0.5; st.aim = true;
     sound.play('whoosh', p, 0.3 + charge * 0.5, 1.4 - Math.min(0.6, it.mass / 40));

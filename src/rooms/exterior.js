@@ -404,6 +404,30 @@ export async function build(ctx) {
     [10.25, 5.25, 17.0, [0, 1]], [11.45, 5.25, 17.0, [0, 1]],                  // primary rear (upper)
   ]) lantern(x, y, z, n);
 
+  // ================================================================ street lights (polish pass)
+  // Three slim LA-style cobra-head poles along Camino De Yatasto: emissive heads + a soft additive pool decal on the
+  // asphalt (radial falloff, no real light). Both are plain emissive materials, so src/sky scales them with darkness
+  // (≈ off at noon, full at night). No per-frame work.
+  {
+    const poolTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+      const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); for (const [t, a] of [[0, 1], [0.25, 0.7], [0.55, 0.25], [0.8, 0.06], [1, 0]]) gr.addColorStop(t, `rgb(${a * 255 | 0},${a * 255 | 0},${a * 255 | 0})`); // alphaMap reads green: grey levels on black
+      g.fillStyle = '#000'; g.fillRect(0, 0, 128, 128); g.fillStyle = gr; g.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); return t; })();
+    const poleMat = std({ color: 0x5d6064, roughness: 0.55, metalness: 0.6 });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xfff6e8, emissive: 0xffd9a8, emissiveIntensity: 0.7, roughness: 0.4 });
+    const poolMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffcf96, emissiveIntensity: 0.05, alphaMap: poolTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const poolGeo = new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2);
+    for (const [x, z, dir] of [[1.5, FRONT.curbZ + 0.35, -1], [27.5, FRONT.curbZ + 0.35, -1], [-12.5, FRONT.farCurbZ - 0.35, 1]]) {
+      const g = kit.group(root, [x, 0, z], 0, 'streetlight'); const y0 = dir < 0 ? WALK_Y : STREET_Y + 0.15;
+      kit.add(g, new THREE.CylinderGeometry(0.07, 0.1, 6.4, 10), poleMat, [0, y0 + 3.2, 0]);
+      kit.add(g, new THREE.CylinderGeometry(0.16, 0.2, 0.3, 10), poleMat, [0, y0 + 0.15, 0]);
+      ctx.phys.boxAABB([x - 0.16, y0, z - 0.16], [x + 0.16, y0 + 6.4, z + 0.16]); // solid pole: players and cars can't pass through
+      const arm = kit.add(g, new THREE.CylinderGeometry(0.045, 0.045, 1.9, 8), poleMat, [0, y0 + 6.25, dir * 0.9]); arm.rotation.x = Math.PI / 2 - dir * 0.12;
+      kit.add(g, kit.rbox(0.36, 0.14, 0.7, 0.05), poleMat, [0, y0 + 6.42, dir * 1.85]);
+      const head = kit.add(g, new THREE.BoxGeometry(0.26, 0.03, 0.5), headMat, [0, y0 + 6.34, dir * 1.85]); head.castShadow = false;
+      const pool = kit.add(g, poolGeo, poolMat, [0, STREET_Y + 0.012, dir * 2.6]); pool.castShadow = false; pool.receiveShadow = false; pool.renderOrder = 3; pool.userData.noProbe = true;
+    }
+  }
+
   // ================================================================ front grade: driveway, entry, planters, street
   // The street is ~0.95 m below the porch (videos v01/v08/v09; terrain.js cuts the ground to match).
   // Entry (v01/v09): a flat landing of 60 cm grey tiles at door level reaching out to the garage-front line,
@@ -438,7 +462,9 @@ export async function build(ctx) {
         flatQuad(g, [[L(za) + lo, za], [R(za) - hi, za], [R(zb) - hi, zb], [L(zb) + lo, zb]], (x, z) => dY(x, z) + 0.012, concreteMat, 1);
       }
     }
-    const tm = flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) - 0.004, turfMat, 1);
+    // polish: the joints read as glowing green lines from the street; use a dark grey-brown grit (soil speckle, greyed down)
+    const jointMat = std({ map: soil.map, normalMap: soil.normalMap, color: 0x8a847c, roughness: 1 });
+    const tm = flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) - 0.004, jointMat, 1);
     surfCollider(tm);
     // side skirt down below the street on the flared (court) side
     for (const [xa, za, xb, zb] of [[dLeft(0.35), 0.35, dLeft(FRONT_Z), FRONT_Z]]) {

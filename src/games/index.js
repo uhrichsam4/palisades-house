@@ -248,6 +248,7 @@ export function startGames(ctx, mp) {
     }
     if (S.phase === 'play' && L.started !== S.sid) { L.started = S.sid; try { g.start?.(session()); } catch (e) { console.warn('[games] start', e); } }
     if (S.phase === 'play' || S.phase === 'count') { try { g.apply?.(S, prev, core); } catch (e) { console.warn('[games] apply', e); } }
+    else if (S.phase === 'end' && g.clearOnEnd) { try { g.cleanup?.(core); } catch {} } // polish: Cash Grab props go when the round ends
     if (S.phase === 'end' && L.ended !== S.sid) { L.ended = S.sid; try { g.cleanup?.(core); } catch {} onEnd(); }
     render(true);
   }

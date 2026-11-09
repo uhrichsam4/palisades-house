@@ -58,7 +58,7 @@ export function startCold(ctx, api) {
       if ((precipK > 0.1 || wind * sev > 0.3) && facing > 0.05) {
         const lv = P.ROOMS[rec.room].level; const w = Math.min(2.6, Math.sqrt(rec.area) * 1.15), h = Math.max(0.6, rec.area / w);
         const d = camera.position.distanceTo(_v.set(rec.pos[0], rec.pos[1], rec.pos[2])); if (d > 30) return;
-        em.push({ id: rec.id, pos: rec.pos, nx: rec.normal[0], nz: rec.normal[2], w, h: Math.min(h, 2.2) * 0.9, snow: S.precip === 'snow', floorY: P.LEVELS[lv].floor, room: rec.room,
+        em.push({ id: rec.id, pos: rec.pos, nx: rec.normal[0], nz: rec.normal[2], w, h: Math.min(h, 2.2) * 0.9, snow: S.precip === 'snow', floorY: P.LEVELS[lv].floor, room: rec.room, rect: P.ROOMS[rec.room].rect, ceilY: lv ? P.LEVELS[1].plate + 1.2 : P.LEVELS[0].ceil, // contain: particles die at the room's walls / ceiling
           wx: _wd.x * (1 + 6 * wind), wz: _wd.y * (1 + 6 * wind), speed: 1.2 + 5 * wind * facing, reach: 1.2 + 3.2 * wind * facing, rate: Math.min(220, (20 + 160 * Math.max(precipK, 0.3)) * open * facing * Math.min(2, rec.area / 2)), strength: open * facing * (0.3 + wind) * Math.min(1.5, rec.area / 2), d, precip: precipK > 0.1 });
       }
     };

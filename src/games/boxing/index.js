@@ -42,7 +42,7 @@ export function createBoxing(ctx, mp, hub) {
   const botSide = (side) => !!M && (M.players[side] === 'bot' || (opts.auto && M.players[side] === me()));
   const snap = () => JSON.parse(JSON.stringify(M));
   const near = () => Math.hypot(st.pos.x - RING.cx, st.pos.z - RING.cz) < 9;
-  const bars = V.el('<div class="cv-score pg-stage" style="top:124px;gap:0"></div>', true);
+  const bars = V.el('<div class="cv-score pg-stage" style="top:132px;gap:0"></div>', true); // polish: sits clear below the score card (was overlapping the round timer)
 
   // ---------------------------------------------------------------- state
   function publish(n) { n.rev = (M?.rev || 0) + 1; n.left = n.phase === 'down' ? Math.max(0, endAt - performance.now()) : Math.max(0, endAt - performance.now()); send({ k: 'state', M: n }); setState(n, true); }
@@ -152,7 +152,7 @@ export function createBoxing(ctx, mp, hub) {
     try { if (st.seat) player.setSeat(null); } catch {}
     ui.veil(true); setTimeout(() => ui.veil(false), 320);
     if (ctx.interact) ctx.interact.modal = { boxing: true, label: () => '', use: () => { leave(); return true; } };
-    document.body.classList.add('pg-venue'); ui.toast('WASD move · click jab · right-click hook · Shift block · double-tap A/D slip · E leaves', 3500);
+    document.body.classList.add('pg-venue'); // polish: no centre-strip hint toast; the key chips at the bottom already show the controls
   }
   function exitRing() {
     if (!local.at) return; local.at = false; local.side = -1;

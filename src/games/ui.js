@@ -104,6 +104,9 @@ const CSS = `
 #pg-panel { width: min(940px, calc(100vw - 32px)); margin-left: calc(min(940px, calc(100vw - 32px)) / -2); }
 .pg-grid { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 860px) { .pg-grid { grid-template-columns: 1fr 1fr; } }
+/* polish: title + close stay pinned while the card grid scrolls (panel padding is 18px, so the sticky bar covers it) */
+#pg-panel > .pg-head { position: sticky; top: -18px; z-index: 3; margin: -18px -18px 14px; padding: 18px 18px 12px; background: var(--bg);
+  border-bottom: var(--hair); border-radius: 6px 6px 0 0; }
 .pg-card .badge { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 2px; background: var(--chip); border: var(--hair);
   font: 600 10px/1 var(--mono); letter-spacing: -0.4px; color: var(--tx); animation: pg-badge .4s var(--eo) both; }
 .pg-card .badge i { width: 6px; height: 6px; border-radius: 50%; background: #3ddc84; animation: pg-pulse 2s infinite; }

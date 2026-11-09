@@ -205,6 +205,15 @@ body.locked .tb-btns{opacity:.35;transition:opacity .3s var(--ease-soft)}
 #help.keys .chip{background:var(--ui-surface);border:var(--ui-line)}
 body.locked #help.keys{opacity:.22}
 body.driving #help.keys{opacity:0;pointer-events:none}
+/* polish: 5 core chips; `/` or the KEYS chip shows the rest (hud.js); fades after 10 s idle */
+#help.keys .chip.more{display:none}
+#help.keys.all .chip.more{display:inline-flex}
+#help.keys .keys-toggle{pointer-events:auto;cursor:pointer}
+#help.keys .keys-toggle b{color:var(--ui-accent)}
+#help.keys.idle:not(.all){opacity:0;transition:opacity 1.2s var(--ease-soft)}
+/* polish: one prompt slot (hud.js arbitrate): interact > watch > re-create > speaker */
+body.pr-hide-vs #vs.near:not(.on),body.pr-hide-rc #rc{display:none!important}
+body.pr-hide-sp #spk-pill{visibility:hidden!important}
 
 /* ---- crosshair, status line, presence card, countdown */
 #crosshair{width:4px;height:4px;margin:-2px;background:var(--ui-text);box-shadow:0 0 0 1px rgb(var(--ui-veil) / .5);transition:opacity .25s var(--ease-soft)}

@@ -24,22 +24,54 @@ function crackLines(g, cx, cy, n, len, rnd, lw = 1.4) {
     g.stroke();
   }
 }
+// frost/crack height field (canvas) -> tangent-space-free XZ normal map (rg = slope x, z; sampled in world XZ)
+function iceNormalTex() {
+  const N = 256, c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d', { willReadFrequently: true }); const r = rng(11);
+  g.fillStyle = '#808080'; g.fillRect(0, 0, N, N);
+  for (let i = 0; i < 900; i++) { const v = 110 + r() * 60 | 0; g.fillStyle = `rgba(${v},${v},${v},0.25)`; g.beginPath(); g.arc(r() * N, r() * N, 2 + r() * 10, 0, 7); g.fill(); }
+  g.strokeStyle = 'rgba(20,20,20,0.9)'; for (let i = 0; i < 6; i++) crackLines(g, r() * N, r() * N, 3 + (r() * 3 | 0), 60 + r() * 90, r, 1.2);
+  const src = g.getImageData(0, 0, N, N).data, out = g.createImageData(N, N), o = out.data; const H = (x, y) => src[(((y + N) % N) * N + ((x + N) % N)) * 4] / 255;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const dx = (H(x - 1, y) - H(x + 1, y)) * 2.2, dy = (H(x, y - 1) - H(x, y + 1)) * 2.2; const i = (y * N + x) * 4;
+    o[i] = Math.max(0, Math.min(255, 128 + dx * 127)); o[i + 1] = Math.max(0, Math.min(255, 128 + dy * 127)); o[i + 2] = 255; o[i + 3] = 255; }
+  g.putImageData(out, 0, 0); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4; return t;
+}
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 
 export function createIce(ctx, { send, sound, onFall }) {
   const { scene, phys, player } = ctx; const st = player.state;
   const root = new THREE.Group(); root.name = 'cold:ice'; root.userData.keep = true; scene.add(root);
   const frost = canvasTex(512, 512, (g, w, h) => {
-    const r = rng(7); g.fillStyle = '#c9dde8'; g.fillRect(0, 0, w, h);
+    const r = rng(7); g.clearRect(0, 0, w, h); g.fillStyle = 'rgba(150,190,210,0.42)'; g.fillRect(0, 0, w, h); /* polish: clear blue-grey ice (alpha 0.42) */
+    for (let i = 0; i < 26; i++) { const x = r() * w, y = r() * h, rad = 30 + r() * 90; const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(236,246,252,0.85)'); gr.addColorStop(1, 'rgba(236,246,252,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
     for (let i = 0; i < 2600; i++) { const x = r() * w, y = r() * h, s = 1 + r() * 7; g.fillStyle = `rgba(255,255,255,${0.04 + r() * 0.16})`; g.beginPath(); g.arc(x, y, s, 0, 7); g.fill(); }
     g.strokeStyle = 'rgba(255,255,255,0.55)'; for (let i = 0; i < 7; i++) crackLines(g, r() * w, r() * h, 3 + (r() * 3 | 0), 120 + r() * 160, r, 1);
     g.strokeStyle = 'rgba(70,100,120,0.25)'; for (let i = 0; i < 4; i++) crackLines(g, r() * w, r() * h, 3, 90, r, 1);
   });
   const crackTex = canvasTex(512, 512, (g, w, h) => { const r = rng(3); g.clearRect(0, 0, w, h); g.strokeStyle = 'rgba(245,252,255,0.95)'; crackLines(g, w / 2, h / 2, 9, 250, r, 2.4); g.strokeStyle = 'rgba(40,70,90,0.7)'; crackLines(g, w / 2, h / 2, 6, 200, r, 1.3); }, false);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xeaf6fc, map: frost, transparent: true, opacity: 0.8, roughness: 0.22, metalness: 0.0, depthWrite: true });
+  // polish: ice that reads as ice, not paint — glossy clear ice with rough frost patches (frost map alpha drives
+  // both translucency and roughness, so the water shows through the clear parts), a procedural frost/crack
+  // normal map in world XZ, the outdoor sky env for reflections, and round jagged holes cut in the shader
+  // (uHoles: world x, z, radius, seed) instead of hiding whole square cells. All per-pixel; no per-frame JS.
+  const iceN = iceNormalTex();
+  const NH = 16, uHoles = { value: Array.from({ length: NH }, () => new THREE.Vector4(0, 0, 0, 0)) };
+  const mat = new THREE.MeshStandardMaterial({ color: 0xf2fbff, map: frost, transparent: true, opacity: 0.86, roughness: 0.08, metalness: 0.0, depthWrite: true, envMapIntensity: 1.25 });
+  try { ctx.kit?.outdoor?.(mat); } catch {}
   mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uHoles = uHoles; sh.uniforms.uIceN = { value: iceN };
     sh.vertexShader = 'varying vec2 vIceXZ;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vIceXZ = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xz;');
-    sh.fragmentShader = 'varying vec2 vIceXZ;\n' + sh.fragmentShader.replace('#include <map_fragment>', 'vec4 texelColor = texture2D(map, vIceXZ * 0.33); diffuseColor *= texelColor;');
+    sh.fragmentShader = 'varying vec2 vIceXZ;\nuniform vec4 uHoles[' + NH + '];\nuniform sampler2D uIceN;\n' + sh.fragmentShader
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  float iceEdge = 1e3;
+  for (int i = 0; i < ${NH}; i++) { vec4 h = uHoles[i]; if (h.z <= 0.0) continue; vec2 dv = vIceXZ - h.xy; float a = atan(dv.y, dv.x);
+    float rr = h.z * (1.0 + 0.11 * sin(a * 5.0 + h.w) + 0.06 * sin(a * 11.0 + h.w * 2.3) + 0.035 * sin(a * 27.0 + h.w * 3.7));
+    float e = length(dv) - rr; if (e < 0.0) discard; iceEdge = min(iceEdge, e); }`)
+      .replace('#include <map_fragment>', `vec4 texelColor = texture2D(map, vIceXZ * 0.33); diffuseColor *= texelColor;
+  float iceRim = 1.0 - smoothstep(0.0, 0.09, iceEdge);
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.97, 1.0), iceRim * 0.85); diffuseColor.a = mix(diffuseColor.a, 0.97, iceRim);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, 0.55, max(smoothstep(0.55, 0.95, texelColor.a), iceRim));')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  { vec2 t1 = texture2D(uIceN, vIceXZ * 0.33).xy * 2.0 - 1.0; vec2 t2 = texture2D(uIceN, vIceXZ * 0.91 + 0.37).xy * 2.0 - 1.0;
+    vec2 pt = t1 * 0.45 + t2 * 0.2 + vec2(0.0, -0.6) * iceRim; normal = normalize(normal + (viewMatrix * vec4(pt.x, 0.0, pt.y, 0.0)).xyz); }`);
   };
   const crackMat = new THREE.MeshBasicMaterial({ map: crackTex, transparent: true, depthWrite: false, opacity: 1, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   const shardMat = new THREE.MeshStandardMaterial({ color: 0xe4f4fb, transparent: true, opacity: 0.85, roughness: 0.15 });
@@ -63,8 +95,8 @@ export function createIce(ctx, { send, sound, onFall }) {
   const thickOf = (s) => THREE.MathUtils.clamp(s.h / 100 * 0.6, 0.015, 0.09);
   function cellMatrix(s, c) { const t = thickOf(s); _p.set(c.x, s.w.surfaceY + 0.03 - t / 2, c.z); _s.set(s.cw * 0.999, t, s.cd * 0.999); _q.identity(); return _m.compose(_p, _q, _s); }
   function placeCell(s, j) {
-    const c = s.cells[j]; const visible = s.shown && !c.hole;
-    s.mesh.setMatrixAt(j, visible ? cellMatrix(s, c) : ZERO); s.mesh.instanceMatrix.needsUpdate = true;
+    const c = s.cells[j]; const visible = s.shown && !c.hole; /* collider */
+    s.mesh.setMatrixAt(j, s.shown ? cellMatrix(s, c) : ZERO); /* polish: hole cells stay drawn; the round hole is cut in the shader */ s.mesh.instanceMatrix.needsUpdate = true;
     if (visible && !c.col) { const y = s.w.surfaceY + 0.03; s.top = y; c.col = phys.boxAABB([c.x - s.cw / 2, y - 0.1, c.z - s.cd / 2], [c.x + s.cw / 2, y, c.z + s.cd / 2]); }
     else if (!visible && c.col) { phys.remove(c.col); c.col = null; }
   }
@@ -75,6 +107,7 @@ export function createIce(ctx, { send, sound, onFall }) {
     const pc = st.swimming || st.inWater ? playerCell(s) : -1; // never close ice over a swimmer's head
     for (let j = 0; j < s.cells.length; j++) { if (j === pc && !s.cells[j].col && s.shown) continue; placeCell(s, j); }
     s.lastT = thickOf(s);
+    mat.opacity = THREE.MathUtils.clamp(0.74 + s.h * 0.008, 0.74, 0.95); /* polish: thin ice lets the water through */
   }
 
   // ---------------------------------------------------------------- shards (pooled)
@@ -89,6 +122,25 @@ export function createIce(ctx, { send, sound, onFall }) {
     shards.count = NSHARD; shards.instanceMatrix.needsUpdate = true; if (!alive) shards.visible = false; shLive = alive;
   }
 
+  // ---------------------------------------------------------------- round holes (polish)
+  // hole records feed the shader's uHoles (round, jagged cut; newest 16 kept) + floating ice chunks along each rim:
+  // static instances placed once at break time and cleared when the hole refreezes (no per-frame work).
+  const NCH = 72; const chunks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 0), shardMat, NCH); chunks.frustumCulled = false; chunks.visible = false; chunks.renderOrder = 3; root.add(chunks);
+  for (let i = 0; i < NCH; i++) chunks.setMatrixAt(i, ZERO);
+  const chunkFree = Array.from({ length: NCH }, (_, i) => NCH - 1 - i); const holes = [];
+  function syncHoles() { const v = uHoles.value; for (let i = 0; i < NH; i++) { const h = holes[holes.length - 1 - i]; if (h) v[i].set(h.x, h.z, h.r, h.seed); else v[i].set(0, 0, 0, 0); } chunks.visible = holes.some(h => h.ch.length); chunks.instanceMatrix.needsUpdate = true; }
+  function addHole(s, x, z, cells, r) {
+    const h = { s, x, z, r, seed: Math.random() * 6.28, cells: cells.slice(), ch: [] }; const n = Math.min(chunkFree.length, Math.round(r * 9));
+    for (let i = 0; i < n; i++) { const k = chunkFree.pop(); const a = Math.random() * 6.283, d = r * (0.5 + Math.random() * 0.42), sz = 0.06 + Math.random() * 0.13;
+      _p.set(x + Math.cos(a) * d, s.w.surfaceY + 0.004, z + Math.sin(a) * d); _e.set((Math.random() - 0.5) * 0.3, Math.random() * 6.28, (Math.random() - 0.5) * 0.3); _q.setFromEuler(_e);
+      _s.set(sz * (1 + Math.random() * 0.8), Math.max(0.012, thickOf(s) * 0.55), sz); chunks.setMatrixAt(k, _m.compose(_p, _q, _s)); h.ch.push(k); }
+    holes.push(h); syncHoles();
+  }
+  function pruneHoles(s) { let changed = false;
+    for (let i = holes.length - 1; i >= 0; i--) { const h = holes[i]; if (h.s !== s || (s.shown && h.cells.some(j => s.cells[j]?.hole))) continue;
+      for (const k of h.ch) { chunks.setMatrixAt(k, ZERO); chunkFree.push(k); } holes.splice(i, 1); changed = true; }
+    if (changed) syncHoles(); }
+
   // ---------------------------------------------------------------- crack + break
   function startCrack(s, x, z) { if (s.crackS) return; s.crackS = { x, z, t: 0 }; s.crack.position.set(x, s.top + 0.003, z); s.crack.rotation.y = Math.random() * 7; s.crack.scale.setScalar(0.2); s.crack.visible = true; sound?.('crack', { x, y: s.top, z }); }
   function breakAt(s, x, z, fromNet, idxs) {
@@ -96,6 +148,7 @@ export function createIce(ctx, { send, sound, onFall }) {
     const now = performance.now() / 1000; let made = 0;
     for (const j of list) { const c = s.cells[j]; if (!c || c.hole) continue; c.hole = now; made++; placeCell(s, j); }
     if (!made) return [];
+    addHole(s, x, z, list, BREAK_R + 0.12); /* polish: round jagged hole + rim chunks */
     if (s.shown) { spawnShards(x, s.w.surfaceY, z, 22); try { s.w.splash(x, s.w.surfaceY, z, 1.6); s.w.disturb(x, z, 1.0, 1.4); } catch {} sound?.('break', { x, y: s.top, z }); }
     if (!fromNet) send?.({ k: 'h', b: s.name, c: list, x: +x.toFixed(2), z: +z.toFixed(2) });
     return list;
@@ -111,6 +164,7 @@ export function createIce(ctx, { send, sound, onFall }) {
       if ((s.h > VIS) !== s.shown || (s.shown && Math.abs(thickOf(s) - (s.lastT ?? 0)) > 0.008)) refreshSheet(s);
       // refreeze holes
       if (s.shown && tempC < 0) { const now = performance.now() / 1000, pc = playerCell(s); for (let j = 0; j < s.cells.length; j++) { const c = s.cells[j]; if (c.hole && now - c.hole > REFREEZE_S * Math.min(3, 4 / -tempC + 0.5) && j !== pc) { c.hole = 0; placeCell(s, j); } } }
+      if (holes.length) pruneHoles(s); /* polish: drop refrozen / hidden hole circles (3 Hz) */
       // a skipped cell over a swimmer closes once they leave it
       if (s.shown) { const pc = playerCell(s); for (let j = 0; j < s.cells.length; j++) { const c = s.cells[j]; if (!c.hole && !c.col && j !== pc) placeCell(s, j); } }
     }
@@ -129,9 +183,14 @@ export function createIce(ctx, { send, sound, onFall }) {
       const R = phys.RAPIER; const cx = s.x0 + s.nx * s.cw / 2, cz = s.z0 + s.nz * s.cd / 2; const shape = new R.Cuboid(s.nx * s.cw / 2, 0.3, s.nz * s.cd / 2);
       phys.world.intersectionsWithShape({ x: cx, y: s.top + 0.25, z: cz }, { x: 0, y: 0, z: 0, w: 1 }, shape, (col) => { const b = col.parent(); if (b && b.isDynamic() && b.mass() > 60) { /* person-weight or heavier: floaties resting on forming ice must not crack it */ const t = b.translation(); const i = Math.floor((t.x - s.x0) / s.cw), k = Math.floor((t.z - s.z0) / s.cd); const j = i >= 0 && k >= 0 && i < s.nx && k < s.nz ? s.grid[i * s.nz + k] : -1; if (j >= 0 && !s.cells[j].hole && s.cells[j].col && t.y > s.top - 0.05) { startCrack(s, t.x, t.z); return false; } } return true; }); } }
   }
+  function snapCell(s, j) { /* polish: late joiner — cluster snapshot hole cells into round holes */
+    const c = s.cells[j]; const h = holes.find(o => o.s === s && Math.hypot(o.x - c.x, o.z - c.z) < BREAK_R + 0.3);
+    if (h) { if (!h.cells.includes(j)) h.cells.push(j); h.r = Math.max(h.r, Math.hypot(h.x - c.x, h.z - c.z) + Math.max(s.cw, s.cd) * 0.6); syncHoles(); }
+    else addHole(s, c.x, c.z, [j], Math.max(s.cw, s.cd) * 0.75);
+  }
   function applyNet(m) { const s = byName.get(m.b); if (!s || !Array.isArray(m.c)) return; breakAt(s, +m.x || 0, +m.z || 0, true, m.c.filter(Number.isInteger)); }
   function snapshot() { const now = performance.now() / 1000; const o = {}; for (const s of sheets) { const l = []; s.cells.forEach((c, j) => { if (c.hole) l.push([j, +(now - c.hole).toFixed(1)]); }); if (l.length) o[s.name] = l; } return o; }
-  function applySnapshot(o) { const now = performance.now() / 1000; for (const [name, l] of Object.entries(o || {})) { const s = byName.get(name); if (!s || !Array.isArray(l)) continue; for (const [j, age] of l) { const c = s.cells[j]; if (!c || c.hole) continue; c.hole = now - (+age || 0); placeCell(s, j); } } }
+  function applySnapshot(o) { const now = performance.now() / 1000; for (const [name, l] of Object.entries(o || {})) { const s = byName.get(name); if (!s || !Array.isArray(l)) continue; for (const [j, age] of l) { const c = s.cells[j]; if (!c || c.hole) continue; c.hole = now - (+age || 0); placeCell(s, j); snapCell(s, j); } } }
   function set(v) { for (const s of sheets) { const h = typeof v === 'number' ? v : v?.[s.name]; if (typeof h === 'number') { s.h = Math.max(0, h); refreshSheet(s); } } }
   const info = () => Object.fromEntries(sheets.map(s => [s.name, { cm: +s.h.toFixed(2), shown: s.shown, thick: s.h >= THICK, cells: s.cells.length, holes: s.cells.reduce((a, c) => a + (c.hole ? 1 : 0), 0), colliders: s.cells.reduce((a, c) => a + (c.col ? 1 : 0), 0), cracking: !!s.crackS, top: +s.top.toFixed(3) }]));
   const holeIds = () => Object.fromEntries(sheets.map(s => [s.name, s.cells.map((c, j) => (c.hole ? j : -1)).filter(j => j >= 0)]));

@@ -101,7 +101,8 @@ function frameAll(ctx, dt, t) {
   if (MOD.tint) { MOD.tint.visible = !!under; if (under) { MOD.tint.material.uniforms.uColor.value.copy(under._fogColor); } }
   // refraction capture (once per frame, shared by all bodies)
   const visible = bodies.filter(b => !b._under && b._visible(cam));
-  if (visible.length) capture(ctx, bodies);
+  // walk mode: capture right before the scene renders (after every update, without its own matrix walk; main.js)
+  if (visible.length && !ctx.preRender?.(() => capture(ctx, bodies))) capture(ctx, bodies);
 }
 
 function scanLayers(scene, bodies) {
@@ -131,11 +132,13 @@ function capture(ctx, bodies) {
   const cc = MOD.capCam; cc.copy(camera); cc.layers.set(LAYER);
   const prevT = renderer.getRenderTarget(), prevSh = renderer.shadowMap.autoUpdate, prevBg = scene.background, prevXr = renderer.xr.enabled;
   const prevCol = renderer.getClearColor(new THREE.Color()), prevA = renderer.getClearAlpha(), prevAuto = renderer.autoClear;
+  // a pending sun-shadow refresh is for the main render (this camera only sees the water layer): keep it pending
+  const prevNU = renderer.shadowMap.needsUpdate; renderer.shadowMap.needsUpdate = false;
   renderer.shadowMap.autoUpdate = false; renderer.xr.enabled = false; scene.background = null; renderer.autoClear = true;
-  renderer.setRenderTarget(MOD.rt); renderer.setClearColor(MOD.deep, 1);
+  renderer.setRenderTarget(MOD.rt); renderer.setClearColor(_c.copy(MOD.deep).multiplyScalar(0.06 + 0.94 * (window.__sky?.daylight ?? 1)), 1); // polish: the 'deep' fill follows daylight (was teal at night)
   renderer.render(scene, cc);
   renderer.setRenderTarget(prevT); renderer.setClearColor(prevCol, prevA); renderer.autoClear = prevAuto;
-  renderer.shadowMap.autoUpdate = prevSh; scene.background = prevBg; renderer.xr.enabled = prevXr;
+  renderer.shadowMap.autoUpdate = prevSh; renderer.shadowMap.needsUpdate = prevNU; scene.background = prevBg; renderer.xr.enabled = prevXr;
 }
 
 function ensureTint(scene) {
@@ -407,8 +410,11 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
     _step(dt, sun) {
       uSun.value = MOD.sunDir; sunLum.value = sun.lum;
       // in-scattered light grows with sun + sky
-      const illum = (0.06 + 0.07 * sun.I * Math.max(MOD.sunDir.y, 0)) * 1.6;
+      // polish: the sky part follows daylight (≈0 at night, so only the pool lights show) and storms turn it grey-green
+      const sk = window.__sky, dl = sk?.daylight ?? 1, sev = sk ? Math.min(1, sk.severity * 1.25) : 0;
+      const illum = (0.06 * (0.05 + 0.95 * dl) + 0.07 * sun.I * Math.max(MOD.sunDir.y, 0)) * 1.6;
       scatter.value.set(color.r * illum * 0.25, color.g * illum * 0.8, color.b * illum * 1.35);
+      if (sev > 0.01) { const l = (scatter.value.x + scatter.value.y + scatter.value.z) / 3; scatter.value.set(scatter.value.x + (l * 0.8 - scatter.value.x) * sev, scatter.value.y + (l * 1.05 - scatter.value.y) * sev, scatter.value.z + (l * 0.85 - scatter.value.z) * sev); }
       // sim
       let steps = 0;
       if (MOD.shot) { steps = 2; if (!warmed) { steps += PREWARM; warmed = true; } }

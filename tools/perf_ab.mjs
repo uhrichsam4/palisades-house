@@ -13,7 +13,7 @@ if (!process.env.SHOT_NICE && process.platform === 'darwin') {
 const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2); const opt = (k, d) => { const a = argv.find(x => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : d; };
 const ROOT = path.resolve(argv.find(a => !a.startsWith('--')) || HERE);
-const SECS = +opt('secs', 3); const EXTRA = opt('q', '');
+const SECS = +opt('secs', 3); const EXTRA = opt('q', ''); const EVAL = opt('eval', ''); const CPUPROF = argv.includes('--cpuprof'); const EVAL_SRC = EVAL ? fs.readFileSync(EVAL, 'utf8') : '';
 const LOCKS = path.join(HERE, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursive: true });
 const SLOTS = Number(process.env.SHOT_SLOTS || 1); let slot = null; const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 while (!slot) {
@@ -46,15 +46,36 @@ try {
     const [x, y, z, yaw] = all[k];
     await page.evaluate(([x, y, z, yaw]) => { const P = window.__player; P.teleport(x, y, z, yaw); P.state.thirdPerson = true; }, [x, y, z, yaw]);
     await sleep(1500);
+    let cdp = null; if (CPUPROF) { cdp = await ctx.newCDPSession(page); await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
     out.spots[k] = await page.evaluate(async (secs) => {
+      // every renderer.render() call during the window: CPU ms, draw calls, triangles per (scene, camera) kind
+      const rd = window.__dbg.renderer, S = window.__dbg.scene; const passes = new Map(); const orig = rd.render;
+      rd.render = function (sc, cam) { const a = performance.now(); const r = orig.call(this, sc, cam); const ms = performance.now() - a;
+        const k = (sc === S ? 'MAIN' : (sc.name || sc.type)) + '/' + (cam.type || '') + (cam === window.__dbg.camera ? '*' : '');
+        const e = passes.get(k) || { n: 0, ms: 0, calls: 0, tris: 0 }; e.n++; e.ms += ms; e.calls += this.info.render.calls; e.tris += this.info.render.triangles; passes.set(k, e); return r; };
       const L = window.__frameLog, G = window.__gpuTimer, R = window.__prof; const n0 = L.n; const t0 = performance.now();
       R.reset(); R.on = true; const g = []; const iv = setInterval(() => { const v = G?.ms; if (v > 0) g.push(v); }, 50);
-      await new Promise(r => setTimeout(r, secs * 1000)); clearInterval(iv); R.on = false;
+      await new Promise(r => setTimeout(r, secs * 1000)); clearInterval(iv); R.on = false; rd.render = orig;
+      const F = Math.max(1, R.frames); const pass = [...passes].map(([k, e]) => [k, +(e.n / F).toFixed(2), +(e.ms / F).toFixed(3), Math.round(e.calls / e.n), Math.round(e.tris / e.n)]).sort((a, b) => b[2] - a[2]);
+      // frustum-visible draws in the main view, grouped by the scene's top-level child (piece / module)
+      const THREE = await import('three'); const cam = window.__dbg.camera; const fr = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse)); const sph = new THREE.Sphere();
+      const grp = {}; let objs = 0;
+      S.traverseVisible(o => { objs++; if (!o.isMesh && !o.isPoints && !o.isLine) return; let inF = true;
+        if (o.frustumCulled) { const bs = o.isInstancedMesh ? (o.boundingSphere || (o.computeBoundingSphere(), o.boundingSphere)) : (o.geometry.boundingSphere || (o.geometry.computeBoundingSphere(), o.geometry.boundingSphere)); if (bs) { sph.copy(bs).applyMatrix4(o.matrixWorld); inF = fr.intersectsSphere(sph); } }
+        if (!inF) return; let p = o; while (p.parent && p.parent !== S) p = p.parent; const k = (p.name || p.type) + (p.name?.startsWith('piece') ? '' : '');
+        const nc = Array.isArray(o.material) ? Math.max(1, o.geometry.groups.length) : 1; const g = grp[k] || (grp[k] = [0, 0]); g[0] += nc; g[1]++; });
+      const groups = Object.entries(grp).sort((a, b) => b[1][0] - a[1][0]).slice(0, 14).map(([k, v]) => [k, v[0]]);
       const n = L.n - n0; const arr = []; for (let i = 0; i < Math.min(n, 8192); i++) arr.push(L.buf[(L.n - 1 - i) & 8191]); arr.sort((a, b) => a - b);
       g.sort((a, b) => a - b); const info = window.__dbg.renderer.info.render; const rep = R.report();
       return { frames: n, avgMs: +((performance.now() - t0) / Math.max(1, n)).toFixed(2), p50: +(arr[arr.length >> 1] || 0).toFixed(2), gpuMs: +(g[g.length >> 1] || 0).toFixed(2),
-        calls: info.calls, tris: info.triangles, video: JSON.stringify(window.__video), rows: rep.rows.slice(0, 14) };
+        calls: info.calls, tris: info.triangles, video: JSON.stringify(window.__video), pr: +window.__dbg.renderer.getPixelRatio().toFixed(3), rows: rep.rows.slice(0, 14), pass, objs, groups };
     }, SECS);
+    if (cdp) { // --cpuprof: self time by function (ms per frame), top 30
+      const { profile } = await cdp.send('Profiler.stop'); const self = new Map(); const byId = new Map(profile.nodes.map(n => [n.id, n]));
+      const dts = profile.timeDeltas; for (let i = 0; i < profile.samples.length; i++) { const n = byId.get(profile.samples[i]); const cf = n.callFrame; const key = (cf.functionName || '(anon)') + ' ' + cf.url.replace(/^.*\/(src|vendor)\//, '$1/') + ':' + (cf.lineNumber + 1); self.set(key, (self.get(key) || 0) + (dts[i] || 0) / 1000); }
+      const F = Math.max(1, out.spots[k].frames); out.spots[k].cpu = [...self].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k2, v]) => [k2, +(v / F).toFixed(3)]); await cdp.detach();
+    }
+    if (EVAL_SRC) out.spots[k].eval = await page.evaluate(EVAL_SRC); // --eval=file.js: extra in-page probe per spot (expression -> JSON)
   }
   await ctx.close();
 } catch (e) { out.errors.push(String(e.stack || e).slice(0, 400)); }

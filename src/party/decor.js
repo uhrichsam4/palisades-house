@@ -108,7 +108,7 @@ export async function buildDecor(ctx, money) {
   }
   // garage: two shrink-wrapped cash pallets (stacks on a wood pallet)
   { const pal = std({ color: 0x9c7a52, roughness: 0.9 }); const gy = surf(15.0, 3.0, 2.0);
-    for (const [x, z] of [[14.3, 4.6], [15.8, 4.6]]) {
+    for (const [x, z] of [[12.25, 4.2], [12.25, 5.35]]) { // polish: tucked against the fire wall, clear of the pool table (was crowding its long rail)
       kit.add(root, kit.box(1.2, 0.14, 1.0), pal, [x, gy + 0.07, z]);
       for (let k = 0; k < 9; k++) for (let i = 0; i < 7; i++) for (let j = 0; j < 14; j++) {
         const outer = i === 0 || i === 6 || j === 0 || j === 13 || k === 8; if (!outer) continue; // hidden core skipped
@@ -306,6 +306,9 @@ export async function buildDecor(ctx, money) {
   inst(new THREE.PlaneGeometry(0.014, 0.022).rotateX(-Math.PI / 2), std({ color: 0xffffff, roughness: 0.35, metalness: 0.6, side: THREE.DoubleSide }), confXf, { cols: confCol, name: 'party:confetti' });
   inst(balGeo, gold, balXf[0], { name: 'party:balloons-gold' }); inst(balGeo, black, balXf[1], { name: 'party:balloons-black' });
   inst(bulbGeo, bulbMat, bulbXf, { name: 'party:bulbs' });
+  // polish: string lights follow darkness (≈ off at noon, 5 at night; was a constant 9 that bloomed at midday).
+  // Built after src/sky scans its emissives, so it reads __sky.daylight itself; only writes when it changes.
+  { let lastK = -1; updates.push(() => { const d = window.__sky?.daylight; if (d === undefined) return; const k = 1 - d; if (Math.abs(k - lastK) < 0.01) return; lastK = k; bulbMat.emissiveIntensity = 0.25 + 4.75 * k * k; }); }
   inst(coupeGeo, glassMat, coupeXf, { name: 'party:coupes' }).renderOrder = 3;
   inst(new THREE.CircleGeometry(0.047, 16).rotateX(-Math.PI / 2), fizzMat, fizzXf, { name: 'party:fizz' }).renderOrder = 2;
   inst(bottleGeo, bottleMat, bottleXf, { shadow: true, name: 'party:bottles' }); inst(bucketGeo, chrome, bucketXf, { name: 'party:buckets' });

@@ -69,7 +69,21 @@ export function fracture(cloud, { count = 8, impact = null, stretchAxis = null, 
   return cells;
 }
 
+// polish: average colour of a material's base-colour map (wood grain, glazes): debris used m.color alone, which is
+// white for most textured materials (pale chair debris). Sampled once per texture on a 8x8 canvas, cached.
+const _tint = new Map();
+export function mapTint(m) {
+  const t = m?.map; const img = t?.image; if (!img || !(img.width > 0)) return null;
+  if (_tint.has(t.uuid)) return _tint.get(t.uuid);
+  let c = null;
+  try { const cv = document.createElement('canvas'); cv.width = cv.height = 8; const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, 8, 8);
+    const d = g.getImageData(0, 0, 8, 8).data; let r = 0, gg = 0, b = 0; for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+    const n = d.length / 4; c = new THREE.Color().setRGB(r / n / 255, gg / n / 255, b / n / 255, THREE.SRGBColorSpace); } catch { c = null; }
+  _tint.set(t.uuid, c); return c;
+}
+
 // ---------------------------------------------------------------- pools
+const pickTone = (o) => { const P = o.palette; if (!P || P.length < 2) return o.color; let r = Math.random() * P.sum; for (const p of P) if ((r -= p.w) <= 0) return p.c; return P[0].c; };
 export function createFx(ctx) {
   const { scene, phys } = ctx; const R = phys.RAPIER, world = phys.world, G = phys.GROUPS;
   const FRAG_GROUPS = phys.groups(G.ALL, G.ALL & ~(G.RAMP | G.PLAYER));
@@ -78,7 +92,7 @@ export function createFx(ctx) {
     const b = new THREE.BatchedMesh(MAX_FRAG, MAX_FRAG * SLOT_V, MAX_FRAG * SLOT_V, mat); b.name = name; b.frustumCulled = false; b.perObjectFrustumCulled = true;
     b.castShadow = false; b.receiveShadow = true; b.userData.keep = true; b.userData.noProbe = true; b.visible = false; scene.add(b); return b;
   };
-  const opaque = mkBatch(new THREE.MeshStandardMaterial({ roughness: 0.62, metalness: 0.0 }), 'smash:debris');
+  const opaque = mkBatch(new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.0, side: THREE.DoubleSide }), 'smash:debris'); // polish: double-sided (no see-through hull faces)
   const glassy = mkBatch(new THREE.MeshStandardMaterial({ roughness: 0.04, metalness: 0.1, transparent: true, opacity: 0.5, envMapIntensity: 1.6 }), 'smash:shards');
   const slots = [];
   for (const b of [opaque, glassy]) for (let i = 0; i < MAX_FRAG; i++) {
@@ -138,6 +152,8 @@ export function createFx(ctx) {
   // spawn the cells as debris. opts: { color, glass, mass, vel (inherited), impact, dir, power, life:[a,b] }
   function spawn(cells, o) {
     const n = cells.length; let made = 0;
+    // polish: multi-part items (plate on a black charger, vase + flowers) -> each fragment takes one of the item's own
+    // part colours, weighted by part size, instead of every piece wearing the largest part's colour
     for (const cell of cells) {
       if (cell.points.length < 4) continue;
       // degenerate cells (slivers, near-flat) would make Rapier's hull builder panic: dedupe + size check first
@@ -158,8 +174,9 @@ export function createFx(ctx) {
       // velocity: inherited + burst away from the impact + along the hit direction
       const out = _v.copy(c).sub(o.impact || c); const L = out.length(); if (L > 1e-4) out.divideScalar(L); else out.set(Math.random() - 0.5, 0.6, Math.random() - 0.5).normalize();
       const pw = o.power ?? 1.5; const vv = { x: (o.vel?.x || 0) + out.x * pw * (0.6 + Math.random() * 0.8) + (o.dir?.x || 0) * pw * 0.6, y: (o.vel?.y || 0) + out.y * pw * 0.7 + pw * 0.35 * Math.random(), z: (o.vel?.z || 0) + out.z * pw * (0.6 + Math.random() * 0.8) + (o.dir?.z || 0) * pw * 0.6 };
+      if (vv.x * vv.x + vv.y * vv.y + vv.z * vv.z > 16) body.enableCcd(true); // contain: fast debris (> 4 m/s, car/blast breaks) can't tunnel through a 0.15 m wall
       body.setLinvel(vv, true); body.setAngvel({ x: (Math.random() - 0.5) * pw * 4, y: (Math.random() - 0.5) * pw * 4, z: (Math.random() - 0.5) * pw * 4 }, true);
-      _c.copy(o.color || _c.set(0xcccccc)); const j = 0.9 + Math.random() * 0.18; _c.multiplyScalar(j); s.b.setColorAt(s.iid, _c);
+      _c.copy(pickTone(o) || _c.set(0xcccccc)); const j = 0.9 + Math.random() * 0.18; _c.multiplyScalar(j); s.b.setColorAt(s.iid, _c);
       s.body = body; s.live = true; s.t = 0; s.life = (o.life?.[0] ?? 8) + Math.random() * ((o.life?.[1] ?? 20) - (o.life?.[0] ?? 8)); s.scale = 1;
       _m.compose(_w.set(c.x, c.y, c.z), _q.identity(), _s.set(1, 1, 1)); s.b.setMatrixAt(s.iid, _m); s.b.setVisibleAt(s.iid, true); s.b.visible = true;
       live.push(s); made++;

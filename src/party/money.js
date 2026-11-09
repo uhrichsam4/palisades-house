@@ -16,11 +16,13 @@
 //   }
 import * as THREE from 'three';
 import { waterBodies } from '../water/index.js';
+import * as PLAN from '../plan.js';
 import { billTexture, stackAtlas, STACK_UV } from './tex.js';
 
 export const BILL = { w: 0.156, d: 0.066 };     // note size (m)
 export const STACK = { l: 0.156, h: 0.04, w: 0.066 };
 const CAP = 2000, LIE = 20, FADE = 1.6, MAX_RAYS = 70;
+const SOFT = 500, LIE_BUSY = 6; // polish: soft cap on landed notes; above it notes lie 6 s instead of 20 s, then fade
 
 // note geometry: a plane in XZ (normal +y), subdivided along its length so it can bend
 export function makeBillGeometry() {
@@ -76,6 +78,20 @@ export function createMoney(ctx) {
 
   // ---- state (struct of arrays)
   const px = new Float32Array(CAP), py = new Float32Array(CAP), pz = new Float32Array(CAP);
+  // contain pass: notes don't fly through walls. A 0.2 m grid per storey of which indoor room each spot is in (built
+  // once); a note thrown inside a room stays in that room, one thrown outdoors can't enter the house footprint below
+  // its roof (sky height map). Blocked notes lose their sideways speed and flutter down along the wall.
+  const GX0 = -1, GZ0 = -1, GS = 0.2, GW = 130, GH = 125; const grid = [new Uint8Array(GW * GH), new Uint8Array(GW * GH)];
+  Object.values(PLAN.ROOMS).forEach((r, k) => { if (r.outdoor) return; const [x0, z0, x1, z1] = r.rect;
+    for (let gz = Math.max(0, Math.ceil((z0 - GZ0) / GS)); gz < GH && GZ0 + gz * GS < z1; gz++) for (let gx = Math.max(0, Math.ceil((x0 - GX0) / GS)); gx < GW && GX0 + gx * GS < x1; gx++) grid[r.level][gz * GW + gx] = k + 1; });
+  const cell = (x, z, lv) => { const gx = Math.round((x - GX0) / GS), gz = Math.round((z - GZ0) / GS); return gx < 0 || gz < 0 || gx >= GW || gz >= GH ? 0 : grid[lv][gz * GW + gx]; };
+  const lvOf = (y) => (y > PLAN.LEVELS[1].floor - 0.1 ? 1 : 0);
+  const home = new Uint8Array(CAP), homeLv = new Uint8Array(CAP); let roofAt = null;
+  function blocked(i, x, z) {
+    if (home[i]) return cell(x, z, homeLv[i]) !== home[i];
+    if (!cell(x, z, 0) && !cell(x, z, 1)) return false;
+    return roofAt ? roofAt(x, z) > py[i] : true;
+  }
   const vx = new Float32Array(CAP), vy = new Float32Array(CAP), vz = new Float32Array(CAP);
   const yaw = new Float32Array(CAP), pit = new Float32Array(CAP), rol = new Float32Array(CAP), wp = new Float32Array(CAP), wr = new Float32Array(CAP), wy = new Float32Array(CAP);
   const age = new Float32Array(CAP), st = new Uint8Array(CAP);   // st: 0 free, 1 flying, 2 landed
@@ -110,7 +126,7 @@ export function createMoney(ctx) {
     yaw[i] = Math.random() * Math.PI * 2; pit[i] = (Math.random() - 0.5) * 2; rol[i] = (Math.random() - 0.5) * 2;
     wp[i] = (Math.random() - 0.5) * 14; wr[i] = (Math.random() - 0.5) * 10; wy[i] = (Math.random() - 0.5) * 4;
     age[i] = 0; st[i] = 1; flying++; phase[i] = Math.random() * 6.283; drag0[i] = 0.15 + Math.random() * 0.3; sway[i] = 0.8 + Math.random() * 1.4;
-    gAge[i] = 99; gx[i] = 1e9; groundAt(i, true);
+    gAge[i] = 99; gx[i] = 1e9; groundAt(i, true); homeLv[i] = lvOf(y); { const rf = window.__sky?.roofAt; home[i] = !rf || rf(x, z) > y ? cell(x, z, homeLv[i]) : 0; } // above the roof = outdoors
     aBill.array[i * 4] = phase[i]; aBill.array[i * 4 + 1] = 1; aBill.array[i * 4 + 2] = 1; attrDirty = true;
     return i;
   }
@@ -154,7 +170,7 @@ export function createMoney(ctx) {
   }
   const flatten = (a) => { const k = Math.round(a / Math.PI) * Math.PI; return k; };
   function update(dt) {
-    dt = Math.min(dt, 0.05); uTime.value += dt; raysThisFrame = 0;
+    dt = Math.min(dt, 0.05); uTime.value += dt; raysThisFrame = 0; roofAt = window.__sky?.roofAt || null;
     // emitters
     for (let k = streams.length - 1; k >= 0; k--) {
       const s = streams[k]; s.acc += s.rate * Math.min(dt, s.left); s.left -= dt;
@@ -165,7 +181,9 @@ export function createMoney(ctx) {
       }
       if (s.left <= 0) streams.splice(k, 1);
     }
-    for (const r of rains) {
+    // polish: ambient rain pauses while a game round runs (hub game in count/play, or the local player at a venue)
+    const gp = rains.size ? window.__games?.phase : null; const quiet = rains.size && (gp === 'play' || gp === 'count' || document.body.classList.contains('pg-venue'));
+    if (!quiet) for (const r of rains) {
       r.acc += r.rate * dt;
       while (r.acc >= 1) { r.acc -= 1; const [x0, z0, x1, z1] = r.rect; spawn(x0 + Math.random() * (x1 - x0), r.y + Math.random() * 0.8, z0 + Math.random() * (z1 - z0), (Math.random() - 0.5) * 0.4, -0.6, (Math.random() - 0.5) * 0.4); }
     }
@@ -180,7 +198,8 @@ export function createMoney(ctx) {
         vx[i] *= f; vy[i] *= f; vz[i] *= f;
         // falling-leaf sway once it flutters
         const sw = sway[i] * ramp; vx[i] += Math.sin(a * 3.1 + phase[i]) * sw * dt * 2.2; vz[i] += Math.cos(a * 2.3 + phase[i] * 1.3) * sw * dt * 2.2;
-        px[i] += vx[i] * dt; py[i] += vy[i] * dt; pz[i] += vz[i] * dt;
+        const nx = px[i] + vx[i] * dt, nz = pz[i] + vz[i] * dt; py[i] += vy[i] * dt;
+        if (blocked(i, nx, nz)) { vx[i] *= -0.15; vz[i] *= -0.15; } else { px[i] = nx; pz[i] = nz; }
         yaw[i] += wy[i] * dt;
         gAge[i] += dt; groundAt(i, false);
         let ground = gy[i]; if (gw[i] >= 0) { try { ground = waterBodies[gw[i]].heightAt(px[i], pz[i]); } catch {} }
@@ -199,8 +218,9 @@ export function createMoney(ctx) {
           let hY = py[i]; try { hY = waterBodies[gw[i]].heightAt(px[i], pz[i]); } catch {}
           py[i] = hY + 0.012; yaw[i] += Math.sin(t * 0.4 + phase[i]) * 0.05 * dt; pit[i] = Math.sin(t * 1.3 + phase[i]) * 0.05; writeMatrix(i);
         }
-        if (a > LIE) {
-          const f = 1 - (a - LIE) / FADE;
+        const lie = landed > SOFT ? LIE_BUSY : LIE; // polish: crowded floor -> old notes clear sooner
+        if (a > lie) {
+          const f = 1 - (a - lie) / FADE;
           if (f <= 0) { st[i] = 0; landed--; A[i * 4 + 2] = 0; _m.makeScale(0, 0, 0); _m.toArray(M, i * 16); matDirty = true; }
           else A[i * 4 + 2] = f;
           attrDirty = true;

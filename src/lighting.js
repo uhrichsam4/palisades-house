@@ -71,10 +71,34 @@ vec3 bpParallax( vec3 v ) {
 `;
 // dual (src/sky): every probe material also gets a second probe set baked at night with the lights on; the
 // IBL fetch becomes day * envDayK + night * envNightK (two shared uniforms the sky module drives).
+// envFlash (sky lightning) x envExpo (per room: how much sky its glass sees, roomExposure below) brightens the day
+// probe during a flash, so a windowless closet stays dark and a glass-walled room gets a soft cold flash.
 const DUAL_FUNC = `
-uniform samplerCube envNight; uniform float envDayK; uniform float envNightK;
-vec4 envDual( vec3 d, float lod ) { return textureLod( envMap, d, lod ) * envDayK + textureLod( envNight, d, lod ) * envNightK; }
+uniform samplerCube envNight; uniform float envDayK; uniform float envNightK; uniform float envFlash; uniform float envExpo;
+vec4 envDual( vec3 d, float lod ) { return textureLod( envMap, d, lod ) * ( envDayK + envFlash * envExpo ) + textureLod( envNight, d, lod ) * envNightK; }
 `;
+const ZERO = { value: 0 };
+// Sky exposure per indoor room (contain pass): exterior glass area (windows, sliders, glass doors) whose `at` sits on
+// that room's wall and whose far side is not another indoor room, relative to the floor area. 0 = no window.
+export const exposureK = (glass, floor) => Math.min(1, 1.2 * Math.sqrt(Math.max(0, glass) / Math.max(1, floor)));
+export function roomExposure() {
+  const out = new Map(); const GLASS = new Set(['window', 'slider', 'french']);
+  const inside = (x, z, lv, skip) => Object.entries(P.ROOMS).some(([id, r]) => id !== skip && !r.outdoor && r.level === lv && x > r.rect[0] && x < r.rect[2] && z > r.rect[1] && z < r.rect[3]);
+  for (const [id, r] of Object.entries(P.ROOMS)) {
+    if (r.outdoor) continue; const [x0, z0, x1, z1] = r.rect; let glass = 0;
+    for (const o of P.OPENINGS) {
+      if (o.level !== r.level || !GLASS.has(o.type)) continue; const [x, z] = o.at; const m = 0.45;
+      if (x < x0 - m || x > x1 + m || z < z0 - m || z > z1 + m) continue;
+      // nearest wall of this room -> outward probe point
+      const d = [[x - x0, -1, 0], [x1 - x, 1, 0], [z - z0, 0, -1], [z1 - z, 0, 1]].sort((a, b) => Math.abs(a[0]) - Math.abs(b[0]))[0];
+      if (inside(x + d[1] * 0.6, z + d[2] * 0.6, r.level, id)) continue; // interior glass door: no sky behind it
+      glass += o.w * (o.head - o.sill);
+    }
+    const floor = (x1 - x0) * (z1 - z0);
+    out.set(id, { value: exposureK(glass, floor), glass, floor });
+  }
+  return out;
+}
 function boxProject(THREEmod, mat, box, probePos, dual) {
   const chunk = THREEmod.ShaderChunk.envmap_physical_pars_fragment;
   const key = 'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );';
@@ -84,7 +108,7 @@ function boxProject(THREEmod, mat, box, probePos, dual) {
   if (canDual) patched = patched.split('textureLod( envMap, ').join('envDual( ').replace('#ifdef USE_ENVMAP', '#ifdef USE_ENVMAP\n' + DUAL_FUNC);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.bpMin = { value: box.min }; sh.uniforms.bpMax = { value: box.max }; sh.uniforms.bpPos = { value: probePos };
-    if (canDual) { sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK; }
+    if (canDual) { sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK; sh.uniforms.envFlash = dual.envFlash || ZERO; sh.uniforms.envExpo = mat.userData.envExpo || ZERO; }
     sh.vertexShader = 'varying vec3 vBPWorld;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvBPWorld = worldPosition.xyz;');
     sh.fragmentShader = BP_FUNC + sh.fragmentShader.replace('#include <envmap_physical_pars_fragment>', patched);
   };
@@ -98,7 +122,7 @@ function dualOnly(THREEmod, mat, dual) {
   if (!chunk.includes('textureLod( envMap, ')) return;
   const patched = chunk.split('textureLod( envMap, ').join('envDual( ').replace('#ifdef USE_ENVMAP', '#ifdef USE_ENVMAP\n' + DUAL_FUNC);
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK;
+    sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK; sh.uniforms.envFlash = dual.envFlash || ZERO; sh.uniforms.envExpo = mat.userData.envExpo || ZERO;
     sh.fragmentShader = sh.fragmentShader.replace('#include <envmap_physical_pars_fragment>', patched);
   };
   mat.customProgramCacheKey = () => 'dn1'; mat.userData.dualEnv = true;
@@ -116,10 +140,10 @@ export function bindRoomProbes(ctx, { size = 128, dual = null } = {}) {
   const { renderer, scene } = ctx;
   const probes = probePoints();
   scene.updateMatrixWorld(true);
-  const clones = new Map(); const bound = new Set();
+  const clones = new Map(); const bound = new Set(); const expo = dual ? roomExposure() : new Map();
   const pm = new THREE.PMREMGenerator(renderer);
   const placeholder = pm.fromScene(new RoomEnvironment(), 0.03, 0.1, 100, { size }).texture; pm.dispose();
-  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; c.envMap = placeholder; c.userData.baseEnvI = c.envMapIntensity ?? 1; if (dual) c.userData.envNight = { value: placeholder }; if (!mat.onBeforeCompile || mat.onBeforeCompile.toString().length < 30) boxProject(THREE, c, roomBox(probe), probe.pos, dual);
+  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; c.envMap = placeholder; c.userData.baseEnvI = c.envMapIntensity ?? 1; if (dual) { c.userData.envNight = { value: placeholder }; c.userData.envExpo = expo.get(probe.room) || ZERO; } if (!mat.onBeforeCompile || mat.onBeforeCompile.toString().length < 30) boxProject(THREE, c, roomBox(probe), probe.pos, dual);
       else if (dual && c.onBeforeCompile === THREE.Material.prototype.onBeforeCompile) dualOnly(THREE, c, dual); clones.set(key, c); } return c; };
   scene.traverse(o => {
     if (!o.isMesh || SKIP(o)) return;
@@ -140,7 +164,7 @@ export function bindRoomProbes(ctx, { size = 128, dual = null } = {}) {
   });
   const used = probes.filter(p => bound.has(p));
   const byProbe = new Map(); for (const c of clones.values()) { const k = c.userData.probe; if (!byProbe.has(k)) byProbe.set(k, []); byProbe.get(k).push(c); }
-  return { probes: used, materials: clones.size, list: [...clones.values()], bake: (opts) => bakeProbes(ctx, used, byProbe, clones, { size, ...opts }) };
+  return { probes: used, materials: clones.size, list: [...clones.values()], expo, bake: (opts) => bakeProbes(ctx, used, byProbe, clones, { size, ...opts }) };
 }
 
 // Phase 2. background=true renders one cube face per frame so walking stays smooth while rooms light up.

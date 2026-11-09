@@ -78,6 +78,19 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   const pivot = new THREE.Vector3(spawn[0], spawn[1] + PIVOT, spawn[2]); let pivotInit = false;
   const camShape = new R.Ball(0.16); const ROT0 = { x: 0, y: 0, z: 0, w: 1 };
   const CAM_FLAGS = R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+  // polish: the camera arm also stops on DYNAMIC furniture (coffee tables, ottomans, side tables made pushable by
+  // furnish/smash) so the lens never ends up inside one; it still ignores the prop in your hands (kccSkip) and small
+  // dynamic props (< 8 kg: pillows, books, balls) so those don't make the camera jitter. The predicate only runs
+  // for colliders the broad phase already found along the arm (a handful), so no measurable per-frame cost.
+  const NEAR0 = camera.near; let nearSet = NEAR0;
+  /* only touches camera.near if player.js set it last (cars / photo views may own it otherwise) */
+  const setNear = (n) => { if (camera.near === n || (camera.near !== nearSet && camera.near !== NEAR0)) return; nearSet = n; camera.near = n; camera.updateProjectionMatrix(); };
+  const CAM_ARM_FLAGS =R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+  const camPred = (c) => {
+    if (kccSkip.has(c.handle)) return false;
+    const b = c.parent(); if (!b || !b.isDynamic()) return true;
+    return b.mass() >= 8;
+  };
   const euler = new THREE.Euler(0, 0, 0, 'YXZ'); const back = new THREE.Vector3();
   let disturbT = 0, frameMs = 0, lastSwimBlocked = 0, climbOut = 0; const climbDir = new THREE.Vector3();
 
@@ -185,11 +198,11 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       back.set(0, 0, 1).applyEuler(euler);
       // over the shoulder: 0.38 m to the camera's right (ray-checked so it never pokes through a wall)
       { const rx = Math.cos(state.yaw), rz = -Math.sin(state.yaw); let so = 0.38;
-        const sh = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: rx, y: 0, z: rz }, camShape, 0.0, so, true, CAM_FLAGS, CAM_GROUPS, collider);
+        const sh = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: rx, y: 0, z: rz }, camShape, 0.0, so, true, CAM_ARM_FLAGS, CAM_GROUPS, collider, undefined, camPred);
         if (sh) so = Math.max(0, sh.time_of_impact - 0.04); shoulder += (so - shoulder) * (1 - Math.exp(-dt * 8));
         pivot2.set(pivot.x + rx * shoulder, pivot.y, pivot.z + rz * shoulder); }
       let d = state.camWant;
-      const hit = world.castShape({ x: pivot2.x, y: pivot2.y, z: pivot2.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, CAM_GROUPS, collider);
+      const hit = world.castShape({ x: pivot2.x, y: pivot2.y, z: pivot2.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_ARM_FLAGS, CAM_GROUPS, collider, undefined, camPred);
       if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04);
       state.camDist = d < state.camDist ? d : state.camDist + (d - state.camDist) * (1 - Math.exp(-dt * 3));
       // boxed in (back to a wall): fall back to an eye-level view instead of jamming the lens into the wall
@@ -197,7 +210,12 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       camera.position.copy(pivot2).addScaledVector(back, state.camDist * close);
       if (close < 1) camera.position.y += (state.pos.y + EYE_FP - camera.position.y) * (1 - close);
       camera.quaternion.setFromEuler(euler);
+      // polish: near fade — when the arm is pulled in by something, push the near plane to 0.1 m (the 0.16 m cast
+      // ball keeps hit surfaces further than that) so slivers of furniture beside the lens are clipped instead of
+      // filling the frame. Projection only rebuilt when the value flips.
+      setNear(state.camDist < state.camWant - 0.2 ? 0.1 : NEAR0);
     } else {
+      setNear(NEAR0);
       pivotInit = false;
       camera.position.set(state.pos.x, state.pos.y + EYE_FP, state.pos.z);
       camera.quaternion.setFromEuler(euler);
@@ -268,7 +286,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     camera.position.set(s.pos[0], s.pos[1] + eye, s.pos[2]);
     if (state.thirdPerson) {
       back.set(0, 0, 1).applyEuler(euler); const piv = _v.copy(camera.position);
-      let d = state.camWant; const hit = world.castShape({ x: piv.x, y: piv.y, z: piv.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, CAM_GROUPS, collider);
+      let d = state.camWant; const hit = world.castShape({ x: piv.x, y: piv.y, z: piv.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_ARM_FLAGS, CAM_GROUPS, collider, undefined, camPred);
       if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04); state.camDist = d;
       camera.position.addScaledVector(back, d);
     }

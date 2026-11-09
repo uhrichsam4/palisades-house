@@ -21,7 +21,9 @@ export const FIXTURES = [
   // ---------------- primary bath (src/rooms/primarybath.js:416-462, 536-545), upper floor y = 3.35
   { id: 'primary-sink-1', room: 'primaryBath', kind: 'sink', name: 'Primary bath sink 1', tip: [21.172, 4.370, 16.225], dir: [-0.64, -0.77, 0], v: 0.75, r: 0.0072, land: 4.215 },
   { id: 'primary-sink-2', room: 'primaryBath', kind: 'sink', name: 'Primary bath sink 2', tip: [21.172, 4.370, 18.475], dir: [-0.64, -0.77, 0], v: 0.75, r: 0.0072, land: 4.215 },
-  { id: 'primary-tub', room: 'primaryBath', kind: 'filler', name: 'Primary tub filler', tip: [18.535, 4.083, 17.16], dir: [1, -0.25, 0], v: 0.55, r: 0.014, land: 3.44 },
+  { id: 'primary-tub', room: 'primaryBath', kind: 'filler', name: 'Primary tub filler', tip: [18.535, 4.083, 17.16], dir: [1, -0.25, 0], v: 0.55, r: 0.014, land: 3.44,
+    // polish: basin the filler fills (water.js rising level). oval: centre + inner lathe profile [r, y] of primarybath.js:470, plan b = r + dL*sqrt(r/0.4)
+    basin: { shape: 'oval', c: [18.90, 3.35, 17.15], dL: 0.45, prof: [[0.21, 0.092], [0.282, 0.13], [0.328, 0.25], [0.356, 0.40], [0.371, 0.53]], y0: 0.095, y1: 0.44 } },
   { id: 'primary-shower', room: 'primaryBath', kind: 'shower', name: 'Primary shower (2 heads)', heads: [[17.079, 5.345, 16.77], [17.079, 5.345, 17.57]], tip: [17.079, 5.345, 17.17], dir: [0.296, -0.955, 0], v: 2.6, r: 0.045, land: 3.356, ui: [[16.83, 4.49, 16.77]] },
   { id: 'primary-hand', room: 'primaryBath', kind: 'hand', name: 'Primary hand shower', tip: [16.915, 5.155, 17.17], dir: [0.88, 0.3, 0], v: 2.3, r: 0.030, land: 3.356 },
   // ---------------- coffee bar in the primary vestibule (src/rooms/primarybath.js:672-682)
@@ -36,7 +38,9 @@ export const FIXTURES = [
   { id: 'bathB-hand', room: 'bathB', kind: 'hand', name: 'Bath B hand shower', tip: [20.140, 5.161, 8.12], dir: [0.85, 0.32, 0], v: 2.3, r: 0.028, land: 3.357 },
   // ---------------- Bath C (src/rooms/bedC.js:608-680): alcove tub with spout + shower arm, brass vanity faucet
   { id: 'bathC-sink', room: 'bathC', kind: 'sink', name: 'Bath C sink', tip: [5.51, 4.328, 12.39], dir: [0.55, -0.83, 0], v: 0.75, r: 0.0072, land: 4.17 },
-  { id: 'bathC-tub', room: 'bathC', kind: 'filler', name: 'Bath C tub spout', tip: [5.476, 3.984, 10.86], dir: [0.8, -0.6, 0], v: 0.6, r: 0.014, land: 3.472 },
+  { id: 'bathC-tub', room: 'bathC', kind: 'filler', name: 'Bath C tub spout', tip: [5.476, 3.984, 10.86], dir: [0.8, -0.6, 0], v: 0.6, r: 0.014, land: 3.472,
+    // polish: inset box basin of bedC.js:611 (ix0..ix1 x iz0..iz1), floor at Y + TH - 0.40
+    basin: { shape: 'box', c: [6.065, 3.35, 10.835], hx: 0.645, hz: 0.345, y0: 0.122, y1: 0.40 } },
   { id: 'bathC-shower', room: 'bathC', kind: 'shower', name: 'Bath C shower arm', tip: [5.538, 5.333, 10.86], dir: [0.3, -0.954, 0], v: 2.4, r: 0.030, land: 3.472, ui: [[5.33, 4.37, 10.86]] },
   { id: 'bathC-hand', room: 'bathC', kind: 'hand', name: 'Bath C hand shower', tip: [5.375, 5.186, 11.04], dir: [0.85, 0.3, 0], v: 2.2, r: 0.030, land: 3.472 },
   // ---------------- guest bath in the turret (src/rooms/theater.js:509-531, 590-597); vanity group rotated 180 deg

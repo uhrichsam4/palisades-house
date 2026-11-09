@@ -49,7 +49,20 @@ export function createHud({ quality, mp, menu, params }) {
 
   // bottom key hints (replaces the #help sentence)
   const help = document.getElementById('help');
-  if (help) { help.textContent = ''; help.classList.add('keys'); for (const [k, v] of HINTS) { const c = document.createElement('span'); c.className = 'chip'; const a = document.createElement('i'); a.textContent = k + '::'; const b = document.createElement('b'); b.textContent = v; c.append(a, b); help.appendChild(c); } }
+  // polish pass: only the 5 core chips by default; `/` (or `?`, or a click on the KEYS chip) toggles the full list;
+  // the row fades out after 10 s without key/click input and comes back on the next one
+  if (help) {
+    help.textContent = ''; help.classList.add('keys');
+    const chip = (k, v, cls) => { const c = document.createElement('span'); c.className = 'chip' + (cls ? ' ' + cls : ''); const a = document.createElement('i'); a.textContent = k + '::'; const b = document.createElement('b'); b.textContent = v; c.append(a, b); help.appendChild(c); return c; };
+    const CORE = new Set(['WASD', 'E', 'J', 'K']);
+    for (const [k, v] of HINTS) chip(k, v, CORE.has(k) ? 'core' : 'more');
+    const more = chip('?', 'KEYS', 'core keys-toggle'); more.title = 'All keys (/)';
+    const toggle = () => { const on = help.classList.toggle('all'); more.lastChild.textContent = on ? 'LESS' : 'KEYS'; wake(); };
+    more.addEventListener('pointerdown', (e) => { e.stopPropagation(); e.preventDefault(); toggle(); });
+    let idleT = 0; const wake = () => { help.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => help.classList.add('idle'), 10000); };
+    addEventListener('keydown', (e) => { if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return; if (e.code === 'Slash' && !e.repeat) toggle(); else wake(); });
+    addEventListener('pointerdown', wake); wake();
+  }
 
   // FPS: F toggles the chip, G cycles quality (chip briefly shows GFX::<tier>)
   let fpsOn = !!params.get('fps') || settings.get().fps; let gfxUntil = 0;
@@ -83,6 +96,29 @@ export function createHud({ quality, mp, menu, params }) {
     show(C.listen, !!t); if (t) { const s = t.length > 48 ? t.slice(0, 47) + '…' : t; if (C.listen.v.textContent !== s) C.listen.v.textContent = s; }
   }
   setInterval(tick, 250); tick();
+
+  // polish pass — ONE prompt slot: the E interact chip (#ix-prompt), Watch (#vs.near), the Re-create take button (#rc,
+  // not seated) and the speaker NEARBY pill (#spk-pill) never stack: interact > watch > re-create > speaker. Watch and
+  // Re-create also hide while in a game, driving, holding a prop / the speaker, or in photo mode. Body classes only;
+  // driven by MutationObservers on those elements + the 4 Hz tick (no per-frame work).
+  const B = document.body; const watched = new WeakSet();
+  const $id = (id) => document.getElementById(id);
+  const arbitrate = () => {
+    const ix = $id('ix-prompt'), vs = $id('vs'), rc = $id('rc'), take = $id('rc-take'), sp = $id('spk-pill');
+    for (const el of [ix, vs, rc, take, sp]) if (el && !watched.has(el)) { watched.add(el); mo.observe(el, { attributes: true, attributeFilter: ['class', 'hidden'] }); }
+    const g = window.__games, held = !!window.__smash?.hands?.heldItem || $id('spk')?.dataset.state === 'held';
+    const busy = B.classList.contains('driving') || B.classList.contains('photo') || held || !!(g && g.in && g.phase !== 'idle');
+    const ixOn = !!ix?.classList.contains('on'), vsNear = !!vs?.classList.contains('near') && !vs.classList.contains('on');
+    const rcTake = !!rc?.classList.contains('show') && !!take && !take.hidden, spOn = !!sp?.classList.contains('on');
+    const hideVs = vsNear && (ixOn || busy), showVs = vsNear && !hideVs;
+    const hideRc = rcTake && (ixOn || showVs || busy), showRc = rcTake && !hideRc;
+    const hideSp = spOn && (ixOn || showVs || showRc);
+    if (B.classList.contains('pr-hide-vs') !== hideVs) B.classList.toggle('pr-hide-vs', hideVs);
+    if (B.classList.contains('pr-hide-rc') !== hideRc) B.classList.toggle('pr-hide-rc', hideRc);
+    if (B.classList.contains('pr-hide-sp') !== hideSp) B.classList.toggle('pr-hide-sp', hideSp);
+  };
+  const mo = new MutationObserver(arbitrate);
+  setInterval(arbitrate, 250); arbitrate();
 
   // mono status line (path-trace progress etc.): main.js status() writes here once loading is done
   const st = document.createElement('div'); st.id = 'hud-status'; st.className = 'chip'; st.hidden = true; document.body.appendChild(st);

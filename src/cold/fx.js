@@ -90,7 +90,9 @@ export function createBlowIn(scene) {
         if (k) { V[j * 3] += Math.sin(t * 3 + j) * 1.6 * dt; V[j * 3 + 2] += Math.cos(t * 2.3 + j * 1.7) * 1.6 * dt; V[j * 3 + 1] += (Math.sin(t * 4 + j * 0.7) * 0.8 - 0.1) * dt; }
         P[j * 3] += V[j * 3] * dt; P[j * 3 + 1] += V[j * 3 + 1] * dt; P[j * 3 + 2] += V[j * 3 + 2] * dt;
         const depth = -((P[j * 3] - e.pos[0]) * e.nx + (P[j * 3 + 2] - e.pos[2]) * e.nz); // metres inside
-        if (P[j * 3 + 1] < D[j * 2 + 1] || depth > D[j * 2]) { if (P[j * 3 + 1] < D[j * 2 + 1] + 0.3) hits.set(e.id, (hits.get(e.id) || 0) + 1); used.delete(j); free.push(j); continue; }
+        // contain: once past the wall (depth > 0.2) a flake/drop must stay inside its room's rect and under the ceiling
+        const rc = e.rect; const inside = depth < 0.2 || !rc || (P[j * 3] > rc[0] && P[j * 3] < rc[2] && P[j * 3 + 2] > rc[1] && P[j * 3 + 2] < rc[3] && P[j * 3 + 1] < e.ceilY);
+        if (P[j * 3 + 1] < D[j * 2 + 1] || depth > D[j * 2] || !inside) { if (P[j * 3 + 1] < D[j * 2 + 1] + 0.3) hits.set(e.id, (hits.get(e.id) || 0) + 1); used.delete(j); free.push(j); continue; }
         if (k) { sPos[ns * 3] = P[j * 3]; sPos[ns * 3 + 1] = P[j * 3 + 1]; sPos[ns * 3 + 2] = P[j * 3 + 2]; ns++; }
         else { const o = nr * 6; rPos[o] = P[j * 3]; rPos[o + 1] = P[j * 3 + 1]; rPos[o + 2] = P[j * 3 + 2]; rPos[o + 3] = P[j * 3] - V[j * 3] * 0.035; rPos[o + 4] = P[j * 3 + 1] - V[j * 3 + 1] * 0.035; rPos[o + 5] = P[j * 3 + 2] - V[j * 3 + 2] * 0.035; nr++; }
       }

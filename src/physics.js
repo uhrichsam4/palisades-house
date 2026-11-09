@@ -5,6 +5,22 @@ import RAPIER from 'rapier';
 
 export async function createPhysics() {
   await RAPIER.init();
+  // Safety net: a JS handle to a body/collider that something already removed (breaks, debris, collapses, games)
+  // makes Rapier panic inside wasm ("unreachable") and then every later physics call fails ("recursive use of an
+  // object"). Many modules keep their own lists, so guard the methods they use: on a removed object they become
+  // no-ops returning a harmless default instead of killing the whole physics world for the session.
+  for (const [C, list] of [[RAPIER.RigidBody, { isSleeping: true, translation: () => ({ x: 0, y: -1000, z: 0 }), rotation: () => ({ x: 0, y: 0, z: 0, w: 1 }), linvel: () => ({ x: 0, y: 0, z: 0 }), angvel: () => ({ x: 0, y: 0, z: 0 }),
+      mass: 0, isDynamic: false, isKinematic: false, isFixed: true, isEnabled: false, isMoving: false,
+      applyImpulse: undefined, applyTorqueImpulse: undefined, applyImpulseAtPoint: undefined, addForce: undefined, setTranslation: undefined, setRotation: undefined, setNextKinematicTranslation: undefined, setNextKinematicRotation: undefined,
+      setLinvel: undefined, setAngvel: undefined, wakeUp: undefined, sleep: undefined, setEnabled: undefined, setGravityScale: undefined, setCcdEnabled: undefined, setLinearDamping: undefined, setAngularDamping: undefined, lockRotations: undefined, setBodyType: undefined }],
+    [RAPIER.Collider, { translation: () => ({ x: 0, y: -1000, z: 0 }), rotation: () => ({ x: 0, y: 0, z: 0, w: 1 }), parent: null, isEnabled: false, activeEvents: 0,
+      setEnabled: undefined, setCollisionGroups: undefined, setSolverGroups: undefined, setActiveEvents: undefined, setContactForceEventThreshold: undefined, setActiveCollisionTypes: undefined, setTranslation: undefined, setTranslationWrtParent: undefined, setSensor: undefined, setFriction: undefined, setRestitution: undefined }]]) {
+    const P = C?.prototype; if (!P || typeof P.isValid !== 'function') continue;
+    for (const [name, dflt] of Object.entries(list)) {
+      const f = P[name]; if (typeof f !== 'function') continue;
+      P[name] = function (...a) { if (!this.isValid()) return typeof dflt === 'function' ? dflt() : dflt; return f.apply(this, a); };
+    }
+  }
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = 1 / 60;
   const dynamics = []; // { body, mesh, offset }

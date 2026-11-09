@@ -18,8 +18,20 @@ function flipIfMirrored(geo, m) {
   for (const at of Object.values(geo.attributes)) { const a = at.array, s = at.itemSize; for (let t = 0; t < n; t += 3) for (let k = 0; k < s; k++) { const i1 = (t + 1) * s + k, i2 = (t + 2) * s + k; const v = a[i1]; a[i1] = a[i2]; a[i2] = v; } at.needsUpdate = true; }
 }
 
-const CORE = {}; const coreMat = (kind) => CORE[kind] || (CORE[kind] = new THREE.MeshStandardMaterial({ color: kind === 'siding' ? 0xe2b79a : kind === 'concrete' ? 0x9c9a94 : kind === 'wood' ? 0xa07a50 : 0xe4e0d6, roughness: 1, name: 'building:core:' + kind }));
+const CORE = {}; const coreMat = (kind) => CORE[kind] || (CORE[kind] = new THREE.MeshStandardMaterial({ color: kind === 'siding' ? 0x8a6a55 : kind === 'concrete' ? 0x6a6862 : kind === 'wood' ? 0x6e5236 : 0x9a968c, roughness: 1, /* polish: torn core in shadow (was paper-white) */ name: 'building:core:' + kind }));
 const STUD = new THREE.MeshStandardMaterial({ color: 0xc09a68, roughness: 0.9, name: 'building:stud' });
+// polish: soot/AO band around the torn edge (vertex alpha ramp), insulation batts in the stud bays, rubble at the foot
+const SOOT = new THREE.MeshBasicMaterial({ color: 0x14110e, vertexColors: true, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, name: 'building:soot' });
+const INSUL = new THREE.MeshStandardMaterial({ color: 0xd9b98a, roughness: 1, name: 'building:insulation' });
+function sootRing(pts, z, R) { // ring from the hole outline outwards; alpha 0.6 at the edge -> 0
+  const n = pts.length, pos = [], col = [];
+  let cx = 0, cy = 0; for (const q of pts) { cx += q.x; cy += q.y; } cx /= n; cy /= n;
+  const outer = pts.map(q => { const dx = q.x - cx, dy = q.y - cy, l = Math.hypot(dx, dy) || 1, w = 0.07 + R() * 0.12; return [q.x + dx / l * w, q.y + dy / l * w]; });
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n, a = pts[i], b = pts[j], A = outer[i], B = outer[j];
+    pos.push(a.x, a.y, z, b.x, b.y, z, B[0], B[1], z, a.x, a.y, z, B[0], B[1], z, A[0], A[1], z);
+    col.push(1, 1, 1, 0.62, 1, 1, 1, 0.62, 1, 1, 1, 0, 1, 1, 1, 0.62, 1, 1, 1, 0, 1, 1, 1, 0); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4)); return g;
+}
 
 // returns a Group (or null if the panel is too small to keep a frame: then it simply disappears)
 export function brokenPanel(p, kind, seed) {
@@ -60,8 +72,28 @@ export function brokenPanel(p, kind, seed) {
       const studs = new THREE.Mesh(sg, STUD); studs.castShadow = true; studs.receiveShadow = true; g.add(studs);
     }
   }
+  // polish: soot band both faces (torn core is darkened above), insulation batts, rubble at the base (all static, built once)
+  { const sa = sootRing(pts, -0.004, R), sb = sootRing(pts, p.depth + 0.004, R); const sg = mergeAttrs([sa, sb], ['position', 'color']); sg.applyMatrix4(m); sg.computeBoundingSphere();
+    const soot = new THREE.Mesh(sg, SOOT); soot.renderOrder = 2; g.add(soot); }
+  if (kind !== 'concrete') {
+    const parts = [], d = p.depth;
+    for (let u = hx0 + 0.05; u < hx1 - 0.2; u += 0.41) { if (R() < 0.35) continue; const w = 0.33, h1 = 0.12 + R() * 0.45, h2 = 0.1 + R() * 0.35;
+      const b = new THREE.BoxGeometry(w, h1, Math.max(0.03, d * 0.55)); b.translate(u + 0.2, hy0 + h1 / 2 - 0.02, d / 2); parts.push(b);
+      if (R() < 0.6) { const t = new THREE.BoxGeometry(w, h2, Math.max(0.03, d * 0.55)); t.translate(u + 0.2, hy1 - h2 / 2 + 0.02, d / 2); parts.push(t); } }
+    if (parts.length) { const ig = mergeNonIndexed(parts); ig.applyMatrix4(m); flipIfMirrored(ig, m); const ins = new THREE.Mesh(ig, INSUL); ins.receiveShadow = true; g.add(ins); }
+  }
+  { const rb = []; const n = 7 + (R() * 6 | 0);
+    for (let i = 0; i < n; i++) { const side = R() < 0.5 ? -1 : 1, s = 0.04 + R() * 0.09; const r = new THREE.DodecahedronGeometry(1, 0).toNonIndexed();
+      r.scale(s * (1 + R()), s * (0.5 + R() * 0.4), s * (1 + R() * 0.6)); r.rotateY(R() * 6.28);
+      r.translate(hx0 + R() * (hx1 - hx0), y0 + s * 0.35, side < 0 ? -0.06 - R() * 0.35 : p.depth + 0.06 + R() * 0.35); rb.push(r); }
+    const rg = mergeNonIndexed(rb); rg.applyMatrix4(m); flipIfMirrored(rg, m); const rub = new THREE.Mesh(rg, coreMat(kind)); rub.castShadow = true; rub.receiveShadow = true; g.add(rub); }
   g.traverse(o => { o.userData.noCull = true; });
   return g;
+}
+function mergeAttrs(parts, names) {
+  const out = new THREE.BufferGeometry();
+  for (const name of names) { const s = parts[0].attributes[name].itemSize; const arr = new Float32Array(parts.reduce((a, g) => a + g.attributes[name].array.length, 0)); let o = 0; for (const g of parts) { arr.set(g.attributes[name].array, o); o += g.attributes[name].array.length; } out.setAttribute(name, new THREE.BufferAttribute(arr, s)); }
+  return out;
 }
 function mergeNonIndexed(geos) {
   const parts = geos.map(g => g.index ? g.toNonIndexed() : g); const out = new THREE.BufferGeometry();

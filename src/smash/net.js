@@ -76,7 +76,7 @@ export function createNet(S) {
       remoteLetGo(it); const d = it.d; d.sleepSkip = false;
       d.body.setTranslation({ x: m.p[0], y: m.p[1], z: m.p[2] }, true); d.body.setRotation({ x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] }, true);
       d.body.setLinvel({ x: m.v[0], y: m.v[1], z: m.v[2] }, true); if (arr(m.w, 3)) d.body.setAngvel({ x: m.w[0], y: m.w[1], z: m.w[2] }, true);
-      d.body.setGravityScale(1, true); d.body.setLinearDamping(0.12); d.body.setAngularDamping(0.35); if (it.mass < 6) d.body.enableCcd(true); d.body.wakeUp();
+      d.body.setGravityScale(1, true); d.body.setLinearDamping(0.12); d.body.setAngularDamping(0.35); d.body.enableCcd(true); d.body.wakeUp();
       phys.claim(d.collider, { kind: 'thrown', id: it.id, by: from }); it.lastMover = from; it.flying = performance.now();
       S.lastRemoteThrow = { id: it.id, from, t: performance.now() };
       return;

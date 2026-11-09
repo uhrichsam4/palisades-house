@@ -196,7 +196,7 @@ export function createTennis(ctx, mp, hub) {
     try { if (st.seat) player.setSeat(null); } catch {}
     ui.veil(true); setTimeout(() => ui.veil(false), 320);
     if (ctx.interact) ctx.interact.modal = { tennis: true, label: () => '', use: () => { leave(); return true; } };
-    document.body.classList.add('pg-venue'); ui.toast('WASD move · mouse aims (ring) · click / Space swings · E leaves', 3200);
+    document.body.classList.add('pg-venue'); /* polish: no centre-strip hint toast; the key chips at the bottom (V.keys) already show the controls */
   }
   function exitCourt() {
     if (!local.at) return; local.at = false; local.side = -1;
@@ -251,7 +251,7 @@ export function createTennis(ctx, mp, hub) {
       // aim ring on the far court
       G.aim.visible = M.phase !== 'over'; G.aim.position.set(CX + local.aimX * SW * 0.8, Y0 + 0.004, CZ + s * (3 + local.aimD * 7.6));
       if (!st.thirdPerson) st.thirdPerson = true;
-      tgtP.set(Q.x * 0.7 + CX * 0.3, Y0 + 4.4, Math.max(C2.ez0 + 1.8, Math.min(C2.ez1 - 1.8, Q.z - s * 3.6))); // stay well inside the fence + windscreen (critic: camera ended up behind the street-end screen) _b.set(CX, Y0 + 0.4, CZ + s * 5); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
+      tgtP.set(Q.x * 0.7 + CX * 0.3, Y0 + 4.4, Math.max(C2.ez0 + 1.8, Math.min(C2.ez1 - 1.8, Q.z - s * 3.6))); /* stay well inside the fence + windscreen */ _b.set(CX, Y0 + 0.4, CZ + s * 5); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
       if (!local.camInit) { local.camP.copy(tgtP); local.camQ.copy(tgtQ); local.camInit = true; }
       const k = 1 - Math.exp(-dt * 6); local.camP.lerp(tgtP, k); local.camQ.slerp(tgtQ, k); camera.position.copy(local.camP); camera.quaternion.copy(local.camQ);
     } else if (G) G.aim.visible = false;

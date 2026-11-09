@@ -19,7 +19,7 @@ import { N8AOPass } from 'n8ao';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { buildRoomProbes, bindRoomProbes } from './lighting.js';
-import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics, createBlobShadows, createGpuTimer, VIDEO_KEYS, videoOverrides } from './perf.js';
+import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics, createBlobShadows, createGpuTimer, VIDEO_KEYS, videoOverrides, singlePassFaintGlass, fastN8Transparency } from './perf.js';
 import { createCuller } from './cull.js';
 import * as P from './plan.js';
 import { PIECES } from './rooms/index.js';
@@ -131,6 +131,7 @@ function setupPost() {
   composer.setPixelRatio(pr); composer.setSize(W(), H());
   passes.render = new RenderPass(scene, camera); passes.render.enabled = false; composer.addPass(passes.render);
   n8 = new N8AOPass(scene, camera, W() * pr, H() * pr); passes.ao = n8;
+  if (!params.get('n8stock')) fastN8Transparency(n8); // perf.js: same transparency passes, no full-scene walks (?n8stock=1 = stock)
   setAO(SHOT ? 'Ultra' : 'Medium');
   composer.addPass(n8); window.__n8 = n8;
   const b = LIGHT.bloom; passes.bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), b.strength, b.radius, b.threshold); composer.addPass(passes.bloom); // bright windows bloom a little, like a camera
@@ -201,6 +202,7 @@ const PROF = window.__prof = { on: false, frames: 0, acc: new Map(), t0: 0,
   reset() { this.frames = 0; this.acc.clear(); this.t0 = performance.now(); },
   report() { const n = Math.max(1, this.frames); return { frames: this.frames, wallMsPerFrame: +((performance.now() - this.t0) / n).toFixed(2), rows: [...this.acc].map(([k, v]) => [k, +(v / n).toFixed(3)]).sort((a, b) => b[1] - a[1]) }; } };
 let shadows = null, cull = null, mirrorRooms = new Set();
+const preQ = []; preQ.on = false; // ctxBase.preRender queue (drained in the walk loop's frameFn)
 const T0 = performance.now(); window.__timing = {};
 const mark = (k) => { window.__timing[k] = Math.round(performance.now() - T0); };
 const ctxBase = {
@@ -208,6 +210,9 @@ const ctxBase = {
   kit: { M, ...T, ...G, ...RM, loadModel, fitTo, outdoor, fabric },
   ENV,
   onUpdate: (fn) => { updates.push(fn); fn.__src = srcLabel(fn); },
+  // preRender(fn): run fn this frame AFTER all updates, right after the frame's one matrix walk and before the scene
+  // renders (no extra matrix walk). Returns false outside the walk loop: the caller should then just run fn itself.
+  preRender: (fn) => { if (!preQ.on) return false; preQ.push(fn); return true; },
 };
 
 async function main() {
@@ -252,7 +257,10 @@ async function main() {
     const skip = (o) => /^(roof:|soffit:|fascia|water|mirror)/.test(o.name || '');
     const roots = [shell.root, ...scene.children.filter(c => (c.name || '').startsWith('piece:'))];
     let made = 0, removed = 0; for (const r of roots) { const res = G.mergeStatic(r, { dedupe, skip }); made += res.merged; removed += res.removed; }
-    window.__merge = { made, removed }; mark('merge');
+    // perf: merged static meshes never move (identity transform under their piece root): skip their per-frame
+    // matrix compose in the frame's matrix walk (their world matrix still follows the parent)
+    let frozen = 0; for (const r of roots) r.traverse(o => { if (o.isMesh && o.name === 'merged' && o.matrixAutoUpdate) { o.updateMatrix(); o.matrixAutoUpdate = false; frozen++; } });
+    window.__merge = { made, removed, frozen }; mark('merge');
   }
   // throwable props: one multi-draw per material instead of one draw per prop
   const propBatch = batchDynamics(scene, phys); ctxBase.propBatch = propBatch; window.__propBatch = { batches: propBatch.batches, instances: propBatch.instances };
@@ -321,7 +329,8 @@ async function main() {
   // changes shadows and never forces a refresh.
   { const sm = renderer.shadowMap, r0 = sm.render.bind(sm); sm.render = (lights, sc, cam) => { const had = cam.layers.isEnabled(30); if (cull?.enabled && !had) cam.layers.enable(30); try { r0(lights, sc, cam); } finally { if (!had) cam.layers.disable(30); } }; }
   if (!params.get('nocull')) { cull = createCuller({ scene, camera, phys, doors: ctxBase.doors || [], mirrorRooms }); cull.props = ctxBase.propBatch?.tracked || null; window.__cull = cull; }
-  THREE.DefaultLoadingManager.onLoad = ((prev) => () => { prev?.(); shadows.poke(); })(THREE.DefaultLoadingManager.onLoad); // late model loads cast shadows too
+  THREE.DefaultLoadingManager.onLoad = ((prev) => () => { prev?.(); shadows.poke(); singlePassFaintGlass(scene); })(THREE.DefaultLoadingManager.onLoad); // late model loads cast shadows too
+  window.__singlePassGlass = singlePassFaintGlass(scene); setTimeout(() => singlePassFaintGlass(scene), 15000); // perf.js: faint glass draws in one pass
   // E: look-at interactions first (src/interact.js: taps, cars, …), then the nearest door
   const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => { if (ctxBase.interact?.use()) return; useNearestDoor(pos); }, onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => { const b = document.body.classList; return b.contains('ui-open') || b.contains('menu-open') || b.contains('paused'); } }, { spawn: SPAWN, yaw: Math.PI });
   ctxBase.player = player;
@@ -407,9 +416,20 @@ async function main() {
     if (awake < awakePrev) shadows.poke(); awakePrev = awake;
     blobs?.update(dt, () => shadows.poke());
     shadows.tick(doorsMoving); lap('shadows.tick+blobs');
-    if (photoMode?.active) photoMode.render(() => render());
-    else if (pf) { const sh = renderer.shadowMap.needsUpdate; cull?.update(); lap('cull.update'); render(true); lap(sh ? 'render (incl. shadow refresh)' : 'render (no shadow)'); PROF.add('shadow refreshes/frame', sh ? 1 : 0); }
-    else render();
+    const drainPre = () => { for (let i = 0; i < preQ.length; i++) { try { preQ[i](); } catch (e) { console.warn('[preRender]', e); } } preQ.length = 0; };
+    if (photoMode?.active) { drainPre(); photoMode.render(() => render()); }
+    else {
+      // perf: ONE scene matrix walk per frame. Every renderer.render() re-walks all ~5k objects' matrices, and the
+      // composer renders the scene 3x (N8AO beauty + its two transparency passes) plus the water refraction capture
+      // (deferred here via ctx.preRender); nothing moves between them.
+      scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+      try {
+        if (pf) lap('matrixWorld');
+        drainPre(); if (pf) lap('preRender (water capture)');
+        if (pf) { const sh = renderer.shadowMap.needsUpdate; cull?.update(); lap('cull.update'); render(true); lap(sh ? 'render (incl. shadow refresh)' : 'render (no shadow)'); PROF.add('shadow refreshes/frame', sh ? 1 : 0); }
+        else render();
+      } finally { scene.matrixWorldAutoUpdate = true; }
+    }
     hud(player); lap('hud');
     gpuT.end(); lastWork = performance.now() - now;
   };
@@ -429,6 +449,7 @@ async function main() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && loopMode === 'uncapped') { last = performance.now(); mc.port2.postMessage(0); } });
   setLoop(params.get('fpscap') || settings.get().fpsCap); settings.onChange((st) => setLoop(params.get('fpscap') || st.fpsCap));
   window.__loop = { get mode() { return loopMode; }, set: setLoop };
+  preQ.on = true;
   window.__ready = true;
 }
 

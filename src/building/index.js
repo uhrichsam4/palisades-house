@@ -331,6 +331,16 @@ export function startBuilding(ctx, api) {
   // ------------------------------------------------------------------ car crumple
   const dents = []; const lastDent = new Map();
   function carById(id) { return window.__cars?.cars?.find(c => c && c.def.name === id) || null; }
+  // recompute vertex normals only for vertices whose faces touch a moved vertex (indexed or not)
+  function localNormals(geo, mv) {
+    const pa = geo.attributes.position, na = geo.attributes.normal; if (!na) { geo.computeVertexNormals(); return; }
+    const idx = geo.index, tri = idx ? idx.count / 3 : pa.count / 3, at = (j) => (idx ? idx.getX(j) : j);
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), fn = new THREE.Vector3(); const acc = new Map();
+    for (let f = 0; f < tri; f++) { const i0 = at(f * 3), i1 = at(f * 3 + 1), i2 = at(f * 3 + 2); if (!mv[i0] && !mv[i1] && !mv[i2]) continue;
+      a.fromBufferAttribute(pa, i0); b.fromBufferAttribute(pa, i1); c.fromBufferAttribute(pa, i2); fn.subVectors(c, b).cross(a.sub(b));
+      for (const v of [i0, i1, i2]) { if (!mv[v]) continue; const o = acc.get(v); if (o) o.add(fn); else acc.set(v, fn.clone()); } }
+    for (const [v, n] of acc) { n.normalize(); na.setXYZ(v, n.x, n.y, n.z); } na.needsUpdate = true;
+  }
   function applyDent(carId, lp, ld, amount) {
     const car = carById(carId); if (!car) return false; const G = car.vis.group; G.updateMatrixWorld(true);
     const ginv = new THREE.Matrix4().copy(G.matrixWorld).invert(); const P0 = new THREE.Vector3(...lp), D = new THREE.Vector3(...ld).normalize(); const r = 0.55 + amount * 1.5;
@@ -340,10 +350,19 @@ export function startBuilding(ctx, api) {
       const pos = m.geometry?.attributes?.position; if (!pos || pos.count > 200000) return;
       const toG = new THREE.Matrix4().multiplyMatrices(ginv, m.matrixWorld), toM = new THREE.Matrix4().copy(toG).invert();
       if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); const bb = m.geometry.boundingBox.clone().applyMatrix4(toG); if (bb.distanceToPoint(P0) > r) return;
-      if (!m.userData.dentOwn) { m.geometry = m.geometry.clone(); m.userData.dentOwn = true; }
-      const pa = m.geometry.attributes.position; let moved = 0;
-      for (let i = 0; i < pa.count; i++) { _v.fromBufferAttribute(pa, i).applyMatrix4(toG); const d = _v.distanceTo(P0); if (d > r) continue; const k = (1 - d / r) ** 2 * amount; _v.addScaledVector(D, k); _v.y += (Math.random() - 0.5) * k * 0.15; _v.applyMatrix4(toM); pa.setXYZ(i, _v.x, _v.y, _v.z); moved++; }
-      if (moved) { pa.needsUpdate = true; m.geometry.computeVertexNormals(); m.geometry.computeBoundingSphere(); }
+      // polish: dents read — deeper falloff, crease darkening in vertex colours (per-mesh material clone with
+      // vertexColors, colour attribute added once), normals recomputed only for the faces touching moved vertices
+      // (the rest of the body keeps its authored normals / hard edges). Event-driven: no per-frame cost.
+      if (!m.userData.dentOwn) { m.geometry = m.geometry.clone(); m.userData.dentOwn = true;
+        if (!m.geometry.attributes.color) { const n = m.geometry.attributes.position.count; m.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3)); }
+        const vc = (mt) => { if (!mt || mt.vertexColors) return mt; const c = mt.clone(); c.vertexColors = true; return c; };
+        m.material = Array.isArray(m.material) ? m.material.map(vc) : vc(m.material); }
+      const pa = m.geometry.attributes.position, ca = m.geometry.attributes.color; let moved = 0; const mv = new Uint8Array(pa.count);
+      for (let i = 0; i < pa.count; i++) { _v.fromBufferAttribute(pa, i).applyMatrix4(toG); const d = _v.distanceTo(P0); if (d > r) continue; const t = 1 - d / r;
+        const k = t ** 1.6 * amount * 1.5; const jit = Math.sin(i * 12.9898 + lp[0] * 78.233) * 43758.5453 % 1; _v.addScaledVector(D, k); _v.y += jit * k * 0.12;
+        _v.applyMatrix4(toM); pa.setXYZ(i, _v.x, _v.y, _v.z); mv[i] = 1; moved++;
+        if (ca) { const dark = 1 - Math.min(0.6, (0.55 * 4 * t * (1 - t) + 0.25 * t) * Math.min(1, amount * 7)); for (let c = 0; c < ca.itemSize && c < 3; c++) ca.setComponent(i, c, Math.min(ca.getComponent(i, c), dark)); } }
+      if (moved) { pa.needsUpdate = true; if (ca) ca.needsUpdate = true; localNormals(m.geometry, mv); m.geometry.computeBoundingSphere(); }
     });
     dents.push({ car: carId, p: lp, d: ld, a: amount }); if (dents.length > 200) dents.shift(); return true;
   }
