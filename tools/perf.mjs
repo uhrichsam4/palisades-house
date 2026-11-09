@@ -17,7 +17,7 @@ const LOCKS = path.join(ROOT, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursiv
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 let slot = null;
 while (!slot) {
-  for (let i = 0; i < 3 && !slot; i++) { const d = path.join(LOCKS, 'slot' + i); try { fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'pid'), String(process.pid)); slot = d; } catch { let pid = 0; try { pid = +fs.readFileSync(path.join(d, 'pid'), 'utf8'); } catch {} if (pid && !alive(pid)) fs.rmSync(d, { recursive: true, force: true }); } }
+  for (let i = 0; i < Number(process.env.SHOT_SLOTS || 2) && !slot; i++) { const d = path.join(LOCKS, 'slot' + i); try { fs.mkdirSync(d); fs.writeFileSync(path.join(d, 'pid'), String(process.pid)); slot = d; } catch { let pid = 0; try { pid = +fs.readFileSync(path.join(d, 'pid'), 'utf8'); } catch {} if (pid && !alive(pid)) fs.rmSync(d, { recursive: true, force: true }); } }
   if (!slot) await new Promise(r => setTimeout(r, 1500));
 }
 process.on('exit', () => fs.rmSync(slot, { recursive: true, force: true }));

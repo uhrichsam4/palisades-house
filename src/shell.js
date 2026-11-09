@@ -7,6 +7,14 @@ import * as P from './plan.js';
 import { M } from './kit/materials.js';
 
 const V2 = (x, z) => new THREE.Vector2(x, z);
+export const OPEN_CODE = 100000; // uv1.x codes of opening fills start here (see buildShell)
+// merge non-indexed/indexed box geometries (same attributes) into one
+function mergeBoxes(geos) {
+  const out = new THREE.BufferGeometry(); const names = Object.keys(geos[0].attributes); let vtx = 0; const idx = [];
+  for (const nm of names) { const sz = geos[0].attributes[nm].itemSize; const arr = new Float32Array(geos.reduce((a, g) => a + g.attributes[nm].count, 0) * sz); let o = 0; for (const g of geos) { arr.set(g.attributes[nm].array, o); o += g.attributes[nm].array.length; } out.setAttribute(nm, new THREE.BufferAttribute(arr, sz)); }
+  for (const g of geos) { const n = g.attributes.position.count; if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + vtx); else for (let i = 0; i < n; i++) idx.push(i + vtx); vtx += n; }
+  out.setIndex(idx); return out;
+}
 
 // ---------- geometry helpers -------------------------------------------------------------
 // Box lying along segment p0->p1 (in XZ), from the face line going `depth` along unit normal n,
@@ -95,9 +103,15 @@ export function buildShell(ctx) {
   const wallMatsExt = [M.paintWhite, M.extWhite, M.paintWhite]; // A(face on outer line) = exterior siding
   const wallMatsInt = [M.paintWhite, M.paintWhite, M.paintWhite];
   const doors = [];
+  // src/building (2026-11-08): walls are split into ~1.2 m panels (one collider each) and every shell part that the
+  // building module may later hide carries a `uv1` attribute whose x is an integer code (wall panel = 1 + index,
+  // opening fill = OPEN_CODE + 4·index + part (0 frame/bars, 1 glass)). The global merge keeps uv1, so after the merge
+  // the building module can still find (and degenerate) exactly those triangles. uv1 is never sampled by any material.
+  const panels = [], openings = [];
+  const tagCode = (obj, code) => obj.traverse?.(m => { if (!m.isMesh) return; const g = m.geometry; const n = g.attributes.position.count; g.setAttribute('uv1', new THREE.Float32BufferAttribute(new Float32Array(n * 2).fill(0).map((v, i) => (i % 2 ? 0 : code)), 2)); });
   const add = (geo, mat, name) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; m.receiveShadow = true; if (name) m.name = name; root.add(m); return m; };
 
-  function wallRun(level, a, b, n, depth, y0, y1, mats, tagFaceLineIsCentre) {
+  function wallRun(level, a, b, n, depth, y0, y1, mats, tagFaceLineIsCentre, wallKey, ext) {
     // a,b on reference line; n unit (inward/normal); if centre line, shift back by depth/2
     let A = V2(a[0], a[1]), B = V2(b[0], b[1]); const N = V2(n[0], n[1]);
     if (tagFaceLineIsCentre) { A = A.clone().addScaledVector(N, -depth / 2); B = B.clone().addScaledVector(N, -depth / 2); }
@@ -114,18 +128,26 @@ export function buildShell(ctx) {
       buildOpeningFill(o, A.clone().addScaledVector(U, s0), A.clone().addScaledVector(U, s1), N, depth, sillY, headY, tagFaceLineIsCentre);
     }
     if (cur < L - 0.001) pieces.push([cur, L, y0, y1]);
-    for (const [s0, s1, py0, py1] of pieces) {
-      const p0 = A.clone().addScaledVector(U, s0), p1 = A.clone().addScaledVector(U, s1);
-      const g = segBox(p0, p1, N, depth, py0, py1);
-      const m = add(g, mats, 'wall');
-      ctx.phys.boxFromSeg(p0, p1, N, depth, py0, py1);
-    }
+    const floorY = level === 0 ? Math.max(0, y0) : P.LEVELS[1].floor;
+    pieces.forEach(([s0, s1, py0, py1], pi) => {
+      const nP = Math.max(1, Math.round((s1 - s0) / 1.2));
+      for (let k = 0; k < nP; k++) {
+        const a0 = s0 + (s1 - s0) * k / nP, a1 = s0 + (s1 - s0) * (k + 1) / nP;
+        const p0 = A.clone().addScaledVector(U, a0), p1 = A.clone().addScaledVector(U, a1);
+        const g = segBox(p0, p1, N, depth, py0, py1);
+        const m = add(g, mats, 'wall'); const code = 1 + panels.length; tagCode(m, code);
+        const collider = ctx.phys.boxFromSeg(p0, p1, N, depth, py0, py1);
+        panels.push({ id: `wall:${wallKey}:${pi}:${k}`, code, level, wallKey, ext: !!ext, p0, p1, N: N.clone(), U: U.clone(), depth, y0: py0, y1: py1, s0: a0, s1: a1, mats, collider,
+          header: py0 > floorY + 0.2, makeCollider: () => ctx.phys.boxFromSeg(p0, p1, N, depth, py0, py1) });
+      }
+    });
   }
 
   // ---- opening fills: windows, doors, sliders, garage doors
   function buildOpeningFill(o, p0, p1, N, depth, y0, y1, interior) {
     const w = p0.distanceTo(p1); const h = y1 - y0; const U = p1.clone().sub(p0).normalize();
     const g = new THREE.Group(); g.name = 'opening:' + o.id;
+    const meta = { o, p0: p0.clone(), p1: p1.clone(), N: N.clone(), depth, y0, y1, interior, g, colliders: [], code: OPEN_CODE + 4 * openings.length }; openings.push(meta);
     // local frame: x along wall (p0->p1), y up, z along N (into wall depth)
     const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(U.x, 0, U.y), new THREE.Vector3(0, 1, 0), new THREE.Vector3(N.x, 0, N.y));
     g.quaternion.setFromRotationMatrix(basis); g.position.set(p0.x, y0, p0.y);
@@ -145,7 +167,8 @@ export function buildShell(ctx) {
     const [cols, rows] = o.panes || [1, 1];
     if (o.type === 'window') {
       const p = glazedPanel(w, h, cols, rows); p.position.z = zSet; g.add(p);
-      ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.04);
+      meta.zSet = zSet; meta.makeCollider = () => ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.04); meta.colliders.push(meta.makeCollider());
+      tagCode(p, meta.code); for (const c of p.children) if (c.name === 'glass') tagCode(c, meta.code + 1);
     } else if (o.type === 'slider') {
       const n = Math.max(2, cols); const pw = w / n;
       const open = o.open ?? 0;
@@ -153,9 +176,10 @@ export function buildShell(ctx) {
         const p = glazedPanel(pw + fr, h, 1, 1);
         const stackX = (w - pw - 0.02) - i * 0.02; // pocket stack at far end
         p.position.set(THREE.MathUtils.lerp(i * pw, stackX, open), 0, zSet + (i % 2) * 0.06);
-        g.add(p);
+        g.add(p); tagCode(p, meta.code); for (const c of p.children) if (c.name === 'glass') tagCode(c, meta.code + 1);
       }
-      if (open < 0.5) ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.06);
+      meta.zSet = zSet; meta.open = open; meta.makeCollider = () => ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.06);
+      if (open < 0.5) meta.colliders.push(meta.makeCollider());
     } else if (o.type === 'french' || o.type === 'door') {
       const leaves = o.type === 'french' && w > 1.2 ? 2 : 1;
       const lw = w / leaves;
@@ -174,7 +198,7 @@ export function buildShell(ctx) {
         leafs.push({ hinge, sign: i === 0 ? 1 : -1 });
       }
       const door = { o, g, leafs, w, h, open: o.open ?? (o.type === 'door' ? 1 : 0), target: 0, colliders: [] };
-      door.target = door.open; doors.push(door);
+      door.target = door.open; doors.push(door); meta.door = door;
       const setPose = () => { for (const L of door.leafs) L.hinge.rotation.y = -L.sign * door.open * Math.PI * 0.5; };
       door.setPose = setPose; setPose();
       door.world = new THREE.Vector3(); g.updateMatrixWorld(); g.localToWorld(door.world.set(w / 2, 1, 0));
@@ -186,7 +210,9 @@ export function buildShell(ctx) {
       const pg = new THREE.Group();
       const panel = box(w, h, 0.05, w / 2, h / 2, zSet + 0.05, M.garageDoor); pg.add(panel);
       const nGroove = 5; for (let i = 1; i < nGroove; i++) pg.add(box(w, 0.012, 0.012, w / 2, (h * i) / nGroove, zSet + 0.02, M.blackMetal));
-      g.add(pg); ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.05);
+      g.add(pg); pg.userData.keep = true; pg.name = 'garagedoor:' + o.id; // src/building rolls it up (2 meshes per door)
+      { const grooves = pg.children.slice(1); if (grooves.length > 1) { const gs = grooves.map(b => { b.updateMatrix(); return b.geometry.clone().applyMatrix4(b.matrix); }); const one = new THREE.Mesh(mergeBoxes(gs), M.blackMetal); one.castShadow = true; one.receiveShadow = true; for (const b of grooves) pg.remove(b); pg.add(one); } }
+      meta.zSet = zSet; meta.panel = pg; meta.makeCollider = () => ctx.phys.boxLocal(g, w / 2, h / 2, zSet, w / 2, h / 2, 0.05); meta.colliders.push(meta.makeCollider());
     }
   }
 
@@ -210,7 +236,7 @@ export function buildShell(ctx) {
       const oneStorey = level === 0 && !edgeOnPoly(a, b, P.EXT[1]);
       const top = oneStorey ? 3.30 : y1;
       // NOTE face A (on the outer line) must be exterior: segBox's group 0 is face A; swap materials.
-      wallRun(level, a, b, n, P.EXT_T, level === 0 ? y0 : P.LEVELS[1].floor, top, [mats[1], mats[0], mats[2]], false);
+      wallRun(level, a, b, n, P.EXT_T, level === 0 ? y0 : P.LEVELS[1].floor, top, [mats[1], mats[0], mats[2]], false, `x${level}-${i}`, mats !== wallMatsExt ? false : true);
     }
   }
   // ---- interior walls
@@ -220,7 +246,7 @@ export function buildShell(ctx) {
     for (const wdef of P.INT_WALLS[level]) {
       const t = wdef.t || P.INT_T; const a = wdef.a, b = wdef.b;
       const dx = b[0] - a[0], dz = b[1] - a[1]; const L = Math.hypot(dx, dz);
-      wallRun(level, a, b, [-dz / L, dx / L], t, lf, top, wallMatsInt, true);
+      wallRun(level, a, b, [-dz / L, dx / L], t, lf, top, wallMatsInt, true, wdef.id, false);
     }
   }
 
@@ -293,7 +319,7 @@ export function buildShell(ctx) {
   // ---- roofs
   if (!ctx.skipRoofs) for (const r of P.ROOFS) buildRoof(r, root, ctx);
 
-  return { root, doors };
+  return { root, doors, panels, openings };
 }
 
 function near(p, q) { return Math.abs(p[0] - q[0]) < 0.02 && Math.abs(p[1] - q[1]) < 0.02; }

@@ -1,6 +1,6 @@
 // Party games UI (docs/UI_STYLE.md): dark #1e1e1e / #262626 surfaces, 6px radius, mono KEY::VALUE chips,
 // yellow #f2c84b accent, ease-out-expo rise/sink, per-character rolling numbers (rollText from src/net/motion.js).
-// Pieces: hub panel (J), invite card (bottom), 3-2-1 countdown, top-centre HUD chip row + leaderboard,
+// Pieces: hub panel (J / HUD controller button), ready-up lobby (full-width bottom panel), invite card (bottom), teleport veil, 3-2-1 countdown, top-centre HUD chip row + leaderboard,
 // seeker blackout overlay, end-screen scoreboard, small toast, floating "+$5,000" texts.
 import { rollText } from '../net/motion.js';
 
@@ -100,6 +100,52 @@ const CSS = `
 .pg-float { position: fixed; left: 0; top: 0; z-index: 40; pointer-events: none; font: 600 15px/1 var(--mono); letter-spacing: -0.4px; color: #f7f7f7;
   text-shadow: 0 2px 10px rgba(0,0,0,.55); white-space: nowrap; will-change: transform, opacity; }
 .pg-float.me { color: var(--acc); font-size: 20px; }
+/* ---- games hub: registry cards (3 columns), LIVE badge */
+#pg-panel { width: min(940px, calc(100vw - 32px)); margin-left: calc(min(940px, calc(100vw - 32px)) / -2); }
+.pg-grid { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 860px) { .pg-grid { grid-template-columns: 1fr 1fr; } }
+.pg-card .badge { position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 2px; background: var(--chip); border: var(--hair);
+  font: 600 10px/1 var(--mono); letter-spacing: -0.4px; color: var(--tx); animation: pg-badge .4s var(--eo) both; }
+.pg-card .badge i { width: 6px; height: 6px; border-radius: 50%; background: #3ddc84; animation: pg-pulse 2s infinite; }
+.pg-card .row { flex-wrap: wrap; }
+.pg-ico svg { width: 18px; height: 18px; }
+/* ---- ready-up lobby (full-width bottom panel, non-modal: you can keep walking) */
+#pg-lobby { position: fixed; left: 16px; right: 16px; bottom: 64px; z-index: 55; background: var(--bg); border: var(--hair); border-radius: 6px; padding: 14px 16px;
+  box-shadow: 0 2px 6px -2px rgba(0,0,0,.2), 0 24px 60px rgba(0,0,0,.45); box-sizing: border-box; overflow: hidden; }
+#pg-lobby::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .06; background-image: var(--pg-grain); }
+.pg-lb-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.pg-lb-title { font-size: 26px; font-weight: 500; letter-spacing: -0.055em; line-height: 1; }
+.pg-lb-title .roll-c { line-height: 1; }
+.pg-lb-chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.pg-lb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.pg-lc { background: var(--surf); border: var(--hair); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 9px; box-shadow: 0 2px 6px -2px rgba(0,0,0,.2);
+  animation: pg-lc-in .5s var(--eo) both; transition: border-color .25s var(--es); }
+@keyframes pg-lc-in { from { opacity: 0; transform: translateY(6%) scale(.96) } to { opacity: 1; transform: none } }
+.pg-lc.ready { border-color: rgba(61,220,132,.28); }
+.pg-lc.me .pg-lc-name { color: var(--acc); }
+.pg-lc-top { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.pg-av { width: 30px; height: 30px; border-radius: 50%; flex: none; background: hsl(var(--h) 62% 58%); box-shadow: inset 0 -6px 10px rgba(0,0,0,.25), 0 0 0 1px rgba(247,247,247,.08);
+  display: grid; place-items: center; font: 600 12px/1 var(--mono); color: #1e1e1e; }
+.pg-lc-name { font-size: 15px; font-weight: 500; letter-spacing: -0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-lc-top .who { min-width: 0; flex: 1; }
+.pg-seg { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 2px; border-radius: 6px; background: var(--chip); border: var(--hair); }
+.pg-seg .pg-pill { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc(50% - 2px); border-radius: 4px; background: rgba(247,247,247,.08); box-shadow: 0 0 0 1px rgba(247,247,247,.04);
+  transition: transform .4s var(--eo), background .25s var(--es); }
+.pg-lc.ready .pg-seg .pg-pill { transform: translateX(100%); background: rgba(61,220,132,.16); }
+.pg-seg span.o { position: relative; text-align: center; padding: 4px 0; font: 600 10px/1.2 var(--mono); letter-spacing: -0.4px; color: var(--tx3); transition: color .25s var(--es);
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.pg-lc:not(.ready) .pg-seg span.o.w { color: var(--tx); }
+.pg-lc.ready .pg-seg span.o.r { color: #3ddc84; }
+.pg-seg .chk { width: 11px; height: 11px; transform: scale(0); opacity: 0; transition: transform .45s cubic-bezier(.34,1.8,.5,1), opacity .2s var(--es); }
+.pg-lc.ready .pg-seg .chk { transform: scale(1); opacity: 1; }
+.pg-lb-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.pg-lb-btns { margin-left: auto; display: flex; gap: 6px; }
+#pg-lobby button.go { background: #3ddc84; color: #10241a; } #pg-lobby button.go:hover { background: #52e394; }
+/* veil (teleport fade) */
+#pg-veil { position: fixed; inset: 0; z-index: 70; background: #0b0b0b; opacity: 0; pointer-events: none; transition: opacity .26s var(--es), backdrop-filter .26s var(--es); }
+#pg-veil.on { opacity: 1; }
+body.watching #pg-lobby { display: none; }
+@media (prefers-reduced-motion: reduce) { .pg-lc { animation: none; } .pg-seg .pg-pill, .pg-seg .chk { transition: none; } }
 body.watching #pg-hud { display: none; }
 @media (prefers-reduced-motion: reduce) { .pg-stage, .pg-stage.on { transform: none !important; } .pg-chips .pg-chip, .pg-row { animation: none; } .pg-dot { animation: none; } }
 `;
@@ -115,8 +161,12 @@ const ICONS = {
   hide: '<path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="10" cy="10" r="2"/><path d="M3.5 16.5l13-13"/>',
   tag: '<circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="2.5"/>',
   chairs: '<path d="M6 3.5v13M14 3.5v13M6 9.5h8M6 12.5h8M6 3.5h8"/>',
+  pool: '<circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="2.6"/><path d="M8.9 8.9h1.6l-1 2.4"/>',
+  pingpong: '<circle cx="8" cy="8" r="5"/><path d="M11.5 11.5l4.5 4.5"/><circle cx="15.5" cy="5" r="1.4"/>',
+  games: '<path d="M6.2 6.5h7.6a3.4 3.4 0 0 1 3.3 2.7l.8 4.1a2 2 0 0 1-3.4 1.7l-1.9-2h-5.2l-1.9 2a2 2 0 0 1-3.4-1.7l.8-4.1a3.4 3.4 0 0 1 3.3-2.7z"/><path d="M6.5 9v2.4M5.3 10.2h2.4"/><circle cx="13.2" cy="9.6" r=".5"/><circle cx="14.6" cy="11" r=".5"/>',
 };
-export const icon = (k) => `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || ''}</svg>`;
+export const ICON_PATHS = ICONS;
+export const icon = (k) => `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k] || ICONS.games}</svg>`;
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const chip = (k, v, cls = '') => `<span class="pg-chip ${cls}"><span class="k">${esc(k)}::</span><span class="v">${esc(v)}</span></span>`;
 
@@ -125,8 +175,8 @@ export function buildUI() {
   const root = document.createElement('div'); root.id = 'pg';
   root.style.setProperty('--pg-grain', grainURL());
   root.innerHTML = `
-    <div id="pg-panel" class="pg-stage" role="dialog" aria-label="Party games">
-      <div class="pg-head"><div><div class="pg-h1" id="pg-h1">Party games</div><div class="pg-sub" id="pg-sub"></div></div>
+    <div id="pg-panel" class="pg-stage" role="dialog" aria-label="Games">
+      <div class="pg-head"><div><div class="pg-h1" id="pg-h1">Games</div><div class="pg-sub" id="pg-sub"></div></div>
         <button type="button" class="ghost" id="pg-x" title="Close (J / Esc)" aria-label="Close"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 2l10 10M12 2L2 12"/></svg></button></div>
       <div class="pg-grid" id="pg-grid"></div>
       <div class="pg-foot"><span id="pg-note" class="mono"></span><span class="mono"><kbd>J</kbd> <span class="k">CLOSE</span></span></div>
@@ -141,11 +191,17 @@ export function buildUI() {
       <div class="pg-rows" id="pg-rows"></div>
       <div class="pg-end-foot"><span id="pg-end-worth"></span><button type="button" id="pg-end-x">Close <kbd>J</kbd></button></div>
     </div>
+    <div id="pg-lobby" class="pg-stage" role="dialog" aria-label="Ready up">
+      <div class="pg-lb-head"><span class="pg-dot"></span><div><div class="mono" id="pg-lb-kicker"></div><div class="pg-lb-title" id="pg-lb-title"></div></div><div class="pg-lb-chips" id="pg-lb-chips"></div></div>
+      <div class="pg-lb-cards" id="pg-lb-cards"></div>
+      <div class="pg-lb-foot"><span class="mono" id="pg-lb-hint"></span><div class="pg-lb-btns"><button type="button" class="pri" id="pg-lb-ready">Ready <kbd>J</kbd></button><button type="button" id="pg-lb-leave">Leave</button><button type="button" id="pg-lb-start" class="go">Start now</button></div></div>
+    </div>
+    <div id="pg-veil"></div>
     <div id="pg-toast" class="mono"></div>`;
   document.body.appendChild(root);
   const $ = (id) => document.getElementById(id);
   // nothing clicked or typed in the games UI reaches the game's own key / pointer handlers
-  for (const id of ['pg-panel', 'pg-invite', 'pg-end']) {
+  for (const id of ['pg-panel', 'pg-invite', 'pg-end', 'pg-lobby']) {
     const el = $(id);
     el.addEventListener('pointerdown', (e) => e.stopPropagation()); el.addEventListener('click', (e) => e.stopPropagation());
   }
@@ -157,12 +213,16 @@ export function buildUI() {
     dark: $('pg-dark'), darkMsg: $('pg-dark-msg'), darkT: $('pg-dark-t'),
     end: $('pg-end'), endGame: $('pg-end-game'), endWin: $('pg-end-win'), rows: $('pg-rows'), worth: $('pg-end-worth'), endX: $('pg-end-x'),
     toast: $('pg-toast'),
+    lobby: $('pg-lobby'), lbKicker: $('pg-lb-kicker'), lbTitle: $('pg-lb-title'), lbChips: $('pg-lb-chips'), lbCards: $('pg-lb-cards'), lbHint: $('pg-lb-hint'),
+    lbReady: $('pg-lb-ready'), lbLeave: $('pg-lb-leave'), lbStart: $('pg-lb-start'), veil: $('pg-veil'),
   };
   const show = (el, on) => { if (el.classList.contains('on') === !!on) return; el.classList.toggle('on', !!on); };
   const setHtml = (el, h) => { if (el.__h !== h) { el.__h = h; el.innerHTML = h; } };
   let toastT = 0;
   function toast(text, ms = 2200) { els.toast.textContent = text; show(els.toast, true); clearTimeout(toastT); toastT = setTimeout(() => show(els.toast, false), ms); }
-  return { els, show, setHtml, toast, roll: rollText };
+  // veil(on): full-screen fade used around teleports (0.26 s)
+  const veil = (on) => els.veil.classList.toggle('on', !!on);
+  return { els, show, setHtml, toast, roll: rollText, veil };
 }
 
 // floating world-space texts (DOM, projected each frame)

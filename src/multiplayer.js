@@ -81,7 +81,7 @@ export async function start(ctx) {
   // ---------------------------------------------------------------- remote players
   function addRemote(id, msg) {
     const body = phys.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(msg.p[0], msg.p[1] + 0.83, msg.p[2]));
-    const collider = phys.world.createCollider(R.ColliderDesc.capsule(0.55, 0.28).setFriction(0), body);
+    const collider = phys.world.createCollider(R.ColliderDesc.capsule(0.55, 0.28).setFriction(0).setActiveCollisionTypes(R.ActiveCollisionTypes.DYNAMIC_DYNAMIC | R.ActiveCollisionTypes.DYNAMIC_FIXED | R.ActiveCollisionTypes.KINEMATIC_FIXED), body); // no kinematic-vs-kinematic contacts: a passenger's capsule inside a driven car launched it (src/cars/)
     let seed = 0; for (const ch of id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
     const name = clean(msg.n, 24) || 'Guest';
     const creature = createAvatar(ctx, { hue: msg.h ?? 0.5, name, local: false, seed: (seed % 9973) + 3 });
@@ -310,5 +310,14 @@ export async function start(ctx) {
   try { const { startParty } = await import('./party/index.js'); api.party = startParty(ctx, api); } catch (e) { console.warn('[party] not started:', e); }
   try { api.games = (await import('./games/index.js')).startGames(ctx, api); } catch (e) { console.warn('[games] not started:', e); }
   try { api.avatars = startAvatarSync(ctx, api); } catch (e) { console.warn('[avatars] not started:', e); }
+  // 2026-11-08 batch: each module owns its own channel(s) and works solo too
+  try { ctx.damage?.attachNet(api); } catch (e) { console.warn('[damage] net not attached:', e); }
+  try { api.sky = (await import('./sky/index.js')).startSkySync?.(ctx, api) || null; } catch (e) { console.warn('[sky] not started:', e); }
+  try { api.taps = (await import('./taps/index.js')).startTaps?.(ctx, api) || null; } catch (e) { console.warn('[taps] not started:', e); }
+  try { api.emotes = (await import('./emotes.js')).startEmotes?.(ctx, api) || null; } catch (e) { console.warn('[emotes] not started:', e); }
+  try { api.cars = (await import('./cars/index.js')).startCars?.(ctx, api) || null; } catch (e) { console.warn('[cars] not started:', e); }
+  try { api.smash = (await import('./smash/index.js')).startSmash?.(ctx, api) || null; } catch (e) { console.warn('[smash] not started:', e); }
+  try { if (new URLSearchParams(location.search).get('building') !== '0') api.building = (await import('./building/index.js')).startBuilding?.(ctx, api) || null; } catch (e) { console.warn('[building] not started:', e); }
+  try { api.cold = (await import('./cold/index.js')).startCold?.(ctx, api) || null; } catch (e) { console.warn('[cold] not started:', e); }
   return api;
 }

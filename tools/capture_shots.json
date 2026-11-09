@@ -1,0 +1,69 @@
+{
+  "_doc": "Shot list for tools/capture.mjs (before/after comparisons). World metres, y up (see src/plan.js). Stills: pos/look/fov (vertical deg, 16:9 frame). player: third-person over-the-shoulder shot (feet pos, yaw 0 = facing -z, pitch). params: extra URL query the newer site understands (older versions ignore it). after_only: skipped by --set=before. Videos: keys = [{pos, look, fov?}], Catmull-Rom over pos and look, eased over the whole duration.",
+  "stills": [
+    { "name": "front_street", "pos": [15.0, 0.75, -17.2], "look": [12.8, 2.7, 4.0], "fov": 52 },
+    { "name": "driveway_garage", "pos": [21.5, 0.75, -9.2], "look": [16.4, 1.35, 0.35], "fov": 56 },
+    { "name": "front_porch", "pos": [8.4, 0.85, -3.6], "look": [9.8, 1.65, 4.4], "fov": 56 },
+    { "name": "foyer_stairs", "pos": [9.75, 1.45, 5.05], "look": [10.0, 2.0, 12.0], "fov": 66 },
+    { "name": "family_room", "pos": [3.26, 1.66, 13.72], "look": [5.96, 1.42, 16.7], "fov": 70 },
+    { "name": "kitchen", "pos": [20.03, 1.38, 13.75], "look": [19.67, 0.98, 18.7], "fov": 63 },
+    { "name": "dining", "pos": [10.0, 1.6, 17.85], "look": [13.3, 1.0, 14.0], "fov": 64 },
+    { "name": "primary_bedroom", "pos": [14.3, 4.78, 11.95], "look": [11.65, 4.6, 16.19], "fov": 66 },
+    { "name": "primary_bath_vanity", "pos": [19.7, 4.8, 19.95], "look": [19.0, 4.65, 14.5], "fov": 66 },
+    { "name": "bathB_shower", "pos": [20.14, 4.66, 6.22], "look": [21.84, 4.5, 8.4], "fov": 76 },
+    { "name": "pool_deck_house", "pos": [13.5, 1.3, 30.4], "look": [10.5, 2.6, 18.0], "fov": 58 },
+    { "name": "pool_canyon", "pos": [9.0, 1.45, 20.9], "look": [11.0, 0.1, 45.0], "fov": 60 },
+    { "name": "canyon_trees", "pos": [8.0, 1.2, 31.0], "look": [4.0, -3.5, 42.0], "fov": 50 },
+    { "name": "side_yard", "pos": [-4.5, 1.3, 2.0], "look": [1.0, 1.0, 16.0], "fov": 60 },
+    { "name": "upstairs_hall", "pos": [8.64, 4.8, 4.92], "look": [9.3, 4.8, 11.0], "fov": 62 },
+    { "name": "street_neighbour", "pos": [11.0, 0.75, -7.4], "look": [15.0, 0.4, -24.6], "fov": 58 },
+    { "name": "tp_foyer", "player": { "pos": [9.7, 0.05, 6.4], "yaw": 3.14159, "pitch": -0.08 } },
+    { "name": "tp_pool_deck", "player": { "pos": [5.0, 0.3, 21.6], "yaw": -1.07, "pitch": -0.15 } },
+    { "name": "tp_driveway", "player": { "pos": [15.5, -0.5, -4.5], "yaw": 2.9, "pitch": -0.05 } },
+
+    { "name": "front_street_night", "after_only": true, "params": "tod=22:00", "pos": [15.0, 0.75, -17.2], "look": [12.8, 2.7, 4.0], "fov": 52 },
+    { "name": "front_street_sunset", "after_only": true, "params": "tod=19:15", "pos": [15.0, 0.75, -17.2], "look": [12.8, 2.7, 4.0], "fov": 52 },
+    { "name": "front_street_rain", "after_only": true, "params": "weather=rain", "pos": [15.0, 0.75, -17.2], "look": [12.8, 2.7, 4.0], "fov": 52 },
+    { "name": "front_street_storm", "after_only": true, "params": "weather=storm", "pos": [15.0, 0.75, -17.2], "look": [12.8, 2.7, 4.0], "fov": 52 },
+    { "name": "pool_deck_house_night", "after_only": true, "params": "tod=22:00", "pos": [13.5, 1.3, 30.4], "look": [10.5, 2.6, 18.0], "fov": 58 },
+    { "name": "pool_deck_house_sunset", "after_only": true, "params": "tod=19:15", "pos": [13.5, 1.3, 30.4], "look": [10.5, 2.6, 18.0], "fov": 58 },
+    { "name": "pool_deck_house_rain", "after_only": true, "params": "weather=rain", "pos": [13.5, 1.3, 30.4], "look": [10.5, 2.6, 18.0], "fov": 58 },
+    { "name": "pool_deck_house_storm", "after_only": true, "params": "weather=storm", "pos": [13.5, 1.3, 30.4], "look": [10.5, 2.6, 18.0], "fov": 58 },
+    { "name": "kitchen_night", "after_only": true, "params": "tod=22:00", "pos": [20.03, 1.38, 13.75], "look": [19.67, 0.98, 18.7], "fov": 63 },
+    { "name": "kitchen_sunset", "after_only": true, "params": "tod=19:15", "pos": [20.03, 1.38, 13.75], "look": [19.67, 0.98, 18.7], "fov": 63 },
+    { "name": "kitchen_rain", "after_only": true, "params": "weather=rain", "pos": [20.03, 1.38, 13.75], "look": [19.67, 0.98, 18.7], "fov": 63 },
+    { "name": "kitchen_storm", "after_only": true, "params": "weather=storm", "pos": [20.03, 1.38, 13.75], "look": [19.67, 0.98, 18.7], "fov": 63 }
+  ],
+  "videos": [
+    { "name": "vid_street_to_door", "duration": 8, "fov": 58, "keys": [
+      { "pos": [15.5, 0.75, -17.0], "look": [12.5, 2.6, 4.0] },
+      { "pos": [12.6, 0.8, -10.5], "look": [11.0, 2.2, 4.4] },
+      { "pos": [10.4, 1.15, -3.5], "look": [9.9, 1.9, 4.4] },
+      { "pos": [9.85, 1.55, 1.9], "look": [9.8, 1.6, 4.43] } ] },
+    { "name": "vid_walkthrough", "duration": 10, "fov": 66, "keys": [
+      { "pos": [9.2, 1.6, 5.3], "look": [9.2, 1.5, 12.0] },
+      { "pos": [8.95, 1.6, 10.8], "look": [8.4, 1.4, 16.5] },
+      { "pos": [9.6, 1.6, 14.7], "look": [4.8, 1.4, 17.4] },
+      { "pos": [11.2, 1.6, 15.6], "look": [15.0, 1.2, 15.6] },
+      { "pos": [15.6, 1.6, 15.2], "look": [19.5, 1.1, 17.5] },
+      { "pos": [18.0, 1.55, 14.4], "look": [19.8, 1.0, 19.5] } ] },
+    { "name": "vid_pool_orbit", "duration": 9, "fov": 60, "keys": [
+      { "pos": [1.6, 2.3, 21.6], "look": [10.0, 0.0, 25.0] },
+      { "pos": [3.0, 2.5, 30.0], "look": [10.0, 0.0, 25.0] },
+      { "pos": [10.0, 2.7, 31.6], "look": [10.0, 0.4, 24.0] },
+      { "pos": [17.6, 2.5, 30.0], "look": [10.0, 0.6, 22.5] },
+      { "pos": [19.6, 2.3, 23.4], "look": [10.0, 0.6, 22.5] } ] },
+    { "name": "vid_canyon_pan", "duration": 8, "fov": 52, "keys": [
+      { "pos": [5.5, 1.35, 30.6], "look": [-6.0, -2.0, 41.0] },
+      { "pos": [8.0, 1.35, 30.8], "look": [8.0, -3.0, 46.0] },
+      { "pos": [10.5, 1.35, 30.6], "look": [24.0, -2.0, 42.0] } ] },
+    { "name": "vid_primary_bed_pushin", "duration": 7, "fov": 64, "keys": [
+      { "pos": [9.2, 4.9, 12.2], "look": [12.6, 4.55, 16.6] },
+      { "pos": [10.4, 4.85, 13.2], "look": [12.9, 4.5, 16.8] },
+      { "pos": [11.8, 4.75, 14.3], "look": [13.35, 4.45, 17.2] } ] },
+    { "name": "vid_primary_bath_pushin", "duration": 7, "fov": 64, "keys": [
+      { "pos": [19.95, 4.85, 20.85], "look": [19.0, 4.65, 14.5] },
+      { "pos": [19.7, 4.8, 19.6], "look": [18.8, 4.6, 14.5] },
+      { "pos": [19.35, 4.75, 18.3], "look": [18.4, 4.55, 14.5] } ] }
+  ]
+}

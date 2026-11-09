@@ -19,7 +19,7 @@ import { N8AOPass } from 'n8ao';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { FXAAPass } from 'three/addons/postprocessing/FXAAPass.js';
 import { buildRoomProbes, bindRoomProbes } from './lighting.js';
-import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics, createBlobShadows, createGpuTimer } from './perf.js';
+import { createQuality, createShadowScheduler, guardMirrors, createLightPool, batchDynamics, createBlobShadows, createGpuTimer, VIDEO_KEYS, videoOverrides } from './perf.js';
 import { createCuller } from './cull.js';
 import * as P from './plan.js';
 import { PIECES } from './rooms/index.js';
@@ -35,6 +35,8 @@ import { fabric } from './kit/fabrics.js';
 import { settings } from './net/settings.js';
 import { rollText } from './net/motion.js';
 import { applyTheme } from './net/hud.js';
+import { createSky, skyWanted } from './sky/index.js';
+import { patchOutputPass } from './look/film.js';
 
 const params = new URLSearchParams(location.search);
 const viewId = params.get('view'); const camParam = params.get('cam'); const topLevel = params.get('top');
@@ -84,7 +86,11 @@ const hemi = new THREE.HemisphereLight(0xeef3fa, 0xe8dccb, LIGHT.hemi); scene.ad
 
 // Exterior materials call kit.outdoor(mat) to use the real sky for reflections / ambient.
 const ENV = { outdoor: null, room: null, rotY: 0, pending: [] };
-function applyOutdoor(mat) { mat.envMap = ENV.outdoor; mat.envMapRotation = new THREE.Euler(0, ENV.rotY, 0); mat.needsUpdate = true; }
+// day/night + weather (src/sky): walk mode only. It owns the sky (a dome instead of scene.background), ENV.outdoor
+// (a PMREM of that dome, re-captured as the sky changes: already world-aligned, so no envMapRotation), fog, sun,
+// hemi, exposure and the probe day/night mix. Photo shots and ?sky=0 keep the fixed morning look below.
+let SKY = null;
+function applyOutdoor(mat) { mat.envMap = ENV.outdoor; mat.envMapRotation = new THREE.Euler(0, SKY ? 0 : ENV.rotY, 0); SKY?.outdoorPatch(mat); mat.needsUpdate = true; }
 export function outdoor(mat) { if (ENV.outdoor) applyOutdoor(mat); else ENV.pending.push(mat); return mat; }
 async function loadEnvironment() {
   const hdr = await new HDRLoader().loadAsync('assets/ph/golden_gate_hills/golden_gate_hills_2k.hdr');
@@ -102,9 +108,10 @@ async function loadEnvironment() {
   // for the bounce light a raster renderer can't compute); exterior materials opt into the real
   // canyon sky via ctx.kit.outdoor(material) so facades, pool and terrain reflect the actual HDRI.
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const outdoor = pmrem.fromEquirectangular(hdr).texture;
+  const outdoor = SKY ? SKY.attachEnv(hdr, rotY) : pmrem.fromEquirectangular(hdr).texture;
   const room = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
-  scene.environment = room; scene.background = hdr;
+  scene.environment = room; scene.background = SKY ? null : hdr;
+  if (SKY) SKY.envReady();
   scene.environmentRotation.set(0, 0, 0); scene.backgroundRotation.set(0, rotY, 0);
   scene.environmentIntensity = LIGHT.envIntensity; scene.backgroundIntensity = LIGHT.bgIntensity;
   ENV.outdoor = outdoor; ENV.room = room; ENV.rotY = rotY; ENV.hdr = hdr;
@@ -127,40 +134,62 @@ function setupPost() {
   setAO(SHOT ? 'Ultra' : 'Medium');
   composer.addPass(n8); window.__n8 = n8;
   const b = LIGHT.bloom; passes.bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), b.strength, b.radius, b.threshold); composer.addPass(passes.bloom); // bright windows bloom a little, like a camera
-  { const bs = passes.bloom.setSize.bind(passes.bloom); passes.bloom.setSize = (w, h) => { const k = passes.bloom.shift || 1; bs(Math.max(1, w >> k), Math.max(1, h >> k)); }; } // half-res bloom chain (quarter at Ultra lever stage 1+): a soft glow, no visible loss
+  { const bs = passes.bloom.setSize.bind(passes.bloom); passes.bloom.setSize = (w, h) => { const k = passes.bloom.shift ?? 1; bs(Math.max(1, w >> k), Math.max(1, h >> k)); }; } // half-res bloom chain (quarter at Ultra lever stage 1+): a soft glow, no visible loss
   passes.out = new OutputPass(); // + camera-style white balance (luminance-preserving), before tone mapping
   passes.out.uniforms.wb = { value: new THREE.Vector3(...LIGHT.whiteBalance) };
   passes.out.material.fragmentShader = passes.out.material.fragmentShader
     .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse; uniform vec3 wb;')
     .replace('gl_FragColor = texture2D( tDiffuse, vUv );', 'gl_FragColor = texture2D( tDiffuse, vUv ); { float l0 = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ); vec3 b = gl_FragColor.rgb * wb; gl_FragColor.rgb = b * ( l0 / max( dot( b, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-5 ) ); }');
   passes.out.material.needsUpdate = true;
+  passes.film = patchOutputPass(passes.out); passes.film.set(renderer, params.get('film') || 'neutral'); // src/look/film.js: AgX + LUT grade (walk mode follows Settings > VIDEO)
   composer.addPass(passes.out);
   passes.smaa = new SMAAPass(W() * pr, H() * pr); composer.addPass(passes.smaa);
   passes.fxaa = new FXAAPass(); passes.fxaa.enabled = false; composer.addPass(passes.fxaa);
 }
-function setAO(mode) {
+function setAO(mode, { full = null, samples = 0 } = {}) {
   if (!n8) return;
   if (!mode) { n8.enabled = false; passes.render.enabled = true; return; }
   n8.enabled = true; passes.render.enabled = false;
   n8.setQualityMode(mode); // (vendor/n8ao.js is patched so half-res AO works on three r187)
-  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: !SHOT && ((mode !== 'High' && mode !== 'Ultra') || qStage >= 1), depthAwareUpsampling: true, denoiseRadius: 10 });
+  const half = full !== null ? !full : !SHOT && ((mode !== 'High' && mode !== 'Ultra') || qStage >= 1);
+  Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: half, depthAwareUpsampling: true, denoiseRadius: 10 });
+  if (samples) Object.assign(n8.configuration, { aoSamples: samples, denoiseSamples: 16, denoiseRadius: 8 });
 }
 // quality tier + render resolution (walk mode; see perf.js)
 // stage = Ultra 120 Hz lever (perf.js createQuality): 1 AO half-res + quarter bloom, 2 2k shadow map + slower door
 // shadow refresh, 3 small-object cull distance x0.6, 4 probe bake paused. The tier's look (every effect) stays.
-let qStage = 0;
-function applyQuality(tier, pr, stage = 0) {
-  qStage = stage;
+// opts.over = Settings > VIDEO 'custom' overrides (perf.js videoOverrides): an override always beats the lever.
+// opts.max = MAX tier (also photo mode): full-res AO with 64 samples, 4096 soft shadows, full-res bloom, SMAA at any
+// density, 6+4 pool lights, anisotropy 16 everywhere, far small-object cull distance.
+let qStage = 0; const VQ = { max: false, over: null, aniso: null };
+const SHADOW = { off: [0, 0], low: [2048, 2], high: [4096, 3], ultra: [4096, 5] };
+function setAniso(on) { // MAX: every texture at the GPU's max anisotropy (re-uploads them once); off: back as it was
+  const maxA = renderer.capabilities.getMaxAnisotropy();
+  if (on && !VQ.aniso) { VQ.aniso = new Map(); scene.traverse(o => { for (const m of [].concat(o.material || [])) for (const k in m) { const t = m[k]; if (t?.isTexture && !t.isRenderTargetTexture && !t.isCubeTexture && t.image && (t.anisotropy || 1) < maxA && !VQ.aniso.has(t)) { VQ.aniso.set(t, t.anisotropy || 1); t.anisotropy = maxA; t.needsUpdate = true; } } }); }
+  else if (!on && VQ.aniso) { for (const [t, a] of VQ.aniso) { t.anisotropy = a; t.needsUpdate = true; } VQ.aniso = null; }
+}
+function applyQuality(tier, pr, stage = 0, opts = {}) {
+  qStage = stage; const o = opts.over || null, MX = !!opts.max; VQ.max = MX; VQ.over = o;
   renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight, false);
-  const ms = stage >= 2 ? 2048 : 4096;
-  if (sun.shadow.mapSize.x !== ms) { sun.shadow.mapSize.set(ms, ms); sun.shadow.map?.dispose(); sun.shadow.map = null; renderer.shadowMap.needsUpdate = true; }
-  if (shadows) shadows.movingHz = stage >= 2 ? 4 : 8;
-  if (cull) cull.smallScale = stage >= 3 ? 0.6 : 1;
-  window.__probesPaused = stage >= 4;
+  const sh = MX ? SHADOW.ultra : o?.shadows ? SHADOW[o.shadows] : [stage >= 2 ? 2048 : 4096, 3];
+  const on = sh[0] > 0; if (sun.castShadow !== on) { sun.castShadow = on; renderer.shadowMap.needsUpdate = true; }
+  if (on && sun.shadow.mapSize.x !== sh[0]) { sun.shadow.mapSize.set(sh[0], sh[0]); sun.shadow.map?.dispose(); sun.shadow.map = null; renderer.shadowMap.needsUpdate = true; }
+  if (sun.shadow.radius !== sh[1] && on) { sun.shadow.radius = sh[1]; renderer.shadowMap.needsUpdate = true; }
+  if (shadows) shadows.movingHz = stage >= 2 && !o?.shadows && !MX ? 4 : 8;
+  if (cull) cull.smallScale = MX ? 1.6 : stage >= 3 ? 0.6 : 1;
+  window.__probesPaused = stage >= 4 && !MX;
+  const lp = ctxBase.lightPool; if (lp?.resize) { const want = MX ? [6, 4] : [3, 2]; if (lp.size[0] !== want[0] || lp.size[1] !== want[1]) lp.resize(...want); }
+  setAniso(MX);
   if (!composer) return;
-  setAO(tier.ao); passes.bloom.enabled = tier.bloom; passes.bloom.shift = stage >= 1 ? 2 : 1;
-  passes.smaa.enabled = tier.aa === 'smaa' && pr < 1.5; passes.fxaa.enabled = tier.aa === 'fxaa'; // dense pixels: SMAA buys little
+  if (MX) setAO('Ultra', { full: true, samples: 64 });
+  else if (o?.ao) setAO(o.ao === 'off' ? null : o.ao === 'full' ? 'High' : 'Medium', { full: o.ao === 'full' });
+  else setAO(tier.ao);
+  passes.bloom.enabled = MX ? true : o && o.bloom !== null ? o.bloom : tier.bloom;
+  passes.bloom.shift = MX ? 0 : stage >= 1 && !o ? 2 : 1;
+  const aa = MX ? 'smaa' : o?.aa || tier.aa;
+  passes.smaa.enabled = aa === 'smaa' && (pr < 1.5 || MX || !!o?.aa); passes.fxaa.enabled = aa === 'fxaa'; // dense pixels: SMAA buys little (tier presets)
   composer.setPixelRatio(pr); composer.setSize(innerWidth, innerHeight);
+  window.__video = { tier: MX ? 'MAX' : o ? 'Custom' : tier.name, pixelRatio: +pr.toFixed(3), ao: n8?.enabled ? (n8.configuration.halfRes ? 'half' : 'full') + ':' + n8.configuration.aoSamples : 'off', shadowMap: on ? sun.shadow.mapSize.x : 0, shadowRadius: sun.shadow.radius, bloom: passes.bloom.enabled ? (passes.bloom.shift === 0 ? 'full' : passes.bloom.shift === 1 ? 'half' : 'quarter') : 'off', aa: passes.smaa.enabled ? 'smaa' : passes.fxaa.enabled ? 'fxaa' : 'off', lights: lp?.size, stage };
 }
 
 // ---------------------------------------------------------------- boot
@@ -184,7 +213,10 @@ const ctxBase = {
 async function main() {
   status('Loading physics…');
   const phys = await createPhysics(); ctxBase.phys = phys; mark('physics');
+  // src/smash (movable / breakable world): watches piece builds so furniture can become physics objects BEFORE any merge
+  let smashPrep = null; if ((!SHOT || params.get('smash') === '1') && params.get('smash') !== '0') { /* ?smash=0: off (perf A/B) */ try { smashPrep = (await import('./smash/prep.js')).installPrep(ctxBase); ctxBase.smashPrep = smashPrep; } catch (e) { console.error('[smash prep]', e); window.__errors.push('smash prep: ' + e.message); } }
   status('Loading sky…');
+  if (skyWanted(params, SHOT)) { try { SKY = createSky(ctxBase); ctxBase.sky = SKY; } catch (e) { console.error('[sky]', e); window.__errors.push('sky: ' + e.message); SKY = null; } }
   const envP = loadEnvironment();
   // import piece modules first so the shell knows which ceilings are custom
   const mods = {};
@@ -204,6 +236,14 @@ async function main() {
     catch (e) { console.error('[piece build]', p, e); window.__errors.push(p + ': ' + (e.stack || e.message)); }
   }));
   mark('pieces');
+  SKY?.preMerge(); // lantern positions etc. (before the merge flattens groups)
+  // lived-in extras (src/furnish/): walk mode only, so photo shots still compare against the staged listing photos
+  if (!SHOT || params.get('furnish') === '1') {
+    const root = new THREE.Group(); root.name = 'piece:furnish'; scene.add(root); const tb = performance.now();
+    try { const f = await import('./furnish/index.js'); await f.build?.({ ...ctxBase, phys: phys.tagged('piece:furnish'), root, piece: 'furnish' }); window.__timing['build:furnish'] = Math.round(performance.now() - tb); }
+    catch (e) { console.error('[furnish]', e); window.__errors.push('furnish: ' + (e.stack || e.message)); }
+  }
+  try { smashPrep?.afterPieces(scene); } catch (e) { console.error('[smash prep]', e); window.__errors.push('smash prep: ' + (e.stack || e.message)); }
   // global merge pass: the shell (never merged before: ~900 draws) + every piece again, now with identical
   // materials shared across objects (builders made many std({...}) twins), multi-material walls split by
   // material, faint glass merged per room. Roofs/soffits/fascia stay: pieces patch them by name later.
@@ -217,18 +257,20 @@ async function main() {
   // throwable props: one multi-draw per material instead of one draw per prop
   const propBatch = batchDynamics(scene, phys); ctxBase.propBatch = propBatch; window.__propBatch = { batches: propBatch.batches, instances: propBatch.instances };
   { const f = () => propBatch.sync(); f.__src = 'perf.js propBatch.sync'; updates.push(f); }
+  try { smashPrep?.afterMerge(scene, propBatch); } catch (e) { console.error('[smash prep]', e); window.__errors.push('smash prep: ' + (e.stack || e.message)); }
   await envP; mark('env');
   // per-room light probes with one bounce (see lighting.js). Photo shots wait for them; visitors start
   // walking right away while the probes bake in the background (rooms brighten up once they're done).
   // per-room light probes: bound now (final shader programs exist from the start), baked later
   let bound = null;
-  if (!params.get('noprobes')) { try { bound = bindRoomProbes(ctxBase); } catch (e) { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); } }
+  if (!params.get('noprobes')) { try { bound = bindRoomProbes(ctxBase, SKY ? { dual: SKY.dual } : undefined); } catch (e) { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); } }
   // walk mode: a small pool of real lights handed to the fixtures nearest the viewer (see perf.js)
   const pool = SHOT ? null : createLightPool(scene, { points: 3, spots: 2 });
   ctxBase.lightPool = pool;
   if (!SHOT) for (const m of guardMirrors(scene)) if (m.room) mirrorRooms.add(m.room);
-  const probesJob = () => !bound ? Promise.resolve() : bound.bake({ intensity: LIGHT.probeIntensity, onStatus: SHOT ? status : null, background: !SHOT,
-    beforeCapture: pool ? (pos, draw) => (cull ? cull.without(() => pool.around(pos, draw)) : pool.around(pos, draw)) : null })
+  const probeCapture = pool ? (pos, draw) => (cull ? cull.without(() => pool.around(pos, draw)) : pool.around(pos, draw)) : null;
+  const probesJob = () => !bound ? Promise.resolve() : (SKY ? SKY.bakeProbes(bound, probeCapture, LIGHT.probeIntensity) : bound.bake({ intensity: LIGHT.probeIntensity, onStatus: SHOT ? status : null, background: !SHOT,
+    beforeCapture: probeCapture }))
     .then(() => { shadows?.poke(); }).catch(e => { console.error('[probes]', e); window.__errors.push('probes: ' + e.message); });
   if (bound && SHOT) await probesJob();
   setupPost();
@@ -265,9 +307,14 @@ async function main() {
   }
 
   // ---- walk mode
-  const quality = createQuality({ renderer, apply: applyQuality, initial: (params.get('quality') || 'auto').toLowerCase() });
+  const qParam = (params.get('quality') || 'auto').toLowerCase();
+  const quality = createQuality({ renderer, apply: applyQuality, initial: qParam === 'max' ? 'ultra' : qParam });
+  if (qParam === 'max') quality.set('max');
   ctxBase.quality = quality; window.__quality = quality;
-  shadows = createShadowScheduler(renderer);
+  shadows = createShadowScheduler(renderer); ctxBase.shadows = shadows;
+  if (SKY) { try { await SKY.setup({ bound, lightPool: pool, shadowSched: shadows, quality }); } catch (e) { console.error('[sky setup]', e); window.__errors.push('sky setup: ' + (e.stack || e.message)); } }
+  // src/look: light shafts + dust, lawn grass, film look toggle (?look=0: off, for perf A/B)
+  if (params.get('look') !== '0') { try { const { createLook } = await import('./look/index.js'); ctxBase.look = createLook({ ...ctxBase, quality }, { film: params.get('film') ? null : passes.film }); } catch (e) { console.error('[look]', e); window.__errors.push('look: ' + (e.stack || e.message)); } }
   // room/portal culling (src/cull.js): walk mode only; photo shots never cull
   // the static sun shadow map is drawn with EVERY caster, culled or not: three builds the main-pass lists before
   // the shadow pass, so the camera may see layer 30 (= culled) just for the shadow pass. Culling therefore never
@@ -275,10 +322,23 @@ async function main() {
   { const sm = renderer.shadowMap, r0 = sm.render.bind(sm); sm.render = (lights, sc, cam) => { const had = cam.layers.isEnabled(30); if (cull?.enabled && !had) cam.layers.enable(30); try { r0(lights, sc, cam); } finally { if (!had) cam.layers.disable(30); } }; }
   if (!params.get('nocull')) { cull = createCuller({ scene, camera, phys, doors: ctxBase.doors || [], mirrorRooms }); cull.props = ctxBase.propBatch?.tracked || null; window.__cull = cull; }
   THREE.DefaultLoadingManager.onLoad = ((prev) => () => { prev?.(); shadows.poke(); })(THREE.DefaultLoadingManager.onLoad); // late model loads cast shadows too
-  const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => useNearestDoor(pos), onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => { const b = document.body.classList; return b.contains('ui-open') || b.contains('menu-open') || b.contains('paused'); } }, { spawn: SPAWN, yaw: Math.PI });
+  // E: look-at interactions first (src/interact.js: taps, cars, …), then the nearest door
+  const player = createPlayer({ ...ctxBase, dom: canvas, useNearest: (pos) => { if (ctxBase.interact?.use()) return; useNearestDoor(pos); }, onLockChange: (l) => document.body.classList.toggle('locked', l), uiBlocking: () => { const b = document.body.classList; return b.contains('ui-open') || b.contains('menu-open') || b.contains('paused'); } }, { spawn: SPAWN, yaw: Math.PI });
   ctxBase.player = player;
-  const S0 = settings.get(); player.state.sens = S0.sens;
-  if (!params.get('quality') && S0.quality !== 'auto') quality.set(S0.quality);
+  { const { createDamage } = await import('./damage.js'); ctxBase.damage = createDamage(ctxBase); } // shared material damage model (src/damage.js)
+  { const { createInteract } = await import('./interact.js'); const ix = createInteract({ ...ctxBase, player }); ctxBase.interact = ix; const f = (dt) => ix.update(dt); f.__src = 'interact.js'; updates.push(f); }
+  const S0 = settings.get(); player.state.sens = S0.sens; camera.fov = S0.fov || 70; camera.updateProjectionMatrix();
+  let photoMode = null; // P (src/photo), loaded on first use
+  // Settings > VIDEO (perf.js PRESETS): preset -> quality tier / MAX, 'custom' -> base tier + overrides; tree detail,
+  // view distance, field of view. Photo mode holds its own (MAX) config and re-applies these on exit.
+  const videoKey = (st) => JSON.stringify([st.quality, st.base, ...VIDEO_KEYS.map(k => st[k])]);
+  const applyVideo = (st, withQuality = !params.get('quality')) => {
+    if (photoMode?.active) return;
+    if (withQuality) { if (st.quality === 'custom') quality.set(st.base || 'high', videoOverrides(st)); else quality.set(st.quality); }
+    window.__trees?.setDetail(st.treeDetail, st.viewDist);
+  };
+  ctxBase.applyVideo = () => applyVideo(settings.get());
+  applyVideo(S0);
   let mp = null;
   try { const game = await import('./multiplayer.js'); mp = await game.start({ ...ctxBase, player }); } catch (e) { console.warn('[game] not loaded:', e.message); }
   // title menu over the live house (src/net/menu.js); ?room= joins directly, ?menu=0 plays solo
@@ -292,7 +352,7 @@ async function main() {
   function flyToSpawn() {
     const s = spawnFor(mp?.connected ? mp.selfId : 'local');
     player.teleport(s[0], s[1], s[2], Math.PI); player.state.pitch = -0.05; player.state.keys.clear(); player.state.thirdPerson = true; // Fortnite-style third person by default (V = first person)
-    const to = { pos: new THREE.Vector3(s[0], s[1] + 2.0, s[2] - 3.0), quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12, Math.PI, 0, 'YXZ')), fov: 70 };
+    const to = { pos: new THREE.Vector3(s[0], s[1] + 2.0, s[2] - 3.0), quat: new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.12, Math.PI, 0, 'YXZ')), fov: settings.get().fov || 70 };
     camTween = { a: camPose(), b: () => to, t: 0, dur: 2.2, then: () => { camView = 'play'; } }; camView = 'fly';
   }
   function flyToMenu() { player.state.keys.clear(); menuT0 = camT; camTween = { a: camPose(), b: () => orbitPose(camT), t: 0, dur: 2.0, then: () => { camView = 'menu'; } }; camView = 'fly'; }
@@ -306,15 +366,19 @@ async function main() {
   const { createHud } = await import('./net/hud.js');
   const hudUI = createHud({ quality, mp, menu, params }); hudStatus = (m) => hudUI.setStatus(m);
   const applySettings = (st) => { player.state.sens = st.sens; };
-  let lastQ = S0.quality; settings.onChange((st) => { applySettings(st); if (st.quality !== lastQ) { lastQ = st.quality; quality.set(st.quality); } });
+  let lastV = videoKey(S0), lastFov = S0.fov;
+  settings.onChange((st) => { applySettings(st); const k = videoKey(st); if (k !== lastV) { lastV = k; applyVideo(st, true); }
+    if (st.fov !== lastFov) { lastFov = st.fov; if (camView === 'play' && !photoMode?.active) { camera.fov = st.fov; camera.updateProjectionMatrix(); } } });
   if (camView === 'menu') menu.showMain();
   hudUI.setStatus('');
-  // P = path-traced photo mode (freezes the camera, accumulates samples until P again)
-  let photo = null;
+  // P = photo mode (src/photo): max graphics, free camera, accumulated AA / depth of field, filters, 2x PNG save.
+  // (The path tracer, src/pathtrace.js, is only used by shot mode's ?pt=.)
   addEventListener('keydown', async (e) => {
-    if (e.code !== 'KeyP' || (e.target && e.target.tagName === 'INPUT')) return;
-    if (!photo) { const { createPhotoMode } = await import('./pathtrace.js'); photo = createPhotoMode(ctxBase); }
-    if (photo.active) { photo.exit(); if (cull) cull.enabled = true; status(''); } else { if (cull) cull.enabled = false; status('Path tracing: building scene…'); await photo.enter({ onProgress: (v) => status('Path tracing: building scene ' + Math.round(v * 100) + '%') }); }
+    if (e.code !== 'KeyP' || e.repeat || (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range')) return;
+    const b = document.body.classList; if (menu.mode !== 'game' || b.contains('paused') || b.contains('menu-open') || (b.contains('ui-open') && !b.contains('photo')) || camView !== 'play') return;
+    if (!photoMode) { const { createPhotoMode } = await import('./photo/index.js');
+      photoMode = createPhotoMode({ ...ctxBase, player, quality, sky: SKY, getComposer: () => composer, renderScene: () => render(), applyVideo: ctxBase.applyVideo }); }
+    if (photoMode.active) photoMode.exit(); else photoMode.enter();
   });
   let last = performance.now(), t = 0, awakePrev = 0, lastWork = 0; const gpuT = createGpuTimer(renderer.getContext()); window.__gpuTimer = gpuT;
   let blobs = null; try { blobs = createBlobShadows({ scene, phys }); window.__blobs = blobs; } catch (e) { console.warn('[blobs]', e); }
@@ -322,14 +386,13 @@ async function main() {
   const frameFn = () => {
     if (window.__dbg.paused) { last = performance.now(); return; }
     const now = performance.now(); FLOG.buf[FLOG.n++ & 8191] = now - last; const dt = Math.min((now - last) / 1000, 0.1); last = now; t += dt;
-    if (photo && photo.active) { photo.render(); if (photo.ready) status('Photo mode (path traced) · ' + photo.samples + ' samples · P to exit'); return; }
     gpuT.begin();
     const pf = PROF.on; let tq = pf ? performance.now() : 0; const lap = (k) => { if (!pf) return; const n = performance.now(); PROF.add(k, n - tq); tq = n; };
     if (pf) PROF.frames++;
     quality.frame(dt * 1000, lastWork, gpuT.ms); lap('quality.frame');
     const doorsMoving = animateDoors(dt);
     camT += dt;
-    if (camView === 'play') { autoOpenDoors(player.position); player.update(dt); }
+    if (camView === 'play') { autoOpenDoors(player.position); player.update(dt); if (photoMode?.active) photoMode.drive(dt); }
     else if (camView === 'menu') menuCam(dt);
     else if (camView === 'fly') flyCam(dt);
     lap('player.update+doors');
@@ -337,13 +400,15 @@ async function main() {
     if (pf) for (const u of updates) { u(dt, t); lap('upd ' + (u.__src || 'main')); }
     else for (const u of updates) u(dt, t);
     pool?.update(dt, camera.position); lap('lightPool.update');
+    if (SKY) { SKY.afterPool(); SKY.step(dt); lap('sky'); }
     // static sun shadows (perf.js): doors re-render it while swinging; a prop going back to sleep pokes it once;
     // avatars and other movers have blob shadows instead
     let awake = 0; for (const d of phys.dynamics) if (!d.body.isSleeping()) awake++;
     if (awake < awakePrev) shadows.poke(); awakePrev = awake;
     blobs?.update(dt, () => shadows.poke());
     shadows.tick(doorsMoving); lap('shadows.tick+blobs');
-    if (pf) { const sh = renderer.shadowMap.needsUpdate; cull?.update(); lap('cull.update'); render(true); lap(sh ? 'render (incl. shadow refresh)' : 'render (no shadow)'); PROF.add('shadow refreshes/frame', sh ? 1 : 0); }
+    if (photoMode?.active) photoMode.render(() => render());
+    else if (pf) { const sh = renderer.shadowMap.needsUpdate; cull?.update(); lap('cull.update'); render(true); lap(sh ? 'render (incl. shadow refresh)' : 'render (no shadow)'); PROF.add('shadow refreshes/frame', sh ? 1 : 0); }
     else render();
     hud(player); lap('hud');
     gpuT.end(); lastWork = performance.now() - now;
@@ -439,7 +504,7 @@ function useNearestDoor(pos) {
 // but nobody should get stuck behind one.
 function autoOpenDoors(pos) {
   for (const d of ctxBase.doors || []) {
-    if (d.target > 0.5) continue;
+    if (d.target > 0.5 || d.noAuto) continue; // noAuto: closed on purpose with E (src/building clears it when you walk away)
     const near = Math.hypot(d.world.x - pos.x, d.world.z - pos.z) < 1.25 && Math.abs(d.world.y - (pos.y + 1)) < 1.2;
     if (near) { d.target = 1; if (d.collider) { ctxBase.phys.remove(d.collider); d.collider = null; } d.pendingClose = false; }
   }

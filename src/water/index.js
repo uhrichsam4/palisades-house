@@ -470,6 +470,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
   // ---- buoyancy (runs before each 60 Hz physics step)
   const floaters = []; let physHooked = false;
   function floatStep(dt) {
+    for (let i = floaters.length - 1; i >= 0; i--) { const f = floaters[i]; if (f.rec.dead || (f.rec.body?.isValid && !f.rec.body.isValid())) floaters.splice(i, 1); }
     for (const f of floaters) {
       const b = f.rec.body; const p = b.translation();
       if (!inside(p.x, p.z)) { f.prev = 0; continue; }

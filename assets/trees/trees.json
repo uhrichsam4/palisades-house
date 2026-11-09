@@ -1,0 +1,68 @@
+{
+ "oak": {
+  "crownR": 0.668,
+  "crownBase": 0.055,
+  "heightUnits": 56.34,
+  "tris": {
+   "0_bark": 2376,
+   "0_leaves": 3200,
+   "1_bark": 480,
+   "1_leaves": 800
+  }
+ },
+ "sycamore": {
+  "crownR": 0.553,
+  "crownBase": 0.107,
+  "heightUnits": 75.25,
+  "tris": {
+   "0_bark": 2016,
+   "0_leaves": 2240,
+   "1_bark": 450,
+   "1_leaves": 560
+  }
+ },
+ "pine": {
+  "crownR": 0.353,
+  "crownBase": 0.095,
+  "heightUnits": 52.8,
+  "tris": {
+   "0_bark": 1248,
+   "0_leaves": 1840,
+   "1_bark": 444,
+   "1_leaves": 640
+  }
+ },
+ "olive": {
+  "crownR": 0.7,
+  "crownBase": 0,
+  "heightUnits": 37.97,
+  "tris": {
+   "0_bark": 1740,
+   "0_leaves": 2016,
+   "1_bark": 432,
+   "1_leaves": 504
+  }
+ },
+ "bushA": {
+  "crownR": 0.626,
+  "crownBase": 0,
+  "heightUnits": 39.21,
+  "tris": {
+   "0_bark": 1112,
+   "0_leaves": 1152,
+   "1_bark": 252,
+   "1_leaves": 480
+  }
+ },
+ "bushB": {
+  "crownR": 0.67,
+  "crownBase": 0.275,
+  "heightUnits": 32.99,
+  "tris": {
+   "0_bark": 732,
+   "0_leaves": 864,
+   "1_bark": 112,
+   "1_leaves": 216
+  }
+ }
+}

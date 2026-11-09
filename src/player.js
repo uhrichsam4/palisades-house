@@ -5,6 +5,7 @@
 // (look direction + Space up / C down), dissolves into the pool and re-forms when it climbs out.
 // Walking into dynamic props shoves them (KCC applies impulses).
 // Seats (Re-create scenes, src/recreate.js): setSeat({pos, yaw, pose}) / setSeat(null); state.pose / state.seat.
+// setSeat({..., vehicle}) = driving/riding: WASD no longer stands you up; the vehicle module updates state.seat.pos/yaw every frame and calls setSeat(null) to get out.
 // state.frozen = true stops walking/jumping (video spots, src/videos.js, then drive the camera after update()).
 import * as THREE from 'three';
 import { createAvatar } from './avatar.js';
@@ -18,14 +19,25 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   const PIVOT = 1.55;             // third-person orbit pivot height
   const body = world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(spawn[0], spawn[1] + halfH + radius, spawn[2]));
   const collider = world.createCollider(R.ColliderDesc.capsule(halfH, radius).setFriction(0.0), body);
-  const cc = world.createCharacterController(0.02);
-  cc.enableAutostep(0.36, 0.15, true); cc.enableSnapToGround(0.3); cc.setMaxSlopeClimbAngle((50 * Math.PI) / 180); // step-up 0.36: stairs 0.197, theater riser 0.30, pool steps
+  // collision groups (physics.js GROUPS, src/smash): the capsule is PLAYER; the controller walks on player-only RAMPs over
+  // stairs and ignores PROPONLY colliders (real treads under a ramp, decor boxes) and anything whose filter drops PLAYER
+  // (a held prop, debris). Dynamic props are pushed, never climbed (no autostep onto a chair = no snagging/hops).
+  const GR = phys.GROUPS || { PLAYER: 0x2000, PROPONLY: 0x4000, RAMP: 0x8000, ALL: 0xFFFF };
+  const grp = (m, f) => ((m & 0xFFFF) << 16 | (f & 0xFFFF)) >>> 0;
+  collider.setCollisionGroups(grp(GR.PLAYER, GR.ALL));
+  const KCC_GROUPS = grp(GR.PLAYER, GR.ALL & ~GR.PROPONLY);
+  const CAM_GROUPS = grp(GR.ALL, GR.ALL & ~(GR.RAMP | GR.PROPONLY));
+  const kccSkip = new Set(); // collider handles the controller must not collide with (state.ignore: e.g. the prop in your hands)
+  const kccPred = (c) => !kccSkip.has(c.handle);
+  const cc = world.createCharacterController(0.025);
+  cc.enableAutostep(0.36, 0.15, false); cc.enableSnapToGround(0.42); cc.setSlideEnabled?.(true); cc.setMaxSlopeClimbAngle((50 * Math.PI) / 180); // step-up 0.36: stairs 0.197, theater riser 0.30, pool steps
   cc.setApplyImpulsesToDynamicBodies(true); cc.setCharacterMass(70);
 
   const state = {
     yaw, pitch: -0.05, facing: yaw, vy: 0, grounded: false, thirdPerson: true, emote: 0, keys: new Set(), locked: false, speed: 0,
     pos: new THREE.Vector3(spawn[0], spawn[1], spawn[2]), vel: new THREE.Vector3(), swimming: false, inWater: false, water: null, waterY: 0,
     camDist: 3.0, camWant: 3.0, jumpQueued: false, autopilot: null,
+    push: new THREE.Vector3(), aim: false, holding: false, ignore: kccSkip, // src/smash: knock-back velocity (decays), face the look direction, arms out, controller ignores
     pose: 'stand', seat: null, // seat = { pos:[x,y,z], yaw, pose } while sitting (see setSeat); pose goes out over the network
   };
   const me = identity();
@@ -40,9 +52,9 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     if (down && e.repeat) return;
     if (down && k === 'KeyV') state.thirdPerson = !state.thirdPerson;
     if (down && k === 'KeyE') ctx.useNearest?.(state.pos);
-    if (down && k === 'KeyB' && !state.frozen) state.emote = (state.emote + 1) % 1000; // wave (synced: src/multiplayer.js field e)
+    if (down && k === 'KeyB' && !state.frozen) state.emote = ((((state.emote / 4) | 0) + 1) % 250) * 4 + 1; // wave: counter seq*4 + kind 1 (H slick back = kind 2, src/emotes.js; synced: src/multiplayer.js field e)
     if (down && k === 'Space') state.jumpQueued = true;
-    if (down && state.seat && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) standUpReq = true;
+    if (down && state.seat && !state.seat.vehicle && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(k)) standUpReq = true;
   };
   let standUpReq = false;
   addEventListener('keydown', e => onKey(e, true)); addEventListener('keyup', e => onKey(e, false));
@@ -98,7 +110,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     const wishLen = Math.hypot(mx, mz);
     if (state.swimming) {
       // slow 3D swimming along the look direction, buoyancy holds the head at the surface
-      const sp = run ? 2.1 : 1.3; const cp = Math.cos(state.pitch), spch = Math.sin(state.pitch);
+      const sp = (run ? 2.1 : 1.3) * (state.speedMul ?? 1); const cp = Math.cos(state.pitch), spch = Math.sin(state.pitch);
       const wx = (-Math.sin(state.yaw) * cp) * mz + right.x * mx, wz = (-Math.cos(state.yaw) * cp) * mz + right.z * mx;
       let wy = state.thirdPerson ? 0 : spch * mz; // third-person: stay at the surface unless C/Ctrl dives (Space rises) if (k.has('Space')) wy += 1; if (k.has('KeyC') || k.has('ControlLeft')) wy -= 1;
       const a = 1 - Math.exp(-dt * 2.2);
@@ -122,7 +134,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       state.vy = THREE.MathUtils.clamp(state.vy, -2.5, 8);
       mvx = state.vel.x * dt; mvy = state.vy * dt; mvz = state.vel.z * dt;
     } else {
-      const sp = (run ? 5.2 : 2.6) * (state.inWater ? 0.6 : 1);
+      const sp = (run ? 5.2 : 2.6) * (state.inWater ? 0.6 : 1) * (state.speedMul ?? 1); // state.speedMul: src/cold (freezing slows you)
       const accel = state.grounded ? 12 : 2.5; const a = 1 - Math.exp(-dt * accel);
       state.vel.x += (wish.x * sp - state.vel.x) * a; state.vel.z += (wish.z * sp - state.vel.z) * a;
       if (climbOut > 0) { climbOut -= dt; state.vel.x = climbDir.x * 1.6; state.vel.z = climbDir.z * 1.6; }
@@ -131,8 +143,10 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       mvx = state.vel.x * dt; mvy = state.vy * dt; mvz = state.vel.z * dt;
     }
     state.jumpQueued = false;
+    // knock-back (a shove from another player, src/smash): added on top, decays in ~0.3 s
+    if (state.push.lengthSq() > 1e-4) { mvx += state.push.x * dt; mvz += state.push.z * dt; if (state.push.y > 0 && state.grounded) { state.vy = Math.max(state.vy, state.push.y); state.push.y = 0; } state.push.multiplyScalar(Math.exp(-dt * 6)); }
 
-    cc.computeColliderMovement(collider, { x: mvx, y: mvy, z: mvz });
+    cc.computeColliderMovement(collider, { x: mvx, y: mvy, z: mvz }, R.QueryFilterFlags.EXCLUDE_SENSORS, KCC_GROUPS, kccSkip.size ? kccPred : undefined);
     const m = cc.computedMovement(); const t = body.translation();
     let nx = t.x + m.x, ny = t.y + m.y, nz = t.z + m.z;
     if (ny < -30) { nx = spawn[0]; ny = spawn[1] + 1; nz = spawn[2]; state.vy = 0; }
@@ -152,13 +166,14 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     if (state.inWater && wt) { disturbT -= dt; if (disturbT <= 0 && state.speed > 0.25) { disturbT = 0.09; try { wt.w.disturb(p.x, p.z, 0.45, Math.min(1, state.speed * 0.35)); } catch {} } }
 
     // ---- facing: third-person turns toward travel, first-person = look yaw
-    if (state.thirdPerson) {
+    if (state.thirdPerson && state.aim) { let d = state.yaw - state.facing; d = Math.atan2(Math.sin(d), Math.cos(d)); state.facing += d * (1 - Math.exp(-dt * 14)); } // holding / punching: face where you look
+    else if (state.thirdPerson) {
       if (state.speed > 0.3) { const want = Math.atan2(-rvx, -rvz); let d = want - state.facing; d = Math.atan2(Math.sin(d), Math.cos(d)); state.facing += d * (1 - Math.exp(-dt * 9)); }
     } else state.facing = state.yaw;
 
     // ---- creature
     creature.setVisible(state.thirdPerson && state.camDist > 0.8);
-    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: state.facing, grounded: state.grounded, swimming: state.swimming, pose: 'stand', emote: state.emote });
+    creature.update(dt, { pos: state.pos, vel: state.velOut, yaw: state.facing, grounded: state.grounded, swimming: state.swimming, pose: 'stand', emote: state.emote, hold: state.holding });
 
     // ---- camera
     euler.set(state.pitch, state.yaw, 0, 'YXZ');
@@ -170,11 +185,11 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       back.set(0, 0, 1).applyEuler(euler);
       // over the shoulder: 0.38 m to the camera's right (ray-checked so it never pokes through a wall)
       { const rx = Math.cos(state.yaw), rz = -Math.sin(state.yaw); let so = 0.38;
-        const sh = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: rx, y: 0, z: rz }, camShape, 0.0, so, true, CAM_FLAGS, undefined, collider);
+        const sh = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: rx, y: 0, z: rz }, camShape, 0.0, so, true, CAM_FLAGS, CAM_GROUPS, collider);
         if (sh) so = Math.max(0, sh.time_of_impact - 0.04); shoulder += (so - shoulder) * (1 - Math.exp(-dt * 8));
         pivot2.set(pivot.x + rx * shoulder, pivot.y, pivot.z + rz * shoulder); }
       let d = state.camWant;
-      const hit = world.castShape({ x: pivot2.x, y: pivot2.y, z: pivot2.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, undefined, collider);
+      const hit = world.castShape({ x: pivot2.x, y: pivot2.y, z: pivot2.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, CAM_GROUPS, collider);
       if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04);
       state.camDist = d < state.camDist ? d : state.camDist + (d - state.camDist) * (1 - Math.exp(-dt * 3));
       // boxed in (back to a wall): fall back to an eye-level view instead of jamming the lens into the wall
@@ -230,7 +245,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
   function setSeat(seat) {
     if (seat) {
       if (!state.seat) preSeat = state.pos.clone();
-      state.seat = { pos: [...seat.pos], yaw: seat.yaw, pose: seat.pose || 'sit', bounds: seat.bounds };
+      state.seat = { pos: [...seat.pos], yaw: seat.yaw, pose: seat.pose || 'sit', bounds: seat.bounds, vehicle: seat.vehicle || null }; // vehicle: WASD drives (src/cars/) instead of standing up; the car moves seat.pos / seat.yaw
       state.pose = state.seat.pose; collider.setEnabled(false);
       state.pos.set(...seat.pos); state.vel.set(0, 0, 0); state.vy = 0; state.yaw = seat.yaw; state.facing = seat.yaw; state.pitch = -0.08;
       state.swimming = false; state.inWater = false; state.grounded = true; pivotInit = false;
@@ -253,7 +268,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     camera.position.set(s.pos[0], s.pos[1] + eye, s.pos[2]);
     if (state.thirdPerson) {
       back.set(0, 0, 1).applyEuler(euler); const piv = _v.copy(camera.position);
-      let d = state.camWant; const hit = world.castShape({ x: piv.x, y: piv.y, z: piv.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, undefined, collider);
+      let d = state.camWant; const hit = world.castShape({ x: piv.x, y: piv.y, z: piv.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_FLAGS, CAM_GROUPS, collider);
       if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04); state.camDist = d;
       camera.position.addScaledVector(back, d);
     }

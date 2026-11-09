@@ -19,6 +19,28 @@ export const TIERS = [
   { name: 'Low', ao: null, aa: 'fxaa', bloom: false, min: 0.5, max: 0.8 },
 ];
 
+// Video settings (src/net/settings.js keys; Settings > VIDEO). A preset sets every control; changing one control
+// makes it 'custom'. Tier presets ('auto' + TIERS) apply exactly the tier look + its levers (no overrides), so they
+// render as before; 'custom' = the base tier plus user overrides that the dynamic levers respect; 'max' = MAX tier.
+//   res: 'auto' (dynamic) | 50..200 (% of the device pixel ratio, fixed)   shadows: off|low|high|ultra
+//   ao: off|half|full   bloom: on|off   aa: off|fxaa|smaa   weatherDetail: low|high   treeDetail: low|medium|high
+//   viewDist: near|far   fov: 60..100
+export const VIDEO_KEYS = ['res', 'shadows', 'ao', 'bloom', 'aa', 'weatherDetail', 'treeDetail', 'viewDist', 'shafts', 'grass', 'film'];
+// src/look (read straight from settings by src/look/index.js; the live tier also gates them): shafts off|on, grass off|low|high, film neutral|agx
+export const PRESETS = {
+  auto: { res: 'auto', shadows: 'high', ao: 'half', bloom: 'on', aa: 'smaa', weatherDetail: 'high', treeDetail: 'medium', viewDist: 'far', shafts: 'off', grass: 'high', film: 'neutral' },
+  low: { res: 'auto', shadows: 'high', ao: 'off', bloom: 'off', aa: 'fxaa', weatherDetail: 'low', treeDetail: 'low', viewDist: 'near', shafts: 'off', grass: 'off', film: 'neutral' },
+  medium: { res: 'auto', shadows: 'high', ao: 'half', bloom: 'on', aa: 'fxaa', weatherDetail: 'high', treeDetail: 'medium', viewDist: 'far', shafts: 'off', grass: 'low', film: 'neutral' },
+  high: { res: 'auto', shadows: 'high', ao: 'half', bloom: 'on', aa: 'smaa', weatherDetail: 'high', treeDetail: 'medium', viewDist: 'far', shafts: 'off', grass: 'high', film: 'neutral' },
+  ultra: { res: 'auto', shadows: 'high', ao: 'full', bloom: 'on', aa: 'smaa', weatherDetail: 'high', treeDetail: 'medium', viewDist: 'far', shafts: 'off', grass: 'high', film: 'neutral' },
+  max: { res: 100, shadows: 'ultra', ao: 'full', bloom: 'on', aa: 'smaa', weatherDetail: 'high', treeDetail: 'high', viewDist: 'far', shafts: 'off', grass: 'high', film: 'neutral' },
+};
+// overrides for a 'custom' config (null = the tier decides). Base tier = the closest built-in look.
+export function videoOverrides(v) {
+  return { res: v.res === 'auto' ? null : Math.min(200, Math.max(50, +v.res || 100)), shadows: v.shadows || null, ao: v.ao || null,
+    bloom: v.bloom ? v.bloom === 'on' : null, aa: v.aa || null };
+}
+
 // Controller input per frame: frame(intervalMs, workMs?, gpuMs?) — rAF interval, CPU work of the frame, GPU time
 // (EXT_disjoint_timer_query_webgl2, may lag a few frames). The frame "cost" it regulates is the larger of CPU and
 // GPU work (and the interval itself once frames are clearly missed), so it reacts to GPU-bound frames under vsync.
@@ -40,9 +62,14 @@ export function createQuality({ renderer, apply, initial = 'auto', basePR = Math
   // frame-time target: the display interval (Ultra: 120 fps on >=100 Hz displays); a 60/120 cap (st.capMs) can only
   // relax it. Uncapped (capMs 0) keeps full quality unless frames exceed the display interval.
   const target = () => Math.max(isUltra() && refreshMs < 10 ? 1000 / 120 : refreshMs, st.capMs || 0);
-  const st = { get tier() { return TIERS[tier]; }, get tierIndex() { return tier; }, get scale() { return scale; }, get pixelRatio() { return basePR * scale; }, get hz() { return Math.round(1000 / refreshMs); },
-    capMs: 0, get stage() { return stage; }, get targetMs() { return target(); }, get costMs() { return ema; }, fps: 0, auto: !fixed, basePR };
-  const commit = () => { apply(TIERS[tier], basePR * scale, stage); lastChange = performance.now(); win.length = 0; goodFor = 0; ema = 0; emaN = 0; okSince = performance.now(); };
+  // max: MAX tier (no dynamic lowering, pixel ratio = min(dpr, 2)); over: custom overrides (null = none); hold: photo
+  // mode freezes the controller (nothing drops while a photo accumulates)
+  let max = false, over = null, hold = false;
+  const prOf = () => max ? basePR : over?.res ? Math.min(4, (devicePixelRatio || 1) * over.res / 100) : basePR * scale;
+  const st = { get tier() { return TIERS[tier]; }, get tierIndex() { return tier; }, get scale() { return scale; }, get pixelRatio() { return prOf(); }, get hz() { return Math.round(1000 / refreshMs); },
+    capMs: 0, get stage() { return stage; }, get targetMs() { return target(); }, get costMs() { return ema; }, fps: 0, auto: !fixed, basePR,
+    get max() { return max; }, get overrides() { return over; }, get hold() { return hold; }, set hold(v) { hold = !!v; }, get name() { return max ? 'MAX' : over ? 'Custom' : TIERS[tier].name; } };
+  const commit = () => { apply(TIERS[tier], prOf(), stage, { max, over }); lastChange = performance.now(); win.length = 0; goodFor = 0; ema = 0; emaN = 0; okSince = performance.now(); };
   commit();
   // display refresh = typical shortest rAF interval over 90 steady frames, on its own rAF chain (the render loop may
   // be capped or uncapped, so its intervals say nothing about the screen)
@@ -55,14 +82,14 @@ export function createQuality({ renderer, apply, initial = 'auto', basePR = Math
     const T = target();
     if (now - lastCheck < 250 || emaN < 8) return false; lastCheck = now;
     if (cost > T * 1.06) { okSince = now;
-      if (scale > ULTRA_FLOOR + 1e-3) { const over = cost / T; scale = Math.max(ULTRA_FLOOR, scale * Math.max(0.8, Math.min(0.97, 1 / Math.sqrt(over)))); return true; } // pixels ~ scale^2
+      if (!over?.res && scale > ULTRA_FLOOR + 1e-3) { const over = cost / T; scale = Math.max(ULTRA_FLOOR, scale * Math.max(0.8, Math.min(0.97, 1 / Math.sqrt(over)))); return true; } // pixels ~ scale^2
       if (stage < 4 && now - lastChange > 500) { stage++; return true; }
       return false;
     }
     if (cost < T * 0.8) {
       if (now - okSince < 2500) return false; okSince = now;
       if (stage > 0) { stage--; return true; }
-      if (scale < TIERS[tier].max - 1e-3) { scale = Math.min(TIERS[tier].max, scale + 0.04); return true; }
+      if (!over?.res && scale < TIERS[tier].max - 1e-3) { scale = Math.min(TIERS[tier].max, scale + 0.04); return true; }
       return false;
     }
     okSince = now; return false;
@@ -70,7 +97,7 @@ export function createQuality({ renderer, apply, initial = 'auto', basePR = Math
   st.frame = (dtMs, workMs = 0, gpuMs = 0) => {
     if (!(dtMs > 0) || dtMs > 250) return; // tab switch / hitch: ignore
     fpsAcc += dtMs; fpsN++; if (fpsAcc > 500) { st.fps = Math.round(1000 * fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
-    if (!refreshKnown) return;
+    if (!refreshKnown || max || hold) return;
     const now = performance.now();
     const cost = Math.max(workMs || 0, gpuMs || 0, (workMs || gpuMs) ? (dtMs > target() * 1.4 ? dtMs * 0.85 : 0) : dtMs);
     ema = emaN === 0 ? cost : ema * 0.85 + cost * 0.15; emaN++;
@@ -85,7 +112,7 @@ export function createQuality({ renderer, apply, initial = 'auto', basePR = Math
     const avg = win.reduce((a, b) => a + b, 0) / win.length;
     if (avg > refreshMs * 1.2) { // missing frames: lower resolution first, then effects
       const t = TIERS[tier];
-      if (scale > t.min + 1e-3 && !isUltra()) scale = Math.max(t.min, scale - (avg > refreshMs * 1.8 ? 0.15 : 0.07));
+      if (!over?.res && scale > t.min + 1e-3 && !isUltra()) scale = Math.max(t.min, scale - (avg > refreshMs * 1.8 ? 0.15 : 0.07));
       else if (tier < TIERS.length - 1) { droppedFrom.set(tier, now); tier++; stage = 0; scale = Math.min(TIERS[tier].max, Math.max(TIERS[tier].min, scale)); }
       else return;
       commit();
@@ -93,19 +120,23 @@ export function createQuality({ renderer, apply, initial = 'auto', basePR = Math
       goodFor += win.length; win.length = 0;
       if (goodFor < 120) return;
       const t = TIERS[tier];
-      if (scale < t.max - 1e-3) scale = Math.min(t.max, scale + 0.05);
+      if (!over?.res && scale < t.max - 1e-3) scale = Math.min(t.max, scale + 0.05);
       else if (tier > 0 && now - (droppedFrom.get(tier - 1) || -1e9) > 20000) { tier--; scale = TIERS[tier].min; }
       else return;
       commit();
     }
   };
-  st.set = (name) => { // 'auto' or a tier name
-    if (name === 'auto') { st.auto = true; return; }
-    const i = TIERS.findIndex(t => t.name.toLowerCase() === String(name).toLowerCase()); if (i < 0) return;
+  st.set = (name, overrides = null) => { // 'auto', a tier name, 'max'; overrides (videoOverrides) = 'custom' on that base
+    name = String(name).toLowerCase();
+    if (name === 'max') { st.auto = false; max = true; over = null; tier = 0; stage = 0; scale = 1; commit(); return; }
+    const wasMax = max; max = false; const prevOver = over; over = overrides;
+    if (name === 'auto') { st.auto = true; if (wasMax || prevOver || overrides) { stage = 0; commit(); } return; }
+    const i = TIERS.findIndex(t => t.name.toLowerCase() === name); if (i < 0) return;
     st.auto = false; tier = i; stage = 0; scale = TIERS[i].max; commit();
   };
-  st.setScale = (v) => { st.auto = false; scale = v; if (isUltra()) stage = 0; commit(); };
-  st.cycle = () => { const order = ['auto', ...TIERS.map(t => t.name.toLowerCase())]; const cur = st.auto ? 'auto' : TIERS[tier].name.toLowerCase(); st.set(order[(order.indexOf(cur) + 1) % order.length]); };
+  st.setScale = (v) => { if (max) return; st.auto = false; scale = v; if (isUltra()) stage = 0; commit(); };
+  st.reapply = () => commit();
+  st.cycle = () => { const order = ['auto', ...TIERS.map(t => t.name.toLowerCase()), 'max']; const cur = max ? 'max' : st.auto ? 'auto' : TIERS[tier].name.toLowerCase(); st.set(order[(order.indexOf(cur) + 1) % order.length]); };
   return st;
 }
 
@@ -239,6 +270,15 @@ export function createLightPool(scene, { points = 3, spots = 2 } = {}) {
     return { light: l, src: null, fade: 0 };
   });
   const slots = { point: mk('point', points), spot: mk('spot', spots) };
+  // MAX / photo mode: a bigger pool (changing the light count recompiles every lit shader once — a one-off hitch)
+  function resize(np, ns) {
+    for (const [type, n] of [['point', np], ['spot', ns]]) {
+      const list = slots[type], want = Math.min(n, srcs.filter(s => type === 'point' ? s.isPointLight : s.isSpotLight).length);
+      while (list.length > want) { const sl = list.pop(); scene.remove(sl.light); if (sl.light.isSpotLight) scene.remove(sl.light.target); sl.light.dispose?.(); }
+      if (list.length < want) list.push(...mk(type, want - list.length));
+    }
+    acc = 1;
+  }
   const _c = new THREE.Vector3(), _t = new THREE.Vector3();
   const score = (s, pos, lv, room) => {
     const d = s.userData.pool.wp.distanceTo(pos), reach = s.distance > 0 ? s.distance : 12;
@@ -279,7 +319,7 @@ export function createLightPool(scene, { points = 3, spots = 2 } = {}) {
   }
   const upd = update;
   function updateTracked(dt, camPos, internal) { if (!internal) lastPos.copy(camPos); upd(dt, camPos); }
-  return { sources: srcs.length, slots, assign, update: updateTracked, around, snap(pos) { lastPos.copy(pos); assign(pos, true); upd(0, pos); } };
+  return { sources: srcs.length, slots, assign, update: updateTracked, around, resize, get size() { return [slots.point.length, slots.spot.length]; }, snap(pos) { lastPos.copy(pos); assign(pos, true); upd(0, pos); } };
 }
 
 // ---------------------------------------------------------------- dynamic props -> BatchedMesh
@@ -320,6 +360,7 @@ export function batchDynamics(scene, phys) {
     plain(on) { for (const b of batches) b.visible = !on; for (const t of tracked) t.o.visible = !!on; },
     sync(force = false) {
       for (const t of tracked) {
+        if (t.d.dead) continue;
         if (!force && t.d.body.isSleeping()) continue;
         t.o.updateWorldMatrix(true, false); t.b.setMatrixAt(t.id, t.o.matrixWorld);
       }

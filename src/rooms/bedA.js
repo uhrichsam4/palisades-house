@@ -465,7 +465,8 @@ export async function build(ctx) {
     kit.add(shade, hem, linenShade);
   }
   // ---- over-exposed daylight seen through the street window (photo: near white, faint pink / green)
-  {
+  // photo shots only: in walk mode it hid the real street view and glowed from outside day and night
+  if (ctx.shot) {
     const o = ctx.plan.OPENINGS.find(q => q.id === 'bA-front'); const r = kit.rng(4);
     const hz = kit.canvasTex(256, 128, (g, w, h) => { g.fillStyle = '#f6f5f2'; g.fillRect(0, 0, w, h); g.filter = 'blur(8px)'; for (let i = 0; i < 40; i++) { g.fillStyle = r() < 0.6 ? 'rgba(160,190,150,0.22)' : 'rgba(220,170,170,0.2)'; g.beginPath(); g.ellipse(r() * w, h * (0.35 + r() * 0.65), 8 + r() * 30, 6 + r() * 20, 0, 0, Math.PI * 2); g.fill(); } });
     const m = kit.add(bed, new THREE.PlaneGeometry(o.w - 0.04, o.head - o.sill - 0.04), std({ color: 0xffffff, map: hz, emissive: 0xffffff, emissiveMap: hz, emissiveIntensity: 1.25, roughness: 1, transparent: true, opacity: 0.8, depthWrite: false }), [o.at[0], Y + (o.sill + o.head) / 2, BED.z0 - 0.25], [0, 0, 0], { shadow: false });

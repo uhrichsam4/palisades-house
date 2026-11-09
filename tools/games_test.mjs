@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-// Party games test (src/games): ONE headless Chrome, three pages (A, B, C) in the same ?room= over the real relays.
-//   node tools/games_test.mjs [--full]   (default ?only=family,kitchen,pool,exterior,site&noprobes=1)
-// startGames() is injected with page.evaluate (multiplayer.js may not call it yet). Durations are shortened
-// through start(game, opts). Checks: Cash Grab (invite, sit out, contested pickup claimed once, scores and
+// Games hub + party games test (src/games): ONE headless Chrome, three pages (A, B, C) in the same ?room= over the
+// real relays.   node tools/games_test.mjs [--full]   (default ?only=family,kitchen,pool,exterior,site&noprobes=1)
+// Durations are shortened through start(game, opts). Round games start with the ready-up lobby: the starter is in
+// (WAITING), others see "… started X — press J to join", join + ready (J / __games.join() / ready()); all ready →
+// 3-2-1 → teleported. Checks: hub panel (registry cards incl. Pool + Ping-pong), lobby with 3 players (one READY,
+// one WAITING) + countdown + teleported start (Tag), Cash Grab (invite card, sit out, contested pickup claimed once, scores and
 // winner equal everywhere), Tag (transfer on touch, new It frozen, tag-back immunity), Hide & Seek (seeker
 // frozen + blackout, hider name tags hidden, tag converts, last hider wins), Musical Chairs (3 players /
 // 2 chairs: two sit, one out, next round 1 chair), host leaves mid-game (game continues). Screenshots in shots/.
@@ -26,7 +28,7 @@ await new Promise(r => server.listen(0, '127.0.0.1', r)); const port = server.ad
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function until(fn, ms, step = 300) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(step); } return null; }
-const IGNORE = /THREE\.Clock|GPU stall|WebGL: INVALID|Automatic fallback|relay|wss:|WebSocket|nostr|ERR_NAME|ERR_CONNECTION|ERR_INTERNET|ERR_BLOCKED|net::|AudioContext was not allowed|youtube|\[lobbies\]/i;
+const IGNORE = /\/src\/smash\/|\/src\/building\/|THREE\.Clock|GPU stall|WebGL: INVALID|Automatic fallback|relay|wss:|WebSocket|nostr|ERR_NAME|ERR_CONNECTION|ERR_INTERNET|ERR_BLOCKED|net::|AudioContext was not allowed|youtube|\[lobbies\]/i;
 const code = 'games' + Math.random().toString(36).slice(2, 7);
 const SHOTS = path.join(ROOT, 'shots');
 async function open(name) {
@@ -36,7 +38,7 @@ async function open(name) {
   page.on('pageerror', e => logs.push('pageerror: ' + e.message));
   await page.goto(`http://127.0.0.1:${port}/index.html?room=${code}${opt.full ? '' : '&only=family,kitchen,pool,exterior,site'}&noprobes=1`, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction(() => window.__ready === true && window.__player && window.__mp, null, { timeout: 180000, polling: 250 });
-  await page.evaluate(async () => { const m = await import('/src/games/index.js'); m.startGames(window.__mp.ctx, window.__mp); });
+  await page.waitForFunction(() => window.__games, null, { timeout: 30000, polling: 250 });
   return { name, page, logs };
 }
 const G = (P, expr) => P.page.evaluate(new Function('return (' + expr + ')'));
@@ -44,6 +46,13 @@ const st = (P) => P.page.evaluate(() => window.__games.state);
 const tp = (P, x, y, z, yaw = 0) => P.page.evaluate(([x, y, z, yaw]) => window.__player.teleport(x, y, z, yaw), [x, y, z, yaw]);
 const shot = async (P, n) => { await P.page.screenshot({ path: path.join(SHOTS, n) }); return 'shots/' + n; };
 const res = { test: 'games', room: code, shots: {} }; const checks = {}; let bad = false;
+// ready-up lobby helper: host starts, joiners join, readiers ready (host included if listed)
+async function lobby(host, game, opts, joiners, readiers) {
+  await host.page.evaluate(([g, o]) => window.__games.start(g, o), [game, opts]);
+  for (const P of joiners) { if (P === host) continue; await until(() => G(P, "window.__games.phase === 'lobby'"), 8000, 150); await P.page.evaluate(() => window.__games.join()); }
+  await until(async () => (await host.page.evaluate(() => window.__games.state?.players?.length || 0)) >= joiners.length, 8000, 150);
+  for (const P of readiers) { await until(() => G(P, 'window.__games.in'), 6000, 100); await P.page.evaluate(() => window.__games.ready(true)); }
+}
 try {
   const A = await open('A'), B = await open('B'), C = await open('C'); const ALL = [A, B, C];
   res.connected = !!(await until(async () => (await Promise.all(ALL.map(P => P.page.evaluate(() => window.__mp.members.size)))).every(n => n >= 2), 120000, 1000));
@@ -53,16 +62,47 @@ try {
 
   // ---------------------------------------------------------------- panel screenshot
   await A.page.keyboard.press('KeyJ'); await sleep(700);
-  checks.panelOpens = await G(A, "window.__games.panelOpen && document.querySelectorAll('#pg-grid .pg-card').length === 4");
+  await until(() => G(A, "document.querySelectorAll('#pg-grid .pg-card').length >= 6"), 8000, 200);
+  checks.panelOpens = await G(A, "window.__games.panelOpen && document.querySelectorAll('#pg-grid .pg-card').length >= 6 && /Pool/.test(document.getElementById('pg-grid').textContent) && /Ping-pong/.test(document.getElementById('pg-grid').textContent)");
+  res.cards = await G(A, "[...document.querySelectorAll('#pg-grid .pg-card h3')].map(h => h.textContent)");
   res.shots.panel = await shot(A, 'games_panel.png');
   await A.page.keyboard.press('KeyJ'); await sleep(400);
+  checks.hudButton = await G(A, "!!document.querySelector('#tb-btns button[title=Games]')");
+
+  // ---------------------------------------------------------------- READY-UP LOBBY (Tag): 3 players, one READY, one WAITING
+  await A.page.evaluate(() => window.__games.start('tag', { dur: 8000, lobby: 30000 }));
+  await until(() => G(B, "window.__games.phase === 'lobby'"), 8000, 150);
+  for (const P of [B, C]) { await P.page.keyboard.press('KeyJ'); } // J = join
+  await until(() => G(A, "window.__games.state.players.length === 3"), 8000, 150);
+  await until(() => G(B, "window.__games.in"), 6000, 100);
+  await B.page.keyboard.press('KeyJ'); // J again = ready
+  await until(() => G(A, "Object.values(window.__games.state.ready).filter(Boolean).length === 1"), 6000, 150);
+  await sleep(900);
+  const lb = await G(A, "({ on: document.getElementById('pg-lobby').classList.contains('on'), cards: document.querySelectorAll('#pg-lb-cards .pg-lc').length, ready: document.querySelectorAll('#pg-lb-cards .pg-lc.ready').length })");
+  res.lobby = lb; checks.lobby3 = lb.on && lb.cards === 3 && lb.ready === 1;
+  res.shots.lobby = await shot(A, 'games_lobby.png');
+  await until(() => G(C, "window.__games.in"), 6000, 100);
+  await A.page.evaluate(() => window.__games.ready(true)); await C.page.evaluate(() => window.__games.ready(true));
+  const cnt = await until(() => G(C, "window.__games.phase === 'count' && document.getElementById('pg-count').classList.contains('on')"), 6000, 50);
+  await sleep(350); res.shots.countdown = await shot(C, 'games_countdown.png'); checks.countdown = !!cnt;
+  await until(() => G(A, "window.__games.phase === 'play'"), 6000, 100); await sleep(900);
+  const sp = await G(A, "(() => { const s = window.__games.state; const p = window.__player.state.pos; const q = s.spawn[window.__games.me]; return { d: Math.hypot(p.x - q[0], p.z - q[2]), players: s.players.length }; })()");
+  res.teleported = sp; checks.teleported = sp.d < 1.5 && sp.players === 3;
+  res.shots.started = await shot(A, 'games_started.png');
+  await A.page.evaluate(() => window.__games.stop());
+  await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'end' || p === 'idle'), 8000);
+  for (const P of ALL) await P.page.evaluate(() => window.__games.dismissEnd());
+  await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'idle'), 20000, 500);
 
   // ---------------------------------------------------------------- CASH GRAB
-  await A.page.evaluate(() => window.__games.start('cash', { dur: 16000, invite: 4500 }));
+  await A.page.evaluate(() => window.__games.start('cash', { dur: 16000 }));
   const inv = await until(() => G(B, "document.getElementById('pg-invite').classList.contains('on') && document.getElementById('pg-inv-title').textContent"), 6000);
-  res.cashInvite = inv; checks.inviteShown = !!inv && /CASH GRAB/.test(inv);
+  res.cashInvite = inv; checks.inviteShown = !!inv && /CASH GRAB/.test(inv) && /press J to join/.test(inv);
   await sleep(500); res.shots.invite = await shot(B, 'games_invite.png');
-  await C.page.keyboard.press('KeyJ'); // C sits out
+  await B.page.evaluate(() => window.__games.join()); // C never joins (sits out)
+  await until(() => G(A, "window.__games.state.players.length === 2"), 6000, 150);
+  await until(() => G(B, 'window.__games.in'), 6000, 100);
+  await A.page.evaluate(() => window.__games.ready(true)); await B.page.evaluate(() => window.__games.ready(true));
   await until(async () => (await G(A, 'window.__games.phase')) === 'play', 12000);
   const s0 = await st(A); res.cashPlayers = s0.players.length; checks.sitOut = !s0.players.includes(ids.C) && s0.players.includes(ids.B);
   // contested pickup: A and B teleport onto the same stack at once
@@ -87,7 +127,7 @@ try {
   for (const P of ALL) await P.page.evaluate(() => window.__games.dismissEnd());
 
   // ---------------------------------------------------------------- TAG
-  await A.page.evaluate(() => window.__games.start('tag', { dur: 22000, invite: 2500 }));
+  await lobby(A, 'tag', { dur: 22000 }, ALL, ALL);
   await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'play'), 12000);
   await sleep(2300); // initial It freeze
   let ts = await st(A); const byId = Object.fromEntries(ALL.map(P => [ids[P.name], P]));
@@ -115,7 +155,7 @@ try {
   for (const P of ALL) await P.page.evaluate(() => window.__games.dismissEnd());
 
   // ---------------------------------------------------------------- HIDE & SEEK
-  await A.page.evaluate(() => window.__games.start('hide', { hide: 6000, seek: 40000, invite: 2500 }));
+  await lobby(A, 'hide', { hide: 6000, seek: 40000 }, ALL, ALL);
   await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'play'), 12000);
   await sleep(1200);
   let hs = await st(A); const SK = byId[hs.data.seekers[0]]; const H = ALL.filter(P => P !== SK);
@@ -138,7 +178,7 @@ try {
   for (const P of ALL) await P.page.evaluate(() => window.__games.dismissEnd());
 
   // ---------------------------------------------------------------- MUSICAL CHAIRS
-  await A.page.evaluate(() => window.__games.start('chairs', { invite: 2500, music: [3500, 4500], grab: 8000 }));
+  await lobby(A, 'chairs', { music: [3500, 4500], grab: 8000 }, ALL, ALL);
   await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'play'), 12000);
   await sleep(600);
   const musicOn = await Promise.all(ALL.map(P => G(P, 'window.__games.music')));
@@ -166,7 +206,7 @@ try {
 
   // ---------------------------------------------------------------- HOST LEAVES MID-GAME (Tag)
   await sleep(500);
-  await A.page.evaluate(() => window.__games.start('tag', { dur: 40000, invite: 2500 }));
+  await lobby(A, 'tag', { dur: 40000 }, ALL, ALL);
   await until(async () => (await Promise.all(ALL.map(P => G(P, 'window.__games.phase')))).every(p => p === 'play'), 12000);
   await sleep(1500);
   const errA = A.logs.slice(); await A.page.close();

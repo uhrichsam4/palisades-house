@@ -204,6 +204,7 @@ body.locked .tb-btns{opacity:.35;transition:opacity .3s var(--ease-soft)}
 #help.keys{display:flex;gap:4px;flex-wrap:wrap;text-shadow:none;opacity:1;transition:opacity .4s var(--ease-soft)}
 #help.keys .chip{background:var(--ui-surface);border:var(--ui-line)}
 body.locked #help.keys{opacity:.22}
+body.driving #help.keys{opacity:0;pointer-events:none}
 
 /* ---- crosshair, status line, presence card, countdown */
 #crosshair{width:4px;height:4px;margin:-2px;background:var(--ui-text);box-shadow:0 0 0 1px rgb(var(--ui-veil) / .5);transition:opacity .25s var(--ease-soft)}

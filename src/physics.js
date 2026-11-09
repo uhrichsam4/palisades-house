@@ -11,12 +11,28 @@ export async function createPhysics() {
   const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _m = new THREE.Matrix4();
   let acc = 0;
   const stepHooks = [];
+  // Impacts (2026-11-08): colliders that opt in with phys.watchImpacts(collider, threshold) report contact forces
+  // to every phys.onImpact(fn) listener as { a, b (collider handles), force (N), dir {x,y,z}, ownerA, ownerB }.
+  // phys.claim(collider, info) labels a collider (window glass, prop, rock, car…) so listeners know what was hit.
+  const impactHooks = []; const owners = new Map(); let eventQueue = null;
 
   const tags = new Map(); // collider handle -> who made it (for the walkability audit)
   let curTag = 'core';
   const fixed = (desc) => { const c = world.createCollider(desc); tags.set(c.handle, curTag); return c; };
+  // Removing a rigid body (breaks, debris, collapses) must also drop it from every per-frame list, or the next
+  // isSleeping()/translation() on the freed body panics inside Rapier ("unreachable", then "recursive use of an
+  // object" on every later call). Records get d.dead = true; anything that keeps its own list checks it.
+  { const rrb = world.removeRigidBody.bind(world);
+    world.removeRigidBody = (b) => {
+      if (!b) return;
+      for (let i = dynamics.length - 1; i >= 0; i--) if (dynamics[i].body === b) { dynamics[i].dead = true; dynamics.splice(i, 1); }
+      if (b.isValid && !b.isValid()) return;
+      try { rrb(b); } catch (e) { console.warn('[phys] removeRigidBody', e); }
+    };
+  }
   const phys = {
     RAPIER, world, dynamics,
+    alive: (d) => !!d && !d.dead && (!d.body?.isValid || d.body.isValid()),
     // wall piece from a segment (see shell.js): p0,p1 Vector2 on face line, N Vector2 normal, depth, y range
     boxFromSeg(p0, p1, N, depth, y0, y1) {
       const L = p0.distanceTo(p1); if (L < 0.01 || y1 - y0 < 0.01) return null;
@@ -99,11 +115,35 @@ export async function createPhysics() {
       return t;
     },
     onStep(fn) { stepHooks.push(fn); },
+    // Collision groups (src/smash, 2026-11-08). Rapier packs membership (high 16 bits) + filter (low 16 bits).
+    // Everything defaults to 0xFFFF/0xFFFF. PLAYER = the local player's capsule; RAMP = invisible player-only
+    // ramps over steps (every dynamic prop's filter drops it, so props land on the real treads); PROPONLY = colliders
+    // only props see (stair treads under a ramp; the player's character controller skips them).
+    GROUPS: { PLAYER: 0x2000, PROPONLY: 0x4000, RAMP: 0x8000, ALL: 0xFFFF },
+    groups(membership, filter = 0xFFFF) { return ((membership & 0xFFFF) << 16 | (filter & 0xFFFF)) >>> 0; },
+    setGroups(collider, membership, filter = 0xFFFF) { if (collider) collider.setCollisionGroups(phys.groups(membership, filter)); return collider; },
+    claim(collider, info) { if (collider) owners.set(collider.handle ?? collider, info); return collider; },
+    ownerOf(handle) { return owners.get(handle); },
+    unclaim(collider) { if (collider) owners.delete(collider.handle ?? collider); },
+    watchImpacts(collider, threshold = 50) { if (!collider) return; collider.setActiveEvents(collider.activeEvents() | RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS); collider.setContactForceEventThreshold(threshold); },
+    onImpact(fn) { impactHooks.push(fn); if (!eventQueue) eventQueue = new RAPIER.EventQueue(true); return () => { const i = impactHooks.indexOf(fn); if (i >= 0) impactHooks.splice(i, 1); }; },
     step(dt) {
       acc += Math.min(dt, 0.1); let n = 0;
-      while (acc >= world.timestep && n < 4) { for (const h of stepHooks) h(world.timestep); world.step(); acc -= world.timestep; n++; }
+      while (acc >= world.timestep && n < 4) {
+        for (const h of stepHooks) h(world.timestep);
+        if (eventQueue && impactHooks.length) {
+          world.step(eventQueue);
+          eventQueue.drainContactForceEvents((ev) => {
+            const a = ev.collider1(), b = ev.collider2(); const d = ev.maxForceDirection();
+            const e = { a, b, force: ev.totalForceMagnitude(), dir: { x: d.x, y: d.y, z: d.z }, ownerA: owners.get(a), ownerB: owners.get(b) };
+            for (const f of impactHooks) { try { f(e); } catch (err) { console.warn('[impact]', err); } }
+          });
+        } else world.step();
+        acc -= world.timestep; n++;
+      }
       const bm = new THREE.Matrix4(), pinv = new THREE.Matrix4();
       for (const d of dynamics) {
+        if (d.sleepSkip && d.body.isSleeping()) continue; // src/smash: resting props cost nothing (pose already written)
         const t = d.body.translation(), r = d.body.rotation();
         bm.compose(_v.set(t.x, t.y, t.z), _q.set(r.x, r.y, r.z, r.w), _s.set(1, 1, 1)).multiply(d.offset);
         // use the object's CURRENT parent (pieces may register props before adding them, or re-parent them)

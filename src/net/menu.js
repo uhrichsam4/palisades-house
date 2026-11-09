@@ -9,6 +9,12 @@ import { directory } from './lobbies.js';
 import { randomCode, cleanCode } from '../multiplayer.js';
 import { rollText, slidePill, stageSwap, ensureGrain } from './motion.js';
 import { themeToggle } from './hud.js';
+import { PRESETS } from '../perf.js';
+
+const VIDEO_CSS = `.gs-sec{font:600 10px/1 var(--ui-mono);letter-spacing:-.4px;color:var(--ui-text-3);text-transform:uppercase;padding-top:8px;border-top:var(--ui-line)}
+.gm-seg.gs-wrap{flex-wrap:wrap}.gm-seg.gs-wrap button,.gm-seg.gs-ctl button{font-size:13px;padding:4px 8px;flex:1 0 auto}
+.gs-row{display:flex;gap:8px;align-items:center}.gs-row .gm-seg{flex:0 0 auto}.gs-row input{flex:1;min-width:0;accent-color:var(--ui-accent)}.gs-row input:disabled{opacity:.35}
+.gs-live{display:flex;flex-wrap:wrap;gap:4px;min-height:19px}\n.gm-panel section[hidden]{display:none}`;
 
 const chip = (k, v) => { const c = document.createElement('span'); c.className = 'chip'; const kk = document.createElement('i'); kk.textContent = k + '::'; const vv = document.createElement('b'); vv.textContent = v; c.append(kk, vv); return c; };
 const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -52,9 +58,17 @@ export function createMenu({ mp, quality, perfHud, enterGame, toMenu }) {
       </section>
       <section data-panel="settings">
         <h2>Settings</h2>
-        <label class="gm-field"><span>Graphics quality</span><select id="gs-quality"><option value="auto">Auto</option><option value="ultra">Ultra</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+        <div class="gs-sec">Video</div>
+        <div class="gm-field"><span>Quality preset <b id="gs-presetv"></b></span><div class="gm-seg gs-wrap" id="gs-preset" role="radiogroup">${[['auto', 'Auto'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['ultra', 'Ultra'], ['max', 'MAX (slow)'], ['custom', 'Custom']].map(([v, t]) => `<button type="button" data-v="${v}" aria-pressed="false">${t}</button>`).join('')}</div></div>
+        <div class="gm-field"><span>Resolution scale <b id="gs-resv"></b></span><div class="gs-row"><div class="gm-seg" id="gs-resmode" role="radiogroup"><button type="button" data-v="auto" aria-pressed="true">Auto</button><button type="button" data-v="fixed" aria-pressed="false">Fixed</button></div><input id="gs-res" type="range" min="50" max="200" step="5" aria-label="Resolution scale"></div></div>
+        ${[['shadows', 'Shadows', [['off', 'Off'], ['low', 'Low'], ['high', 'High'], ['ultra', 'Ultra']]], ['ao', 'Ambient occlusion', [['off', 'Off'], ['half', 'Half-res'], ['full', 'Full-res']]], ['bloom', 'Bloom', [['off', 'Off'], ['on', 'On']]],
+          ['aa', 'Anti-aliasing', [['off', 'Off'], ['fxaa', 'FXAA'], ['smaa', 'SMAA']]], ['weatherDetail', 'Weather &amp; fog detail', [['low', 'Low'], ['high', 'High']]], ['treeDetail', 'Tree detail', [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']]],
+          ['viewDist', 'View distance', [['near', 'Near'], ['far', 'Far']]], ['shafts', 'Light shafts', [['off', 'Off'], ['on', 'On']]], ['grass', 'Lawn grass', [['off', 'Off'], ['low', 'Low'], ['high', 'High']]], ['film', 'Tone mapping', [['neutral', 'Neutral'], ['agx', 'AgX film']]]].map(([k, t, opts]) => `<div class="gm-field"><span>${t}</span><div class="gm-seg gs-ctl" data-k="${k}" role="radiogroup">${opts.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="false">${l}</button>`).join('')}</div></div>`).join('')}
+        <label class="gm-field"><span>Field of view <b id="gs-fovv"></b></span><input id="gs-fov" type="range" min="60" max="100" step="1"></label>
+        <div class="gs-live" id="gs-live"></div>
         <div class="gm-field"><span>Frame rate</span><div class="gm-seg" id="gs-cap" role="radiogroup"><button type="button" data-cap="60" aria-pressed="false">60</button><button type="button" data-cap="120" aria-pressed="false">120</button><button type="button" data-cap="uncapped" aria-pressed="true">Uncapped</button></div></div>
         <p class="gm-hint" id="gs-cap-hint" style="margin:-6px 0 4px;font-size:12px;opacity:.65">Renders as fast as your computer can. Your screen still shows up to its refresh rate. Uses more battery.</p>
+        <div class="gs-sec">General</div>
         <div class="gm-field"><span>Theme</span><div id="gs-theme"></div></div>
         <label class="gm-check"><input type="checkbox" id="gs-fps"> Show FPS</label>
         <label class="gm-field"><span>Mouse sensitivity <b id="gs-sensv"></b></span><input id="gs-sens" type="range" min="0.2" max="3" step="0.05"></label>
@@ -151,12 +165,34 @@ export function createMenu({ mp, quality, perfHud, enterGame, toMenu }) {
   // ---------------------------------------------------------------- settings
   function syncSettings() {
     const s = settings.get();
+    const segv = (g, v) => { if (!g) return; for (const b of g.querySelectorAll('button[data-v]')) b.setAttribute('aria-pressed', String(b.dataset.v === String(v))); g.__pill?.update(); };
+    segv($('gs-preset'), s.quality); $('gs-presetv').textContent = s.quality === 'custom' ? 'from ' + s.base : s.quality === 'max' ? 'very slow' : '';
+    for (const g of root.querySelectorAll('.gs-ctl')) segv(g, s[g.dataset.k]);
+    const fixed = s.res !== 'auto'; segv($('gs-resmode'), fixed ? 'fixed' : 'auto'); $('gs-res').disabled = !fixed; $('gs-res').value = fixed ? s.res : 100; $('gs-resv').textContent = fixed ? s.res + '%' : 'auto (dynamic)';
+    $('gs-fov').value = s.fov; $('gs-fovv').textContent = s.fov + '°';
     for (const b of root.querySelectorAll('[data-cap]')) b.setAttribute('aria-pressed', String(b.dataset.cap === s.fpsCap)); $('gs-cap-hint').hidden = s.fpsCap !== 'uncapped'; $('gs-cap').__pill?.update();
-    $('gs-quality').value = s.quality; $('gs-fps').checked = !!s.fps; $('gs-sens').value = s.sens; $('gs-vol').value = s.vol;
+    $('gs-fps').checked = !!s.fps; $('gs-sens').value = s.sens; $('gs-vol').value = s.vol;
     $('gs-sensv').textContent = (+s.sens).toFixed(2) + '×'; $('gs-volv').textContent = Math.round(s.vol * 100) + '%';
   }
   $('gs-theme').replaceWith(themeToggle('gm-theme'));
-  $('gs-quality').addEventListener('change', () => settings.set({ quality: $('gs-quality').value }));
+  // VIDEO: a preset writes every control; touching one control makes the set 'custom' (based on the current tier)
+  if (!document.getElementById('gs-video-css')) { const st = document.createElement('style'); st.id = 'gs-video-css'; st.textContent = VIDEO_CSS; document.head.appendChild(st); }
+  const baseOf = (s) => s.quality === 'custom' ? s.base : s.quality === 'max' ? 'ultra' : s.quality === 'auto' ? (quality?.tier?.name || 'High').toLowerCase() : s.quality;
+  const custom = (patch) => { const s = settings.get(); settings.set({ ...patch, quality: 'custom', base: baseOf(s) }); };
+  for (const g of [$('gs-preset'), $('gs-resmode'), ...root.querySelectorAll('.gs-ctl')]) slidePill(g, 'button');
+  $('gs-preset').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; const v = b.dataset.v;
+    if (v === 'custom') { const s = settings.get(); if (s.quality !== 'custom') settings.set({ quality: 'custom', base: baseOf(s) }); return; }
+    settings.set({ quality: v, ...PRESETS[v], ...(PRESETS[v] && v !== 'auto' && v !== 'max' ? { base: v } : {}) }); });
+  for (const g of root.querySelectorAll('.gs-ctl')) g.addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; const s = settings.get(); if (s[g.dataset.k] === b.dataset.v) return; custom({ [g.dataset.k]: b.dataset.v }); });
+  $('gs-resmode').addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (!b) return; const s = settings.get(); const want = b.dataset.v === 'auto' ? 'auto' : (s.res === 'auto' ? 100 : s.res); if (want !== s.res) custom({ res: want }); });
+  $('gs-res').addEventListener('change', () => custom({ res: +$('gs-res').value }));
+  $('gs-res').addEventListener('input', () => { $('gs-resv').textContent = $('gs-res').value + '%'; });
+  $('gs-fov').addEventListener('input', () => settings.set({ fov: +$('gs-fov').value }));
+  // live readout of what the renderer is actually doing (main.js window.__video)
+  const liveEl = $('gs-live'); let liveKey = '';
+  setInterval(() => { if (open !== 'settings' || panel.hidden) return; const v = window.__video; if (!v) return;
+    const items = [['GFX', v.tier], ['PR', v.pixelRatio.toFixed(2)], ['AO', v.ao], ['SHADOW', v.shadowMap || 'OFF'], ['BLOOM', v.bloom], ['AA', v.aa], ['LIGHTS', v.lights ? v.lights.join('+') : '-'], ['TREES', window.__trees ? window.__trees.detail + (window.__trees.far ? '' : '/near') : '-']];
+    const k = JSON.stringify(items); if (k === liveKey) return; liveKey = k; liveEl.textContent = ''; for (const [a, b] of items) liveEl.appendChild(chip(a, String(b))); }, 400);
   slidePill($('gs-cap'), 'button'); for (const b of root.querySelectorAll('[data-cap]')) b.addEventListener('click', () => settings.set({ fpsCap: b.dataset.cap }));
   $('gs-fps').addEventListener('change', () => settings.set({ fps: $('gs-fps').checked }));
   $('gs-sens').addEventListener('input', () => settings.set({ sens: +$('gs-sens').value }));

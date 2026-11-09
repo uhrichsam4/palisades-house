@@ -69,17 +69,39 @@ vec3 bpParallax( vec3 v ) {
   return d > 0.0 ? normalize( p + v * d - bpPos ) : v;
 }
 `;
-function boxProject(THREEmod, mat, box, probePos) {
+// dual (src/sky): every probe material also gets a second probe set baked at night with the lights on; the
+// IBL fetch becomes day * envDayK + night * envNightK (two shared uniforms the sky module drives).
+const DUAL_FUNC = `
+uniform samplerCube envNight; uniform float envDayK; uniform float envNightK;
+vec4 envDual( vec3 d, float lod ) { return textureLod( envMap, d, lod ) * envDayK + textureLod( envNight, d, lod ) * envNightK; }
+`;
+function boxProject(THREEmod, mat, box, probePos, dual) {
   const chunk = THREEmod.ShaderChunk.envmap_physical_pars_fragment;
   const key = 'reflectVec = transformDirectionByInverseViewMatrix( reflectVec, viewMatrix );';
   if (!chunk.includes(key)) return; // three changed its chunk: keep plain probes
-  const patched = chunk.replace(key, key + '\n\t\t\treflectVec = bpParallax( reflectVec );');
+  let patched = chunk.replace(key, key + '\n\t\t\treflectVec = bpParallax( reflectVec );');
+  const canDual = dual && patched.includes('textureLod( envMap, ');
+  if (canDual) patched = patched.split('textureLod( envMap, ').join('envDual( ').replace('#ifdef USE_ENVMAP', '#ifdef USE_ENVMAP\n' + DUAL_FUNC);
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.bpMin = { value: box.min }; sh.uniforms.bpMax = { value: box.max }; sh.uniforms.bpPos = { value: probePos };
+    if (canDual) { sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK; }
     sh.vertexShader = 'varying vec3 vBPWorld;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\n\tvBPWorld = worldPosition.xyz;');
     sh.fragmentShader = BP_FUNC + sh.fragmentShader.replace('#include <envmap_physical_pars_fragment>', patched);
   };
-  mat.customProgramCacheKey = () => 'bp1';
+  mat.customProgramCacheKey = () => (canDual ? 'bp2' : 'bp1');
+  if (canDual) mat.userData.dualEnv = true;
+}
+// day/night mix without box projection (note: three's default onBeforeCompile source is longer than 30 chars, so
+// the boxProject branch above never runs for plain materials; this keeps that look and only adds the mix)
+function dualOnly(THREEmod, mat, dual) {
+  const chunk = THREEmod.ShaderChunk.envmap_physical_pars_fragment;
+  if (!chunk.includes('textureLod( envMap, ')) return;
+  const patched = chunk.split('textureLod( envMap, ').join('envDual( ').replace('#ifdef USE_ENVMAP', '#ifdef USE_ENVMAP\n' + DUAL_FUNC);
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.envNight = mat.userData.envNight; sh.uniforms.envDayK = dual.envDayK; sh.uniforms.envNightK = dual.envNightK;
+    sh.fragmentShader = sh.fragmentShader.replace('#include <envmap_physical_pars_fragment>', patched);
+  };
+  mat.customProgramCacheKey = () => 'dn1'; mat.userData.dualEnv = true;
 }
 function roomBox(probe) {
   const r = P.ROOMS[probe.room]; const [x0, z0, x1, z1] = r.rect; const y0 = P.LEVELS[r.level].floor;
@@ -90,14 +112,15 @@ function roomBox(probe) {
 // Phase 1 (sync, at load): bind every interior mesh (or face group) to its room probe, cloning materials per
 // probe, with a same-size placeholder environment so the final shader programs exist from the start and can be
 // precompiled behind the loading screen. Phase 2 (bake): capture + swap textures only (no recompiles).
-export function bindRoomProbes(ctx, { size = 128 } = {}) {
+export function bindRoomProbes(ctx, { size = 128, dual = null } = {}) {
   const { renderer, scene } = ctx;
   const probes = probePoints();
   scene.updateMatrixWorld(true);
   const clones = new Map(); const bound = new Set();
   const pm = new THREE.PMREMGenerator(renderer);
   const placeholder = pm.fromScene(new RoomEnvironment(), 0.03, 0.1, 100, { size }).texture; pm.dispose();
-  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; c.envMap = placeholder; c.userData.baseEnvI = c.envMapIntensity ?? 1; if (!mat.onBeforeCompile || mat.onBeforeCompile.toString().length < 30) boxProject(THREE, c, roomBox(probe), probe.pos); clones.set(key, c); } return c; };
+  const cloneFor = (mat, probe) => { const key = mat.uuid + '|' + probe.id; let c = clones.get(key); if (!c) { c = mat.clone(); c.userData.probe = probe.id; c.envMap = placeholder; c.userData.baseEnvI = c.envMapIntensity ?? 1; if (dual) c.userData.envNight = { value: placeholder }; if (!mat.onBeforeCompile || mat.onBeforeCompile.toString().length < 30) boxProject(THREE, c, roomBox(probe), probe.pos, dual);
+      else if (dual && c.onBeforeCompile === THREE.Material.prototype.onBeforeCompile) dualOnly(THREE, c, dual); clones.set(key, c); } return c; };
   scene.traverse(o => {
     if (!o.isMesh || SKIP(o)) return;
     let p = o; while (p) { if (SKIP(p) || p.name === 'water' || p.name === 'avatar') return; p = p.parent; }
@@ -117,12 +140,14 @@ export function bindRoomProbes(ctx, { size = 128 } = {}) {
   });
   const used = probes.filter(p => bound.has(p));
   const byProbe = new Map(); for (const c of clones.values()) { const k = c.userData.probe; if (!byProbe.has(k)) byProbe.set(k, []); byProbe.get(k).push(c); }
-  return { probes: used, materials: clones.size, bake: (opts) => bakeProbes(ctx, used, byProbe, clones, { size, ...opts }) };
+  return { probes: used, materials: clones.size, list: [...clones.values()], bake: (opts) => bakeProbes(ctx, used, byProbe, clones, { size, ...opts }) };
 }
 
 // Phase 2. background=true renders one cube face per frame so walking stays smooth while rooms light up.
 // beforeCapture(pos, fn) lets the caller set up probe-local state (e.g. the light pool) around each face.
-async function bakeProbes(ctx, used, byProbe, clones, { size = 128, passes = 2, intensity = 1.0, onStatus, background = false, beforeCapture } = {}) {
+// target 'night' (src/sky): bake into the materials' envNight uniform instead of envMap; beforePass(pass) lets the
+// caller change the scene state between the two bounce passes.
+async function bakeProbes(ctx, used, byProbe, clones, { size = 128, passes = 2, intensity = 1.0, onStatus, background = false, beforeCapture, target = 'day', beforePass } = {}) {
   const { renderer, scene } = ctx; const t0 = performance.now();
   const rt = new THREE.WebGLCubeRenderTarget(size, { type: THREE.HalfFloatType, generateMipmaps: false });
   const cam = new THREE.CubeCamera(0.05, 400, rt);
@@ -130,7 +155,7 @@ async function bakeProbes(ctx, used, byProbe, clones, { size = 128, passes = 2, 
   let textures = new Map();
   const frame = () => new Promise(r => requestAnimationFrame(() => r()));
   for (let pass = 0; pass < passes; pass++) {
-    onStatus?.(`Lighting rooms… ${pass + 1}/${passes}`);
+    onStatus?.(`Lighting rooms… ${pass + 1}/${passes}`); beforePass?.(pass);
     renderer.shadowMap.needsUpdate = true;
     const next = new Map();
     for (const p of used) {
@@ -149,12 +174,13 @@ async function bakeProbes(ctx, used, byProbe, clones, { size = 128, passes = 2, 
       next.set(p.id, pmrem.fromCubemap(rt.texture).texture);
       if (!background && performance.now() - t0 > 200) await new Promise(r => setTimeout(r, 0));
     }
-    for (const [id, tex] of next) for (const m of byProbe.get(id) || []) { m.envMap = tex; m.envMapIntensity = m.userData.baseEnvI * intensity; }
+    if (target === 'night') { for (const [id, tex] of next) for (const m of byProbe.get(id) || []) if (m.userData.envNight) m.userData.envNight.value = tex; }
+    else for (const [id, tex] of next) for (const m of byProbe.get(id) || []) { m.envMap = tex; m.envMapIntensity = m.userData.baseEnvI * intensity; }
     for (const t of textures.values()) t.dispose(); textures = next;
   }
   rt.dispose(); pmrem.dispose();
   const info = { probes: used.length, materials: clones.size, ms: Math.round(performance.now() - t0) };
-  window.__probes = info; return info;
+  if (target === 'night') window.__probesNight = info; else window.__probes = info; return info;
 }
 
 // shot mode (photo renders): bind + bake synchronously

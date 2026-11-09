@@ -7,7 +7,9 @@
 import * as THREE from 'three';
 import { G, CENTER, STREET_Y, buildTerrain, padDist, fbm, vnoise, ridged, gully, ss } from './site/terrain.js';
 import { blobGeo, foliageMaterial, instances, palm, updateFloraLOD } from './site/flora.js';
+import { createTrees } from './site/trees.js';
 import { COURT, courtMaterials, buildCourt, fenceLine } from './site/court.js';
+import { buildSportsCourt } from '../games/court.js';   // bigger court: tennis + basketball + boxing ring + gate
 import { addHaze, skyDome, farRidges } from './site/sky.js';
 
 export const piece = { rooms: [], photos: ["p41", "p42", "p43", "p45"] };
@@ -21,7 +23,8 @@ export const views = {
 
 // turf (artificial grass) beyond the court's canyon end + the side strip from the pool lawn (p42)
 // (3.8 m strip between the picket fence and the court; at the far end it opens left along the court end)
-const TURF = [[19.8, 31.25], [23.6, 31.25], [23.6, 36.0], [43.6, 36.0], [43.6, 40.5], [24.6, 40.5], [23.75, 41.6], [23.75, 50.6], [19.8, 50.6]];
+// (the old court-end lawn z 36..40.5 is now inside the bigger court enclosure, src/games/court.js)
+const TURF = [[19.8, 31.25], [23.6, 31.25], [23.6, 41.6], [23.75, 41.6], [23.75, 50.6], [19.8, 50.6]];
 
 export async function build(ctx) {
   const { root, kit, phys } = ctx;
@@ -145,7 +148,7 @@ export async function build(ctx) {
 
   // ---------------------------------------------------------------- tennis court
   const CM = courtMaterials(kit);
-  buildCourt(kit, root, phys, CM, ctx);
+  buildSportsCourt(kit, root, phys, CM, ctx);
 
   // ---------------------------------------------------------------- turf strip + court-end lawn (p42)
   const rTu = kit.rng(12);
@@ -179,7 +182,6 @@ export async function build(ctx) {
   // low black chain-link: along the strip past the court corner, a short run across its far end, and the court-end lawn edge
   fenceLine(kit, root, phys, CM, [23.8, 40.6], [23.8, 50.65], 1.2, 'low', { spacing: 2.6 });
   fenceLine(kit, root, phys, CM, [19.75, 50.65], [23.8, 50.65], 1.2, 'low', { spacing: 2.0 });
-  fenceLine(kit, root, phys, CM, [23.8, 40.6], [43.6, 40.6], 1.2, 'low', { spacing: 2.6 });
   // clipped hedge on the turf side of the picket fence (p42): continuous, ~1.2 m, small glossy leaves
   { const hm = addHaze(foliageMaterial(kit)); hm.color.setHex(0x3f5a2a); hm.roughness = 0.6; hm.specularIntensity = 0.5;
     const hg = kit.rbox(0.8, 1.22, 19.3, 0.3, 4); hg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(hg.attributes.position.count * 3).fill(1), 3));
@@ -199,7 +201,10 @@ export async function build(ctx) {
   const SHRUB = [0x4a5a32, 0x41532d, 0x5c6240, 0x37492a, 0x6a6c4a, 0x52693a, 0x586341, 0x3e5429];
   const TREE = [0x34502a, 0x3e562b, 0x4b5d34, 0x5f6b45, 0x324625, 0x46633a];
   const near = [[], [], []], far = [], trees = [], trunks = [];
+  const real = [], rk = kit.rng(9917); // real branching trees + bushes (site/trees.js); `trees`/`trunks`/`near` stay as the blob fallback (?blobtrees=1)
   const pick = (a) => a[Math.floor(rnd() * a.length)];
+  // leaf tint for the textured bushes from the blob palette: keep its hue/lightness differences, centred on white
+  const bushTint = (hex) => { const c = new THREE.Color(hex), hsl = {}; c.getHSL(hsl); return new THREE.Color().setHSL(hsl.h + 0.015, Math.min(0.3, hsl.s * 0.5), 0.5 + (hsl.l - 0.3) * 0.9).getHex(); };
   const yardOk = (x, z) => x < -6 || x > 52 || (z < -20 && z > -60);
   const acrossView = (x, z) => x > -6 && x < 24 && z < -16 && z > -55;   // porch view across the street: no forest
   const okSpot = (x, z) => (padDist(x, z) > 0.4 || yardOk(x, z)) && !onHouse(x, z) && !inTurf(x, z) && !onStreet(x, z);
@@ -238,17 +243,18 @@ export async function build(ctx) {
     const y = H(x, z);
     trees.push({ x, y: y + ht * 0.3, z, s: [s, s * (0.8 + rnd() * 0.35), s], ry: rnd() * 6.3, color: pick(TREE) });
     trunks.push({ x, y, z, s: [s * 0.08, ht * 0.45, s * 0.08], ry: 0, color: 0x5a4c3e });
+    real.push({ x, y, z, h: ht * 0.3 + 1.9 * s, w: 2 * s, kind: rk() < 0.62 ? 'oak' : 'sycamore', color: TREE[trees.length % TREE.length], ry: trees[trees.length - 1].ry });
   }
   // yard trees around the court and side yards (p41 leafy tree behind the windscreen, p45)
-  const tree = (x, z, s, ht, color = pick(TREE)) => { const y = H(x, z);
+  const tree = (x, z, s, ht, color = pick(TREE), kind = null) => { const y = H(x, z);
     trees.push({ x, y: y + ht - 1.6 * s, z, s: [s, s * (1.0 + rnd() * 0.25), s], ry: rnd() * 6, color });
+    real.push({ x, y, z, h: Math.max(2.5, ht), w: 2.1 * s, color, ry: trees[trees.length - 1].ry,
+      kind: kind || (color === 0x2c3f2a || color === 0x26382a ? 'pine' : (color === 0x8a3a2c || color === 0x7a3428) ? 'oak' : rk() < 0.6 ? 'oak' : 'sycamore') });
     trunks.push({ x, y, z, s: [Math.max(0.15, s * 0.07), ht - 1.2 * s, Math.max(0.15, s * 0.07)], ry: 0, color: 0x5a4c3e }); };
-  for (const [x, z, s, ht] of [[46.5, 27, 2.4, 5.5], [46.8, 34.5, 2.8, 6], [-8, -10, 3.4, 7], [-8.5, 4, 3, 6], [-9, 22, 3.2, 6.5], [-6, 36, 3.6, 6.5]]) tree(x, z, s, ht);
+  for (const [x, z, s, ht] of [[48.8, 27, 2.4, 5.5], [49.0, 34.5, 2.8, 6], [-8, -10, 3.4, 7], [-8.5, 4, 3, 6], [-9, 22, 3.2, 6.5], [-6, 36, 3.6, 6.5]]) tree(x, z, s, ht);
   // silvery olives behind the tennis fence and at the end of the turf strip (p42 left)
   for (const [x, z, s, ht] of [[25.6, 43.0, 1.0, 4.2], [27.4, 46.6, 1.2, 4.6], [25.3, 49.2, 0.9, 3.8], [29.2, 42.0, 1.1, 4.4], [31.5, 45.0, 1.3, 4.8], [27.8, 52.8, 1.2, 4.0]]) {
-    const c = pick([0x76865c, 0x82906a, 0x6e7e56]); tree(x, z, s * 1.2, ht, c);   // loose, multi-lobed olive crowns down to the ground
-    for (let j = 0; j < 3; j++) { const a = rnd() * 6.3, r = s * (0.7 + rnd() * 0.5), xx = x + Math.cos(a) * r, zz = z + Math.sin(a) * r;
-      trees.push({ x: xx, y: H(x, z) + ht * (0.25 + rnd() * 0.35), z: zz, s: [s * 0.9, s * (0.8 + rnd() * 0.4), s * 0.9], ry: rnd() * 6, color: c }); } }
+    const c = pick([0x76865c, 0x82906a, 0x6e7e56]); tree(x, z, s * 1.6, ht, c, 'olive'); }   // loose, multi-stemmed olive crowns down to the ground
   // crown top about level with the pad (the slope falls away under it): the canopy you look out over
   const bankHt = (x, z, lo, hi) => Math.max(lo, Math.min(hi, G - H(x, z) - 1.0 - rnd() * 3.5));
   // mature trees packed around the lot and down the slopes (p45): oaks, conifers, a red-leaf tree
@@ -303,13 +309,28 @@ export async function build(ctx) {
   // low-poly stand-ins (same shapes at icosphere detail 0) for tiles away from the camera
   const shrubLo = [blobGeo(kit, 3, 6, 0), blobGeo(kit, 8, 7, 0, 0.8), blobGeo(kit, 15, 5, 0, 1.1)], crownLo = blobGeo(kit, 21, 8, 0, 0.8), lowLo = blobGeo(kit, 30, 1, 0, 0.9);
   const meshes = [instances(lowG, fol, farC, { lod: lowLo, lodDist: 220 })];
-  near.forEach((list, i) => meshes.push(instances(shrubG[i], fol, list, { shadow: true, lod: shrubLo[i], lodDist: 30 })));
   meshes.push(instances(lowG, fol, far, { lod: lowLo, lodDist: 120 }));
-  meshes.push(instances(crownG, fol, trees, { shadow: true, lod: crownLo, lodDist: 45 }));
   meshes.push(instances(shrubG[1], fol, hedge, { shadow: true, lod: shrubLo[1], lodDist: 30 }));
-  const bark = O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
-  const trunkG = kit.cyl(0.7, 1, 1, 7); trunkG.translate(0, 0.5, 0);
-  meshes.push(instances(trunkG, bark, trunks, { shadow: true }));
+  // near chaparral -> branching bushes (crown ~ the blob's footprint, a little taller: the blobs sat half buried)
+  near.forEach((list) => { for (const it of list) real.push({ x: it.x, y: it.y + 0.12 * it.s[1], z: it.z, h: Math.max(0.5, it.s[1] * 1.55), w: (it.s[0] + it.s[2]) * 0.95, ry: it.ry,
+    kind: rk() < 0.55 ? 'bushB' : 'bushA', color: bushTint(it.color) }); });
+  for (const it of real) if (!it.kind.startsWith('bush')) it.color = bushTint(it.color);
+  // cars drive the street band and the driveway (src/cars): no tree, bush or trunk collider there
+  const roadway = (x, z) => (z > -17.1 && z < -7.95 && x > -42 && x < 52) || (x > 11.0 && x < 28.6 && z > -8.6 && z < 1.0);
+  for (const L of [real, trunks, trees]) for (let i = L.length - 1; i >= 0; i--) if (roadway(L[i].x, L[i].z)) L.splice(i, 1);
+  let treesApi = null;
+  if (ctx.params?.get('blobtrees') !== '1') { try { treesApi = await createTrees(ctx, real, { haze: addHaze }); } catch (e) { console.error('[trees]', e); window.__errors?.push('trees: ' + (e.stack || e.message)); } }
+  if (!treesApi) { // fallback: the old blobs
+    near.forEach((list, i) => meshes.push(instances(shrubG[i], fol, list, { shadow: true, lod: shrubLo[i], lodDist: 30 })));
+    meshes.push(instances(crownG, fol, trees, { shadow: true, lod: crownLo, lodDist: 45 }));
+    const bark = O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }));
+    const trunkG = kit.cyl(0.7, 1, 1, 7); trunkG.translate(0, 0.5, 0);
+    meshes.push(instances(trunkG, bark, trunks, { shadow: true }));
+  } else {
+    window.__trees = treesApi; ctx.trees = treesApi;
+    try { const st = JSON.parse(localStorage.getItem('ph.settings') || '{}'); treesApi.setDetail(st.treeDetail || 'medium', st.viewDist !== 'near'); } catch {}
+    ctx.onUpdate((dt, t) => treesApi.update(dt, t));
+  }
   for (const m of meshes) { m.userData.keep = true; root.add(m); }
   ctx.onUpdate(() => updateFloraLOD(ctx.camera.position));
   // tree trunks are solid near the lot
