@@ -17,7 +17,7 @@ export const ownCeiling = ['bedA'];
 export const views = {
   // level cameras (real-estate photos keep verticals straight)
   p24: { pos: [11.89, 4.40, 5.39], look: [13.78, 4.243, 3.06], fov: 65 }, // 0.3 m closer, ~3 deg down
-  p25: { pos: [16.97, 4.66, 3.12], look: [15.68, 4.60, 1.59], fov: 72 },  // 0.5 m back, 0.3 m left
+  p25: { pos: [17.05, 4.66, 2.55], look: [15.70, 4.58, 1.10], fov: 72 },  /* stepped into the room: from z 3.12 the stub-end waffle towel filled the top-left */
   p26: { pos: [17.28, 4.50, 3.68], look: [15.51, 4.64, 3.50], fov: 72 },  // 0.3 m back, slight tilt up
 };
 
@@ -89,27 +89,31 @@ function fringeTex(kit) { // alpha fringe strands
     for (let x = 0; x < w; x += 2.2 + r() * 1.2) { const v = 220 + r() * 25; g.strokeStyle = `rgb(${v},${v - 4},${v - 12})`; g.lineWidth = 1.3; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (r() - 0.5) * 3, h * (0.75 + r() * 0.25)); g.stroke(); }
   });
 }
-function travertineTex(kit, seed = 13) { // pale greige vein-cut travertine: fine straight vertical striations + small dark pores; 1.2 m x 2.8 m slab
+function travertineTex(kit, seed = 13) { /* warm beige vein-cut travertine (p26): soft tonal bands, fine vertical grain, sparse pores; 1.2 m x 2.8 m slab */
   const r = kit.rng(seed);
   const draw = (bump) => (g, w, h) => {
-    g.fillStyle = bump ? '#808080' : '#d9c8b3'; g.fillRect(0, 0, w, h);
-    g.filter = 'blur(6px)';
-    for (let i = 0; i < 26; i++) { const x = r() * w, bw = 8 + r() * 60, lt = r() < 0.5; g.fillStyle = bump ? 'rgba(128,128,128,0)' : (lt ? 'rgba(236,226,212,0.35)' : 'rgba(186,166,142,0.28)'); g.fillRect(x, 0, bw, h); }
+    const rr = kit.rng(seed); /* same layout for colour + bump */
+    g.fillStyle = bump ? '#808080' : '#d9c3a5'; g.fillRect(0, 0, w, h);
+    /* soft horizontal banding (sediment layers): wide, low-contrast, blurred */
+    g.filter = 'blur(10px)';
+    for (let i = 0; i < 22; i++) { const y = rr() * h, bh = 10 + rr() * 70, lt = rr() < 0.5; g.fillStyle = bump ? 'rgba(128,128,128,0)' : (lt ? `rgba(236,220,196,${0.18 + rr() * 0.2})` : `rgba(184,156,122,${0.12 + rr() * 0.18})`); g.fillRect(0, y, w, bh); }
+    /* broad vertical cloudy streaks */
+    for (let i = 0; i < 12; i++) { const x = rr() * w, bw = 14 + rr() * 60; g.fillStyle = bump ? 'rgba(128,128,128,0)' : (rr() < 0.5 ? 'rgba(232,214,188,0.22)' : 'rgba(176,148,114,0.16)'); g.fillRect(x, 0, bw, h); }
     g.filter = 'none';
-    for (let i = 0; i < 2600; i++) { // striations
-      const x = r() * w, y = r() * h, len = 40 + r() * 700, lw = 0.4 + r() * 1.6, dk = r() < 0.6;
-      const a = 0.06 + r() * 0.22;
-      g.strokeStyle = bump ? (dk ? `rgba(70,70,70,${a})` : `rgba(170,170,170,${a})`) : (dk ? `rgba(${150 + r() * 25},${126 + r() * 20},${100 + r() * 16},${a})` : `rgba(240,232,220,${a})`);
-      g.lineWidth = lw; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (r() - 0.5) * 3, y + len); g.stroke();
-      if (y + len > h) { g.beginPath(); g.moveTo(x, y - h); g.lineTo(x + (r() - 0.5) * 3, y - h + len); g.stroke(); }
+    for (let i = 0; i < 900; i++) { /* fine vertical grain, low contrast */
+      const x = rr() * w, y = rr() * h, len = 60 + rr() * 600, lw = 0.4 + rr() * 1.1, dk = rr() < 0.55, a = 0.04 + rr() * 0.10;
+      g.strokeStyle = bump ? (dk ? `rgba(100,100,100,${a})` : `rgba(150,150,150,${a})`) : (dk ? `rgba(${168 + rr() * 20},${138 + rr() * 16},${104 + rr() * 14},${a})` : `rgba(242,230,212,${a})`);
+      g.lineWidth = lw; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rr() - 0.5) * 2, y + len); g.stroke();
+      if (y + len > h) { g.beginPath(); g.moveTo(x, y - h); g.lineTo(x + (rr() - 0.5) * 2, y - h + len); g.stroke(); }
     }
-    for (let i = 0; i < 1500; i++) { // pores / voids, elongated vertically, clustered on a few veins
-      const x = (r() < 0.6 ? Math.floor(r() * 18) * (w / 18) + (r() - 0.5) * 14 : r() * w), y = r() * h, rl = 1 + r() * 5, rw = 0.5 + r() * 1.4;
-      g.fillStyle = bump ? `rgba(20,20,20,${0.4 + r() * 0.5})` : `rgba(${110 + r() * 30},${90 + r() * 22},${70 + r() * 18},${0.25 + r() * 0.45})`;
+    for (let i = 0; i < 220; i++) { /* sparse small pores, slightly elongated */
+      const x = rr() * w, y = rr() * h, rl = 0.8 + rr() * 2.6, rw = 0.5 + rr() * 1.0;
+      g.fillStyle = bump ? `rgba(40,40,40,${0.35 + rr() * 0.4})` : `rgba(${150 + rr() * 20},${122 + rr() * 16},${92 + rr() * 14},${0.25 + rr() * 0.35})`;
       g.beginPath(); g.ellipse(x, y, rw, rl, 0, 0, Math.PI * 2); g.fill();
     }
-    g.fillStyle = bump ? '#3a3a3a' : 'rgba(150,132,112,0.7)'; g.fillRect(0, 0, 1.5, h); // slab joint at u = 0
+    g.fillStyle = bump ? '#4a4a4a' : 'rgba(170,146,116,0.6)'; g.fillRect(0, 0, 1.5, h); /* slab joint at u = 0 */
   };
+  void r;
   const map = kit.canvasTex(600, 1400, draw(false));
   const bump = kit.canvasTex(600, 1400, draw(true), { srgb: false });
   return { map, bump };
@@ -316,7 +320,7 @@ export async function build(ctx) {
   const aoMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false });
   const ao = (parent, cx, cz, w, d, op, y, ry = 0, s = 0.22) => { const m = kit.add(parent, aoGeo(w, d, s, op), aoMat, [cx, y, cz], [0, ry, 0], { shadow: false }); m.receiveShadow = false; m.renderOrder = 2; return m; };
   // neutral warm-white paint (#EEEBE6-ish on screen): counters the warm cast the global grade puts on paintWhite
-  const paintN = M.paintWhite.clone(); paintN.color = new THREE.Color(0xefeeea); /* neutral (was 0xedf0f6: cold lavender cast in p24) */
+  const paintN = M.paintWhite.clone(); paintN.color = new THREE.Color(0xf4ebdf); /* warm cream (p24/p25): neutral 0xefeeea still rendered blue-grey in the bath */
 
   // ================================================================ BEDROOM A
   const bed = kit.group(root, [0, 0, 0], 0, 'bedA');
@@ -532,7 +536,7 @@ export async function build(ctx) {
   const trvMat = (ox, oy) => {
     const map = TRV.map.clone(); map.repeat.set(1 / 1.2, 1 / 2.8); map.offset.set(ox, oy); map.needsUpdate = true;
     const bump = TRV.bump.clone(); bump.repeat.set(1 / 1.2, 1 / 2.8); bump.offset.set(ox, oy); bump.needsUpdate = true;
-    return physMat({ map, bumpMap: bump, bumpScale: 1.4, roughness: 0.4, clearcoat: 0.15, clearcoatRoughness: 0.35, color: 0xffffff });
+    return physMat({ map, bumpMap: bump, bumpScale: 0.6, roughness: 0.42, clearcoat: 0.12, clearcoatRoughness: 0.35, color: 0xfff6ea });
   };
   const trvA = trvMat(0.0, 0.1), trvB = trvMat(0.37, 0.55), trvC = trvMat(0.71, 0.22); // offsets keep slab joints off the corners' twins
   const towelTaupe = F.cotton(lift('#9c9284', 1.7), { scale: 9, side: THREE.DoubleSide });
@@ -661,13 +665,16 @@ export async function build(ctx) {
     kit.add(bath, kit.rbox(sx1 - sx0 - 0.06, 0.40, 0.20, 0.004), trvA, [(sx0 + sx1) / 2 - 0.03, BY + 0.45 + 0.20, sz1 - 0.10]); // upper step
     phys.boxAABB([sx0, BY, sz1 - 0.40], [sx1, BY + 0.45, sz1]);
     // fixed 10 mm glass panel on the curb (hall half) + brushed-nickel wall clamps; open entry z 3.05..3.82
-    const glass = physMat({ color: 0xeaf6f0, roughness: 0.02, transparent: true, opacity: 0.08, ior: 1.5, specularIntensity: 1, envMapIntensity: 1.4, side: THREE.DoubleSide, depthWrite: false });
+    const glass = physMat({ color: 0xe2f2ea, roughness: 0.02, transparent: true, opacity: 0.13, ior: 1.5, specularIntensity: 1, envMapIntensity: 1.0, side: THREE.FrontSide, depthWrite: false });
     const gz0 = 3.82, gy0 = BY + 0.07, gy1 = BY + 2.05, gx = sx1 - 0.05;
     const gp = kit.add(bath, kit.box(0.01, gy1 - gy0, sz1 - gz0), glass, [gx, (gy0 + gy1) / 2, (gz0 + sz1) / 2], [0, 0, 0], { shadow: false }); gp.renderOrder = 3;
     const edge = physMat({ color: 0xf4fbf8, roughness: 0.02, transparent: true, opacity: 0.32, depthWrite: false, emissive: 0xffffff, emissiveIntensity: 0.12 }); // thin bright polished edge line
     kit.add(bath, kit.box(0.0035, gy1 - gy0, 0.0035), edge, [gx, (gy0 + gy1) / 2, gz0], [0, 0, 0], { shadow: false }).renderOrder = 4;
     kit.add(bath, kit.box(0.0035, 0.0035, sz1 - gz0), edge, [gx, gy1, (gz0 + sz1) / 2], [0, 0, 0], { shadow: false }).renderOrder = 4;
     for (const y of [BY + 1.2, BY + 1.98]) { kit.add(bath, kit.rbox(0.036, 0.06, 0.045, 0.005), polNickel, [gx, y, sz1 - 0.0225]); kit.add(bath, kit.rbox(0.05, 0.075, 0.006, 0.002), polNickel, [gx, y, sz1 - 0.003]); }
+    /* p26: square satin clamps holding the panel's foot to the curb + a green-tinted polished edge on the open side */
+    for (const z of [gz0 + 0.12, sz1 - 0.14]) kit.add(bath, kit.rbox(0.034, 0.045, 0.05, 0.004), champagne, [gx, gy0 + 0.0225, z]);
+    kit.add(bath, kit.box(0.011, gy1 - gy0, 0.004), physMat({ color: 0x9cc8b4, roughness: 0.05, transparent: true, opacity: 0.55, depthWrite: false }), [gx, (gy0 + gy1) / 2, gz0 + 0.002], [0, 0, 0], { shadow: false }).renderOrder = 4;
     phys.boxAABB([gx - 0.01, BY, gz0], [gx + 0.01, gy1, sz1]);
     // fixtures on the SW wall near the stub (satin nickel): fixed head on an angled wall arm, 0.6 m slide bar with a
     // handheld spray, two small round trim valves + a larger round trim/diverter below, hose looping down to ~1 m

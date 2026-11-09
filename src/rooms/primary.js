@@ -69,21 +69,22 @@ export async function build(ctx) {
     roughness: 0.88, color: 0xffffff,
   });
 
-  // Nero Marquina: near-black stone, white lightning veins.
+  // Nero Marquina: near-black stone, soft white veins.
   const marbleMap = kit.canvasTex(1024, 1024, (g, w, h) => {
     const r = kit.rng(77);
     g.fillStyle = '#1a1a1a'; g.fillRect(0, 0, w, h);
     for (let i = 0; i < 40; i++) { const x = r() * w, y = r() * h, rad = 60 + r() * 220; const gr = g.createRadialGradient(x, y, 0, x, y, rad); const k = 24 + r() * 16; gr.addColorStop(0, `rgba(${k},${k},${k},0.35)`); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h); }
+    /* p18: soft natural veining: long, gently drifting veins with a faint blurred halo, rare short branches (was jagged lightning) */
     const vein = (x, y, ang, len, width, alpha, depth) => {
-      g.strokeStyle = `rgba(232,232,228,${alpha})`; g.lineWidth = width; g.lineCap = 'round'; g.beginPath(); g.moveTo(x, y);
-      for (let s = 0; s < len; s += 6) {
-        ang += (r() - 0.5) * 0.5; x += Math.cos(ang) * 6; y += Math.sin(ang) * 6; g.lineTo(x, y);
-        if (depth < 2 && r() < 0.025) { g.stroke(); vein(x, y, ang + (r() - 0.5) * 1.6, len * 0.35, width * 0.55, alpha * 0.8, depth + 1); g.strokeStyle = `rgba(232,232,228,${alpha})`; g.lineWidth = width; g.beginPath(); g.moveTo(x, y); }
-      }
-      g.stroke();
+      const pts = [[x, y]]; let da = 0;
+      for (let s = 0; s < len; s += 8) { da = da * 0.85 + (r() - 0.5) * 0.05; ang += da; x += Math.cos(ang) * 8; y += Math.sin(ang) * 8; pts.push([x, y]);
+        if (depth < 1 && r() < 0.006) vein(x, y, ang + (r() < 0.5 ? 1 : -1) * (0.35 + r() * 0.4), len * 0.3, width * 0.5, alpha * 0.7, depth + 1); }
+      const line = (wid, a, blur) => { g.save(); g.filter = blur ? `blur(${blur}px)` : 'none'; g.strokeStyle = `rgba(226,224,218,${a})`; g.lineWidth = wid; g.lineCap = 'round'; g.lineJoin = 'round';
+        g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const q of pts) g.lineTo(q[0], q[1]); g.stroke(); g.restore(); };
+      line(width * 6, alpha * 0.08, 8); line(width * 2, alpha * 0.18, 2); line(width, alpha * 0.8, 0.5);
     };
-    for (let i = 0; i < 7; i++) vein(r() * w * 0.3, r() * h, -0.45 + (r() - 0.5) * 0.4, 600 + r() * 600, 2.2 + r() * 3, 0.85, 0);
-    for (let i = 0; i < 14; i++) vein(r() * w, r() * h, r() * 6.28, 120 + r() * 260, 0.6 + r() * 0.8, 0.45, 1);
+    for (let i = 0; i < 6; i++) vein(r() * w * 0.3, r() * h, -0.45 + (r() - 0.5) * 0.4, 700 + r() * 700, 1.4 + r() * 1.6, 0.85, 0);
+    for (let i = 0; i < 10; i++) vein(r() * w, r() * h, -0.45 + (r() - 0.5) * 1.2, 160 + r() * 300, 0.5 + r() * 0.6, 0.4, 1);
   }, { repeat: [0.55, 0.55] });
   const marbleMat = physm({ map: marbleMap, roughness: 0.12, clearcoat: 0.6, clearcoatRoughness: 0.08, envMapIntensity: 1.0 });
 
@@ -120,8 +121,9 @@ export async function build(ctx) {
     if (n.dot(new THREE.Vector3(...normalHint)) < 0) { bg.setAttribute('position', new THREE.Float32BufferAttribute([...pts[0], ...pts[2], ...pts[1]], 3)); bg.computeVertexNormals(); }
     const m = new THREE.Mesh(bg, mat); m.receiveShadow = true; m.castShadow = true; root.add(m); return m;
   };
-  tri([[X0 - 0.02, PL - 0.01, Z1], [X1 + 0.02, PL - 0.01, Z1], [XC, RID + 0.02, Z1]], [0, 0, -1], M.paintWhite);
-  tri([[X0 - 0.02, PL - 0.01, Z0], [X1 + 0.02, PL - 0.01, Z0], [XC, RID + 0.02, Z0]], [0, 0, 1], M.paintWhite);
+  /* gables sit 8 mm inside the wall faces: in front of the 4 mm roof sliver the clip below leaves at the wall (p17/p18 dashed line) */
+  tri([[X0 - 0.02, PL - 0.01, Z1 - 0.008], [X1 + 0.02, PL - 0.01, Z1 - 0.008], [XC, RID + 0.02, Z1 - 0.008]], [0, 0, -1], M.paintWhite);
+  tri([[X0 - 0.02, PL - 0.01, Z0 + 0.008], [X1 + 0.02, PL - 0.01, Z0 + 0.008], [XC, RID + 0.02, Z0 + 0.008]], [0, 0, 1], M.paintWhite);
   // Roof parts from the shell / exterior piece (hip ends, soffits, ridge caps, fascia) dip below this vault.
   // A shader discard isn't enough (the AO depth pass still sees them and draws dark lines), so their
   // triangles are clipped against this room's volume under the vault (a convex region: 4 walls, a floor

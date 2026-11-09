@@ -158,16 +158,34 @@ export function buildSportsCourt(kit, root, phys, M, ctx) {
       g.fillStyle = 'rgba(30,60,120,0.75)'; g.font = 'bold 64px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('PALISADES', w / 2, hh / 2); });
     const skirt = O(new THREE.MeshPhysicalMaterial({ color: 0x141418, roughness: 0.55, sheen: 0.4, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x444444) }));
     const canvas = O(new THREE.MeshStandardMaterial({ map: canvasMap, color: 0xffffff, roughness: 0.95, normalMap: wn, normalScale: new THREE.Vector2(0.35, 0.35) }));
-    const apron = O(new THREE.MeshStandardMaterial({ color: 0x2b2d33, roughness: 0.75 }));
-    kit.add(root, kit.box(2 * h, R.h - 0.06, 2 * h), skirt, [R.cx, G + (R.h - 0.06) / 2, R.cz]);
-    kit.add(root, kit.box(2 * h, 0.06, 2 * h), apron, [R.cx, top - 0.03, R.cz]);
+    const apron = O(new THREE.MeshPhysicalMaterial({ color: 0x1b1c21, roughness: 0.5, sheen: 0.3, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x555555) }));
+    /* skirt = draped vinyl panel with vertical pleat folds, inset under a padded apron bumper (white piping + red trim
+       stripe), over a recessed black toe gap: breaks the old solid plinth block into apron / skirt / shadow */
+    const pleatN = kit.canvasTex(256, 32, (g, w, hh) => { const r = kit.rng(31); for (let xx = 0; xx < w; xx++) { const t = Math.sin(xx / w * Math.PI * 2 * 9 + Math.sin(xx * 0.11) * 1.2) * (0.6 + 0.4 * r());
+        const c = Math.round(128 + t * 70); g.fillStyle = `rgb(${c},128,255)`; g.fillRect(xx, 0, 1, hh); } }, { srgb: false });
+    pleatN.wrapS = pleatN.wrapT = THREE.RepeatWrapping; pleatN.repeat.set(4, 1);
+    skirt.normalMap = pleatN; skirt.normalScale = new THREE.Vector2(0.9, 0.9);
+    const toeM = O(new THREE.MeshStandardMaterial({ color: 0x060607, roughness: 1 }));
+    const trimW = O(new THREE.MeshStandardMaterial({ color: 0xe8e8e3, roughness: 0.5 }));
+    const trimR = O(new THREE.MeshPhysicalMaterial({ color: 0xa51d1c, roughness: 0.45, clearcoat: 0.2 }));
+    const SK0 = G + 0.10, SK1 = top - 0.14;
+    kit.add(root, kit.box(2 * h - 0.30, SK0 - G, 2 * h - 0.30), toeM, [R.cx, G + (SK0 - G) / 2, R.cz]);
+    kit.add(root, kit.box(2 * h - 0.06, SK1 - SK0, 2 * h - 0.06), skirt, [R.cx, (SK0 + SK1) / 2, R.cz]);
+    kit.add(root, kit.box(2 * h - 0.05, 0.035, 2 * h - 0.05), trimR, [R.cx, SK0 + 0.07, R.cz], [0, 0, 0], { shadow: false });
+    kit.add(root, kit.rbox(2 * h + 0.04, 0.14, 2 * h + 0.04, 0.05, 3), apron, [R.cx, top - 0.07, R.cz]);
+    kit.add(root, kit.box(2 * h + 0.05, 0.016, 2 * h + 0.05), trimW, [R.cx, top - 0.10, R.cz], [0, 0, 0], { shadow: false });
     kit.add(root, kit.box(2 * rh, 0.012, 2 * rh), canvas, [R.cx, top + 0.006, R.cz], [0, 0, 0], { shadow: false }).receiveShadow = true;
     phys.boxAABB([R.cx - h, G, R.cz - h], [R.cx + h, top, R.cz + h]);
     const padM = [0xa51d1c, 0xe8e8e3, 0x1b46a0, 0xe8e8e3].map(c => O(new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.35 })));
     const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+    const stoolM0 = O(new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.7 }));
     corners.forEach(([sx, sz], i) => { const x = R.cx + sx * rh, z = R.cz + sz * rh;
-      kit.add(root, kit.cyl(0.06, 0.06, 1.55, 12), steel, [x, top + 0.75, z]);
-      kit.add(root, kit.rbox(0.24, 1.15, 0.24, 0.06, 3), padM[i], [x, top + 0.82, z]);
+      kit.add(root, kit.cyl(0.06, 0.06, 1.40, 12), steel, [x, top + 0.70, z]);
+      /* turnbuckle pad: fat stitched vinyl cushion wrapping all 3 rope ends, dark seam bands at each rope + top cap */
+      const pg = kit.group(root, [x, top, z], Math.atan2(-sx, -sz));
+      kit.add(pg, kit.cushion(0.30, 1.02, 0.26, 0.09, 0.03, 5), padM[i], [0, 0.80, 0.02]);
+      for (const ry of [0.45, 0.8, 1.15].slice(0, 2)) kit.add(pg, kit.box(0.31, 0.012, 0.27), stoolM0, [0, ry + 0.175, 0.02], [0, 0, 0], { shadow: false });
+      kit.add(pg, kit.cyl(0.075, 0.075, 0.03, 16), stoolM0, [0, 1.325, 0]);
       phys.boxAABB([x - 0.14, top, z - 0.14], [x + 0.14, top + 1.5, z + 0.14]); });
     const ropeM = [0xa8211f, 0xe6e6e1, 0x1b46a0].map(c => O(new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 })));
     const ropeY = [0.45, 0.8, 1.15];

@@ -43,6 +43,7 @@ export async function build(ctx) {
   const ironBlack = phys_({ color: 0x0c0c0c, roughness: 0.55, metalness: 0.1, envMapIntensity: 0.5 });
   // brushed brass (mirror frame, vase) and matte black hardware per LOOKDEV recipes
   const brass = phys_({ color: 0xd4a84b, metalness: 1, roughness: 0.3, anisotropy: 0.4 });
+  const mirrorBrass = phys_({ color: 0xc8a467, metalness: 1, roughness: 0.36, anisotropy: 0.5, envMapIntensity: 0.8 });
   const blackHW = phys_({ color: 0x151515, metalness: 0.8, roughness: 0.45 });
   const wallWhite = M.paintWhite;
   const wallDouble = M.paintWhite.clone(); wallDouble.side = THREE.DoubleSide;
@@ -284,20 +285,21 @@ export async function build(ctx) {
   // ---------------------------------------------------------------- CONSOLE (oak, 3 drawers + shelf) on the west hall wall, under the mirror
   const CX = 8.30 + 0.20, CZ = 7.35, CT = 0.80;
   const consoleG = kit.group(root, [CX, 0, CZ], R_W, 'console');
+  const cOak = M.oakCabinet.clone(); cOak.color = new THREE.Color().setRGB(1.4, 1.3, 1.18); cOak.roughness = 0.6; /* p14: pale white-oak console (M.oakCabinet scan, lightened: it read dark walnut) */
   {
     const L = 1.80, D = 0.38, Ht = CT, lg = 0.045;
-    kit.add(consoleG, kit.rbox(L, 0.034, D, 0.006), oak, [0, Ht - 0.017, 0]);
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) kit.add(consoleG, kit.rbox(lg, Ht - 0.034, lg, 0.004), oak, [sx * (L / 2 - lg / 2 - 0.01), (Ht - 0.034) / 2, sz * (D / 2 - lg / 2 - 0.01)]);
-    kit.add(consoleG, kit.box(L - 0.05, 0.13, 0.02), oak, [0, Ht - 0.034 - 0.065, -D / 2 + 0.03]);              // back apron
-    for (const sx of [-1, 1]) kit.add(consoleG, kit.box(0.02, 0.13, D - 0.06), oak, [sx * (L / 2 - 0.03), Ht - 0.099, 0]);
+    kit.add(consoleG, kit.rbox(L, 0.034, D, 0.006), cOak, [0, Ht - 0.017, 0]);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) kit.add(consoleG, kit.rbox(lg, Ht - 0.034, lg, 0.004), cOak, [sx * (L / 2 - lg / 2 - 0.01), (Ht - 0.034) / 2, sz * (D / 2 - lg / 2 - 0.01)]);
+    kit.add(consoleG, kit.box(L - 0.05, 0.13, 0.02), cOak, [0, Ht - 0.034 - 0.065, -D / 2 + 0.03]); /* back apron */
+    for (const sx of [-1, 1]) kit.add(consoleG, kit.box(0.02, 0.13, D - 0.06), cOak, [sx * (L / 2 - 0.03), Ht - 0.099, 0]);
     const nd = 3, dw = (L - 0.09) / nd;
     for (let k = 0; k < nd; k++) {
       const x = -L / 2 + 0.045 + dw * (k + 0.5);
-      kit.add(consoleG, kit.rbox(dw - 0.008, 0.115, 0.02, 0.003), oak, [x, Ht - 0.1, D / 2 - 0.02]);
+      kit.add(consoleG, kit.rbox(dw - 0.008, 0.115, 0.02, 0.003), cOak, [x, Ht - 0.1, D / 2 - 0.02]);
       kit.add(consoleG, kit.rbox(0.13, 0.01, 0.012, 0.004), M.brushedNickel, [x, Ht - 0.1, D / 2 - 0.002]);
     }
-    kit.add(consoleG, kit.box(L - 0.06, 0.02, 0.02), oak, [0, 0.13, D / 2 - 0.035]);
-    kit.add(consoleG, kit.rbox(L - 0.06, 0.025, D - 0.05, 0.004), oak, [0, 0.13, 0]);  // lower shelf
+    kit.add(consoleG, kit.box(L - 0.06, 0.02, 0.02), cOak, [0, 0.13, D / 2 - 0.035]);
+    kit.add(consoleG, kit.rbox(L - 0.06, 0.025, D - 0.05, 0.004), cOak, [0, 0.13, 0]); /* lower shelf */
   }
   phys.solidGroup(consoleG);
   // smart-home panel beside the mirror (p14)
@@ -307,7 +309,7 @@ export async function build(ctx) {
     const g = kit.group(root, [8.30 + 0.01, CT + 0.22 + 0.62, CZ + 0.02], R_W, 'blobMirror');
     const pts = (s) => { const a = []; for (let i = 0; i < 72; i++) { const t = i / 72 * Math.PI * 2; const r = 1 + 0.07 * Math.sin(2 * t + 0.9) + 0.05 * Math.sin(3 * t + 2.3) + 0.025 * Math.cos(5 * t + 0.4); a.push([Math.cos(t) * 0.47 * r * s + 0.03 * Math.sin(t), Math.sin(t) * 0.62 * r * s - 0.05 * Math.cos(2 * t) * s]); } return a; };
     const outer = pts(1.0), inner = pts(0.982);
-    const fr = kit.extrude(outer, 0.022, 0.003, [inner.slice().reverse()]); kit.add(g, fr, brass, [0, 0, 0]);
+    const fr = kit.extrude(outer, 0.012, 0.002, [inner.slice().reverse()]); kit.add(g, fr, mirrorBrass, [0, 0, 0]); /* p14: ~1 cm thin brushed-brass rim */
     const shape = new THREE.Shape(inner.map(([x, y]) => new THREE.Vector2(x, y)));
     // live Reflector, rendered only while the camera is downstairs in the foyer (room-culled)
     const m = liveMirror(new THREE.ShapeGeometry(shape, 24), 'foyer'); m.position.set(0, 0, 0.012); g.add(m);

@@ -54,7 +54,7 @@ export function courtMaterials(kit) {
     line: o(new THREE.MeshStandardMaterial({ color: 0xbdbdb9, roughness: 0.92, emissive: 0x000000, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })),
     post: o(new THREE.MeshStandardMaterial({ color: 0x151617, roughness: 0.5, metalness: 0.4 })),
     chain: o(new THREE.MeshStandardMaterial({ map: chain, color: 0xffffff, transparent: true, alphaTest: 0.02, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2, depthWrite: false })),
-    screen: o(new THREE.MeshStandardMaterial({ map: screen, normalMap: screenN, normalScale: new THREE.Vector2(0.6, 0.6), color: 0xd0d2d4, roughness: 0.36, metalness: 0.1, side: THREE.DoubleSide })),
+    screen: o(new THREE.MeshStandardMaterial({ map: screen, normalMap: screenN, normalScale: new THREE.Vector2(0.22, 0.22), color: 0xc4c6c8, roughness: 0.82, metalness: 0, side: THREE.DoubleSide })),
     net: o(new THREE.MeshStandardMaterial({ map: net, color: 0x202020, transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, roughness: 0.8, depthWrite: false })),
     tape: o(new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.7, side: THREE.DoubleSide })),
     lamp: new THREE.MeshStandardMaterial({ color: 0xdfe6ea, emissive: 0xe8f0ff, emissiveIntensity: 0.25, roughness: 0.3 }),

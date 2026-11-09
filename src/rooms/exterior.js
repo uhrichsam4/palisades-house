@@ -94,7 +94,7 @@ export async function build(ctx) {
   function sidingTex() {
     const W = 512, H = 512, pxm = W / 2.4, n = vnoise(3, 8); const hgt = new Float32Array(W * H);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const u = (x / pxm) % 0.30; hgt[y * W + x] = (u < 0.05 ? 1 : 0) + n(x / W, y / H) * 0.05; }
-    const map = pixelTex(W, H, (x, y) => { const u = (x / pxm) % 0.30; const v = 240 + (n(x / W, y / H) - 0.5) * 6 - (u > 0.05 && u < 0.058 ? 16 : 0); return [v, v - 3, v - 10]; }); /* warm white ~#efece6 (p01), not blue-grey */
+    const map = pixelTex(W, H, (x, y) => { const u = (x / pxm) % 0.30; const v = 246 + (n(x / W, y / H) - 0.5) * 6 - (u > 0.05 && u < 0.058 ? 16 : 0); return [v, v - 3, v - 10]; }); /* warm white ~#efece6 (p01), not blue-grey */
     return { map, normalMap: normalFromHeight(hgt, W, H, 1.6) };
   }
   // ---- vertical-plank garage door: 512 px = 1.2 m, 0.15 m boards
@@ -133,11 +133,11 @@ export async function build(ctx) {
   const trimMat = std({ color: 0x2b211c, roughness: 0.5 });           // belly band / frieze (very dark brown, p00)
   const capMat = std({ color: 0x2f2f30, roughness: 0.9 });             // ridge caps
   const sd = sidingTex(); sd.map.repeat.set(1 / 2.4, 1 / 2.4); sd.normalMap.repeat.set(1 / 2.4, 1 / 2.4);
-  const sidingMat = std({ map: sd.map, normalMap: sd.normalMap, normalScale: new THREE.Vector2(0.75, 0.75), roughness: 0.85, side: THREE.DoubleSide }); sidingMat.envMapIntensity = 0.6;
+  const sidingMat = std({ map: sd.map, normalMap: sd.normalMap, normalScale: new THREE.Vector2(0.75, 0.75), roughness: 0.85, side: THREE.DoubleSide }); kit.outdoor(sidingMat); sidingMat.envMapIntensity = 1.7; sidingMat.color = new THREE.Color(0xfff6ea); /* p01/p39: real-sky ambient so the shaded north face reads white, not mid-grey */
   const stucco = M.extWhite; kit.outdoor(stucco);
   const stuccoD = M.extWhiteDouble; kit.outdoor(stuccoD);
   /* facade (p01): warm white, a visible fine stucco texture on the lower storey, less blue sky sheen */
-  for (const m of [stucco, stuccoD]) { m.color = new THREE.Color(0xefece6); m.envMapIntensity = 0.6; }
+  for (const m of [stucco, stuccoD]) { m.color = new THREE.Color(0xfaf5ec); m.envMapIntensity = 1.1; }
   if (stucco.normalMap) stucco.normalScale = new THREE.Vector2(0.4, 0.4);
 
   const dt = doorTex();
@@ -188,7 +188,7 @@ export async function build(ctx) {
      garage wing overlap above the upstairs primary suite) the hidden part used to hang through the vaulted ceilings
      (p17/p19). Inside the CUT room rects, roof surface / soffit / fascia / ridge pieces that sit below another part's
      roof surface are dropped (never visible from outside: they're under that other roof). */
-  const CUT = ['primaryBed', 'primaryBath'].map(id => P.ROOMS[id]?.rect).filter(Boolean).map(r => [r[0] - 0.16, r[1] - 0.16, r[2] + 0.16, r[3] + 0.16]);
+  const CUT = Object.values(P.ROOMS).filter(r => r.level === 1 && !r.outdoor && r.rect).map(r => r.rect).map(r => [r[0] - 0.16, r[1] - 0.16, r[2] + 0.16, r[3] + 0.16]); /* every indoor upper-floor room (p15/p16/p32: hall, landing, theater) */
   const inCut = (x, z) => CUT.some(r => x > r[0] && x < r[2] && z > r[1] && z < r[3]);
   const inPoly = (x, z, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
   let allParts = [];
@@ -225,7 +225,7 @@ export async function build(ctx) {
       const uvOf = (p) => [p[0] * tx + p[1] * tz, ((p[0] - A.px) * A.nx + (p[1] - A.pz) * A.nz) * k];
       for (const poly of cutPieces(poly0)) {
         let cx = 0, cz = 0; for (const p of poly) { cx += p[0]; cz += p[1]; } cx /= poly.length; cz /= poly.length;
-        if (buried(cx, cz, hAt(A, cx, cz), part)) continue;
+        if (buried(cx, cz, hAt(A, cx, cz), part) && poly.every(p => buried(p[0] + (cx - p[0]) * 0.02, p[1] + (cz - p[1]) * 0.02, hAt(A, p[0], p[1]), part))) continue; /* only cells fully under another roof: keeps the outside silhouette whole */
         const tris = THREE.ShapeUtils.triangulateShape(poly.map(p => V2(p[0], p[1])), []);
         for (const [a, b, c] of tris) {
           let P0 = poly[a], P1 = poly[b], P2 = poly[c];
@@ -712,15 +712,22 @@ export async function build(ctx) {
       plantInstances(root, P.shrub, shS, { shadow: true }); plantInstances(root, P.shrub, sh, { shadow: false }); plantInstances(root, P.grass, gr, { shadow: false });
       /* foliage core: the sapling-like shrub_02 reads as bare twigs on gravel on its own; a soft, dark, lumpy mass inside
          each shrub (one instanced draw, ~80 tris each) makes the beds read as the full silvery shrubs of p01 */
-      const coreGeo = new THREE.SphereGeometry(1, 12, 8); { const p = coreGeo.attributes.position, v = new THREE.Vector3();
-        for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const k = 0.78 + 0.13 * Math.sin(v.x * 6.3 + v.z * 4.1) * Math.cos(v.y * 5.2) + 0.09 * Math.sin(v.z * 11.0 + v.y * 9.0);
-          p.setXYZ(i, v.x * k, Math.max(-0.3, v.y) * k, v.z * k); }
-        coreGeo.computeVertexNormals(); }
-      const leafN = kit.noiseNormal(256, 2.2, 22, 41); leafN.repeat.set(3, 2);
-      const coreMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, normalMap: leafN, normalScale: new THREE.Vector2(1.6, 1.6) });
-      const all = [...shS, ...sh]; const core = new THREE.InstancedMesh(coreGeo, coreMat, all.length); const o3 = new THREE.Object3D(), cc = new THREE.Color();
-      all.forEach((it, i) => { o3.position.set(it.x, it.y + it.h * 0.36, it.z); o3.rotation.set(0, it.ry, 0); o3.scale.set(it.w * 0.27, it.h * 0.3, it.w * 0.27); o3.updateMatrix();
-        core.setMatrixAt(i, o3.matrix); core.setColorAt(i, cc.setHex(it.color).offsetHSL(0, 0.04, 0).multiplyScalar(0.46)); });
+      /* core = cluster of 7 small lumpy lobes (merged, still one instanced draw) inside the unit sphere, so the mass reads
+         as a broken leafy shrub silhouette instead of one faceted boulder; extent stays <= the old single ellipsoid */
+      const coreGeo = (() => { const lobes = [], lr = kit.rng(7731);
+        const L = [[0, 0.05, 0, 0.62], [0.42, -0.05, 0.12, 0.5], [-0.38, -0.02, 0.22, 0.5], [0.08, 0.0, -0.44, 0.5], [-0.2, 0.38, -0.12, 0.44], [0.25, 0.42, 0.18, 0.4], [0.0, 0.62, 0.0, 0.32]];
+        for (const [ox, oy, oz, rr] of L) { const g = new THREE.IcosahedronGeometry(1, 2), p = g.attributes.position, v = new THREE.Vector3(), ph = lr() * 10;
+          for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const k = 0.82 + 0.12 * Math.sin(v.x * 7.1 + ph) * Math.cos(v.y * 6.3 + v.z * 5.7) + 0.08 * Math.sin(v.z * 13.0 + v.y * 11.0 + ph);
+            p.setXYZ(i, ox + v.x * rr * k, Math.max(-0.3, oy + v.y * rr * k), oz + v.z * rr * k); g.attributes.normal.setXYZ(i, v.x, v.y, v.z); }
+          lobes.push(g); }
+        return kit.mergeGeometries(lobes); })();
+      const leafN = kit.noiseNormal(256, 2.2, 22, 41); leafN.repeat.set(6, 4);
+      const coreMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0, normalMap: leafN, normalScale: new THREE.Vector2(2.4, 2.4) });
+      const CORE_GREEN = new THREE.Color(0x56704a); const all = [...shS, ...sh]; const core = new THREE.InstancedMesh(coreGeo, coreMat, all.length); const o3 = new THREE.Object3D(), cc = new THREE.Color();
+      /* keep cores out of the game-room turret bay (ROOMS.game rect starts at z 4.73 for x 5.31..8.15) */
+      const GR = ctx.plan.ROOMS.game.rect, coreZ = (it) => { const rad = it.w * 0.27 * 1.05; return it.x > GR[0] - rad && it.x < GR[2] + rad ? Math.min(it.z, GR[1] - 0.06 - rad) : it.z; };
+      all.forEach((it, i) => { o3.position.set(it.x, it.y + it.h * 0.36, coreZ(it)); o3.rotation.set(0, it.ry, 0); o3.scale.set(it.w * 0.27, it.h * 0.3, it.w * 0.27); o3.updateMatrix();
+        core.setMatrixAt(i, o3.matrix); core.setColorAt(i, cc.setHex(it.color).lerp(CORE_GREEN, 0.6).offsetHSL(0, 0.06, 0).multiplyScalar(0.28)); });
       core.castShadow = false; core.receiveShadow = true; core.computeBoundingSphere(); core.userData.keep = true; core.name = 'cc0plants-core'; root.add(core);
     } catch (e) { console.error('[front plants]', e); window.__errors?.push('front plants: ' + (e.stack || e.message)); }
   }

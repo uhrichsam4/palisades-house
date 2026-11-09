@@ -49,7 +49,7 @@ export async function build(ctx) {
   baseSeg([X1, ZF], [X1, dz0], [-1, 0]); baseSeg([X1, dz1], [X1, Z1], [-1, 0]);
 
   // recessed cans (warm), one over the bay, two along the room
-  const cream = M.paintWhite.clone(); cream.color.set(0xdedad5); // light warm grey-white
+  const cream = M.paintWhite.clone(); cream.color.set(0xebe3d8); /* warm white (p33 walls read warm cream, not grey) */
   // warm ceiling skin over room + bay (the slab underside reads cool grey here)
   {
     const sh = new THREE.Shape(); const poly = [...C, [X1, Z1], [X0, Z1]];
@@ -64,11 +64,11 @@ export async function build(ctx) {
   // flat walls: SW (console) wall, back wall, NE wall around the door
   kit.wallPanel(root, [X0, Z1], [X0, ZF], Y, CEIL, [1, 0], cream);
   kit.wallPanel(root, [X1, Z1], [X0, Z1], Y, CEIL, [0, -1], cream);
-  kit.wallPanel(root, [X1, ZF], [X1, dz0], Y, CEIL, [-1, 0], cream.clone().setValues({ color: new THREE.Color(0xd4cfca) }));
+  kit.wallPanel(root, [X1, ZF], [X1, dz0], Y, CEIL, [-1, 0], cream.clone().setValues({ color: new THREE.Color(0xe2dace) }));
   kit.wallPanel(root, [X1, dz1], [X1, Z1], Y, CEIL, [-1, 0], cream);
   kit.wallPanel(root, [X1, dz0], [X1, dz1], Y + door.head + 0.07, CEIL, [-1, 0], cream);
   // short front-wall returns either side of the bay (bay-side faces catch more light: deeper paint)
-  const bayPaint = cream.clone(); bayPaint.color.set(0xcbc6c0);
+  const bayPaint = cream.clone(); bayPaint.color.set(0xd8cfc3);
   kit.wallPanel(root, C[0], C[1], Y, CEIL, [0, 1], bayPaint);
   kit.wallPanel(root, C[4], C[5], Y, CEIL, [0, 1], bayPaint);
 
@@ -77,6 +77,7 @@ export async function build(ctx) {
   const shadeFab = std({ color: 0x0b0b0c, roughness: 1.0, envMapIntensity: 0.15, normalMap: tex('assets/ph/hessian_380/hessian_380_nor_gl_1k.jpg', { repeat: [5, 7] }), normalScale: new THREE.Vector2(0.18, 0.18) });
   const cassetteMat = std({ color: 0x1a1918, roughness: 0.95, metalness: 0.0, normalMap: shadeFab.normalMap, normalScale: new THREE.Vector2(0.25, 0.25) }); // fabric-wrapped valance
   const hemMat = std({ color: 0x0e0e0e, roughness: 0.5, metalness: 0.3 });
+  shadeFab.shadowSide = THREE.DoubleSide;
     for (const [id, li] of [['game-b1', 1], ['game-b2', 2], ['game-b3', 3]]) {
     const o = ctx.plan.OPENINGS.find(q => q.id === id); const Ln = lines[li];
     const cx = o.at[0] + Ln.n[0] * T, cz = o.at[1] + Ln.n[1] * T; // opening centre on interior face
@@ -95,9 +96,10 @@ export async function build(ctx) {
     add(g, new THREE.BoxGeometry(o.w, 0.012, dep), cream, [0, head - 0.006, -dep / 2], [0, 0, 0], { shadow: false });
     add(g, new THREE.BoxGeometry(o.w, 0.02, dep), cream, [0, sill - 0.01, -dep / 2], [0, 0, 0], { shadow: false });
     // inside-mount shade from the valance down to ~1.05 m above the floor
-    const sTop = head - 0.15, sBot = sill + 0.035;
-    add(g, new THREE.PlaneGeometry(o.w - 0.02, sTop - sBot), shadeFab, [0, (sTop + sBot) / 2, -0.06], [0, 0, 0], { shadow: false });
-    add(g, rbox(o.w - 0.02, 0.022, 0.016, 0.005), hemMat, [0, sBot + 0.011, -0.055]);
+    /* shade casts the sun's shadow: unshadowed, midday sun through the glass blew the bay reveals + walls out to white */
+    const sTop = head - 0.15, sBot = sill + 0.02;
+    add(g, new THREE.PlaneGeometry(o.w - 0.01, sTop - sBot), shadeFab, [0, (sTop + sBot) / 2, -0.05]);
+    add(g, rbox(o.w - 0.01, 0.022, 0.016, 0.005), hemMat, [0, sBot + 0.011, -0.045]);
     // per-window boxed black valance (0.15 tall) filling the top of the recess, slightly proud of the wall
     add(g, rbox(o.w + 0.03, 0.15, 0.12, 0.006), cassetteMat, [0, head - 0.075, -0.03]);
   }
@@ -107,27 +109,27 @@ export async function build(ctx) {
   // its right, "be the place" below. 12 mm pink-lavender tubes (#f0a8ff) on a clear acrylic backer.
   const CON_Z = 5.48; // console centre (world z)
   {
-    const W = 1.75, H = 0.95, PX = 900; // px per metre
+    const W = 1.22, H = 0.66, PX = 1200; /* ~30% smaller than before (p33: sign spans ~1.2 m); px per metre */
     const cw = Math.round(W * PX), ch = Math.round(H * PX);
-    const fonts = `'Bradley Hand', 'Snell Roundhand', 'Segoe Script', cursive`; // near-monoline hand script
+    const fonts = `'Bradley Hand', 'Snell Roundhand', 'Segoe Script', cursive`; /* near-monoline hand script */
     const words = [
       { t: 'This', x: 0.05, y: 0.33, s: 0.34 },
       { t: 'must', x: 0.70, y: 0.42, s: 0.22 },
       { t: 'be the place', x: 0.36, y: 0.76, s: 0.235 },
     ];
-    const setFont = (g, w) => { g.font = `700 ${Math.round(w.s * W / 1.5 * PX)}px ${fonts}`; g.textBaseline = 'alphabetic'; };
+    const setFont = (g, w) => { g.font = `400 ${Math.round(w.s * W / 1.5 * PX)}px ${fonts}`; g.textBaseline = 'alphabetic'; };
     const neonMap = canvasTex(cw, ch, (g) => {
       g.clearRect(0, 0, cw, ch);
       // clear acrylic backer: faint fill + a thin bright edge hugging the words
       const off = document.createElement('canvas'); off.width = cw; off.height = ch; const o = off.getContext('2d');
       o.lineJoin = 'round'; o.lineCap = 'round';
-      for (const w of words) { setFont(o, w); const X = w.x * W / 1.5 * PX, Yp = w.y * H / 0.85 * PX; o.strokeStyle = '#fff'; o.lineWidth = 50; o.strokeText(w.t, X, Yp); o.fillStyle = '#fff'; o.fillText(w.t, X, Yp); }
+      for (const w of words) { setFont(o, w); const X = w.x * W / 1.5 * PX, Yp = w.y * H / 0.85 * PX; o.strokeStyle = '#fff'; o.lineWidth = 34; o.strokeText(w.t, X, Yp); o.fillStyle = '#fff'; o.fillText(w.t, X, Yp); }
       const ring = document.createElement('canvas'); ring.width = cw; ring.height = ch; const r = ring.getContext('2d');
       r.drawImage(off, 0, 0); r.globalCompositeOperation = 'destination-out'; r.drawImage(off, 3, 3); r.drawImage(off, -3, -3); r.drawImage(off, 3, -3); r.drawImage(off, -3, 3);
       g.globalAlpha = 0.06; g.drawImage(off, 0, 0); g.globalAlpha = 0.45; g.drawImage(ring, 0, 0); g.globalAlpha = 1;
       g.lineJoin = 'round'; g.lineCap = 'round';
       // glow halo around thin glyphs (fills, so each stroke reads as one tube, not an outline)
-      for (const [blur, a] of [[34, 0.55], [12, 0.85]]) {
+      for (const [blur, a] of [[26, 0.45], [8, 0.75]]) {
         g.shadowColor = `rgba(226,110,255,${a})`; g.shadowBlur = blur;
         for (const w of words) { setFont(g, w); g.fillStyle = `rgba(236,150,255,${a})`; g.fillText(w.t, w.x * W / 1.5 * PX, w.y * H / 0.85 * PX); }
       }
@@ -146,7 +148,7 @@ export async function build(ctx) {
     // soft pink wash on the wall around the sign
     const wash = canvasTex(256, 256, (g) => { const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128); gr.addColorStop(0, 'rgba(225,130,255,0.16)'); gr.addColorStop(0.5, 'rgba(225,130,255,0.06)'); gr.addColorStop(1, 'rgba(225,130,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); });
     const washMat = new THREE.MeshBasicMaterial({ map: wash, transparent: true, depthWrite: false });
-    add(root, new THREE.PlaneGeometry(2.4, 1.6), washMat, [X0 + 0.012, yc, zc], [0, Math.PI / 2, 0], { shadow: false, name: 'neonWash' }).renderOrder = 2;
+    add(root, new THREE.PlaneGeometry(1.7, 1.15), washMat, [X0 + 0.012, yc, zc], [0, Math.PI / 2, 0], { shadow: false, name: 'neonWash' }).renderOrder = 2;
     // thin silver power cords dropping from the words to the console top
     const cordMat = std({ color: 0xcfd0d4, roughness: 0.35, metalness: 0.7 });
     const wx = (u) => zc + W / 2 - u * W / 1.5; // canvas x (m, authored at 1.5 m) -> world z
@@ -342,17 +344,25 @@ export async function build(ctx) {
     }
     geo.computeVertexNormals();
     // soft wrinkle normals (big, low-frequency folds) drawn on a canvas
-    const wrinkle = canvasTex(256, 128, (g, w, h) => {
-      const r = rng(21); g.fillStyle = 'rgb(128,128,255)'; g.fillRect(0, 0, w, h); g.filter = 'blur(6px)';
-      for (let i = 0; i < 40; i++) {
-        const x = r() * w, y = r() * h, L = 30 + r() * 70, a = (r() - 0.5) * 1.2 + Math.PI / 2;
-        g.lineWidth = 3 + r() * 6; g.lineCap = 'round';
-        g.strokeStyle = 'rgb(165,150,255)'; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * L, y + Math.sin(a) * L); g.stroke();
-        g.strokeStyle = 'rgb(92,108,255)'; g.beginPath(); g.moveTo(x + 5, y); g.lineTo(x + 5 + Math.cos(a) * L, y + Math.sin(a) * L); g.stroke();
-      }
+    /* wrinkled velour normals: many short crumpled creases (sharp ridge + soft shadow side) radiating down from
+       the crown, plus fine crush texture; tiles 2 x 2 around the sphere */
+    const wrinkle = canvasTex(512, 256, (g, w, h) => {
+      const r = rng(21); g.fillStyle = 'rgb(128,128,255)'; g.fillRect(0, 0, w, h);
+      const crease = (x, y, L, a, lw, blur) => {
+        g.filter = `blur(${blur}px)`; g.lineCap = 'round'; g.lineWidth = lw;
+        const dx = Math.cos(a), dy = Math.sin(a), nx = -dy, ny = dx; const bend = (r() - 0.5) * L * 0.5;
+        for (const [sgn, col] of [[1, [128 + nx * 70, 128 + ny * 70]], [-1, [128 - nx * 70, 128 - ny * 70]]]) {
+          g.strokeStyle = `rgb(${col[0] | 0},${col[1] | 0},235)`; g.beginPath();
+          g.moveTo(x + nx * sgn * lw * 0.6, y + ny * sgn * lw * 0.6);
+          g.quadraticCurveTo(x + dx * L / 2 + nx * bend, y + dy * L / 2 + ny * bend, x + dx * L + nx * sgn * lw * 0.6, y + dy * L + ny * sgn * lw * 0.6); g.stroke();
+        }
+      };
+      for (let i = 0; i < 70; i++) crease(r() * w, r() * h, 40 + r() * 110, Math.PI / 2 + (r() - 0.5) * 1.4, 4 + r() * 7, 2.5 + r() * 3);
+      for (let i = 0; i < 160; i++) crease(r() * w, r() * h, 10 + r() * 30, r() * 6.28, 2 + r() * 2.5, 1.2);
+      g.filter = 'none';
     });
-    wrinkle.colorSpace = THREE.NoColorSpace; wrinkle.wrapS = wrinkle.wrapT = THREE.RepeatWrapping;
-    const velvet = physm({ color: 0x0f0e10, roughness: 0.8, envMapIntensity: 0.3, normalMap: wrinkle, normalScale: new THREE.Vector2(1.0, 1.0), sheen: 1.0, sheenColor: new THREE.Color(0x34323a), sheenRoughness: 0.35 });
+    wrinkle.colorSpace = THREE.NoColorSpace; wrinkle.wrapS = wrinkle.wrapT = THREE.RepeatWrapping; wrinkle.repeat.set(2, 2);
+    const velvet = physm({ color: 0x1d1c20, roughness: 0.78, envMapIntensity: 0.35, normalMap: wrinkle, normalScale: new THREE.Vector2(1.4, 1.4), sheen: 1.0, sheenColor: new THREE.Color(0x4a4852), sheenRoughness: 0.38 });
     const BX = 7.33, BZ = 4.90;
     const bg = group(root, [BX, Y, BZ], 0.4, 'beanbag');
     const mesh = add(bg, geo, velvet);

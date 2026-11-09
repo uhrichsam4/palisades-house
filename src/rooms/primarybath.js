@@ -67,12 +67,12 @@ export async function build(ctx) {
   function marbleCanvas(seed, dark) {
     return kit.canvasTex(1024, 2048, (g, w, h) => {
       const r = kit.rng(seed);
-      g.fillStyle = dark ? '#1d1c1b' : '#f3f1ed'; g.fillRect(0, 0, w, h);
+      g.fillStyle = dark ? '#262321' : '#e2ddd6'; g.fillRect(0, 0, w, h);
       // low-frequency tonal clouds (kills the flat CG look)
       for (let i = 0; i < 70; i++) {
         const x = r() * w, y = r() * h, rad = 120 + r() * 420;
         const gr = g.createRadialGradient(x, y, 0, x, y, rad);
-        const c = dark ? `rgba(${44 + r() * 16 | 0},${43 + r() * 14 | 0},${42 + r() * 12 | 0},0.20)`
+        const c = dark ? `rgba(${52 + r() * 16 | 0},${46 + r() * 14 | 0},${40 + r() * 12 | 0},0.20)`
           : (r() < 0.5 ? `rgba(${232 + r() * 8 | 0},${226 + r() * 8 | 0},${216 + r() * 8 | 0},0.05)` : `rgba(${228 + r() * 10 | 0},${228 + r() * 10 | 0},${226 + r() * 10 | 0},0.04)`);
         gr.addColorStop(0, c); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
       }
@@ -87,17 +87,18 @@ export async function build(ctx) {
         for (let i = 0; i < 6; i++) {
           const x = r() * w * 1.4 - w * 0.2, y = h * (0.1 + r() * 1.0), a = -0.6 - r() * 0.7, len = 900 + r() * 1500;
           vein(x, y, a, len, 14 + r() * 10, 'rgba(210,210,206,0.10)', 6, 0.18);
-          vein(x, y, a, len, 2.5 + r() * 3.5, 'rgba(244,243,238,0.92)', 0.6, 0.18);
+          vein(x, y, a, len, 2.5 + r() * 3.5, 'rgba(236,230,220,0.85)', 0.6, 0.18);
           for (let k = 0; k < 3; k++) vein(x + (r() - 0.5) * 400, y - r() * 500, a + (r() - 0.5) * 1.4, 100 + r() * 350, 0.8 + r() * 1.4, 'rgba(232,231,226,0.6)', 0, 0.3);
         }
       } else {
         // Calacatta/Volakas-type: bright white field, crisp fine grey veins on long diagonals + faint ghosts
-        for (let i = 0; i < 9; i++) {
-          const x = r() * w * 1.6 - w * 0.3, y = h * (0.15 + r() * 0.95), a = -0.95 - r() * 0.35, len = 1400 + r() * 1400;
-          vein(x, y, a, len, 26 + r() * 30, 'rgba(165,160,152,0.06)', 14);
-          vein(x, y, a, len, 3 + r() * 3, 'rgba(140,134,126,0.14)', 2);
-          vein(x, y, a, len, 0.9 + r() * 1.3, 'rgba(112,106,98,0.62)', 0.4, 0.09);
-          for (let k = 0; k < 3; k++) vein(x + (r() - 0.5) * 300, y - r() * 500, a + (r() - 0.5) * 0.6, 150 + r() * 450, 0.6 + r() * 1.0, 'rgba(125,118,110,0.42)', 0.3, 0.12);
+        /* p20/p21: soft, long, nearly straight grey-beige drifts on a shared diagonal, low contrast (no curly hairlines) */
+        for (let i = 0; i < 11; i++) {
+          const x = r() * w * 1.8 - w * 0.4, y = h * (0.2 + r() * 1.0), a = -1.02 - r() * 0.16, len = 1800 + r() * 1400;
+          vein(x, y, a, len, 40 + r() * 40, 'rgba(170,164,154,0.07)', 22, 0.012);
+          vein(x, y, a, len, 5 + r() * 5, 'rgba(150,142,130,0.13)', 3, 0.012);
+          vein(x, y, a, len, 1.2 + r() * 1.4, 'rgba(138,130,118,0.30)', 1.4, 0.012);
+          if (r() < 0.6) vein(x + (r() - 0.5) * 200, y - r() * 300, a + (r() - 0.5) * 0.12, 500 + r() * 700, 0.8 + r() * 0.8, 'rgba(150,142,132,0.22)', 0.9, 0.01);
         }
       }
       // slab joints (visible hairline seams between 1.2 x 2.4 m panels)
@@ -105,9 +106,9 @@ export async function build(ctx) {
     }, { repeat: [1 / 1.2, 1 / 2.4] });
   }
   // polished slab: glossy clearcoat over a slightly satin base so it reads wet-bright with crisp highlights
-  const marble = physM({ map: marbleCanvas(77, false), roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.15 });
-  const marbleBox = physM({ map: marbleCanvas(78, false), roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 1.15 }); marbleBox.map.repeat.set(1, 1);
-  const marbleBlack = std({ map: marbleCanvas(91, true), roughness: 0.24, envMapIntensity: 0.45 }); marbleBlack.map.repeat.set(1, 1);
+  const marble = physM({ map: marbleCanvas(77, false), roughness: 0.2, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.8 });
+  const marbleBox = physM({ map: marbleCanvas(78, false), roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05, envMapIntensity: 0.8 }); marbleBox.map.repeat.set(1, 1);
+  const marbleBlack = std({ map: marbleCanvas(91, true), color: 0xfff4e8, roughness: 0.24, envMapIntensity: 0.3 }); /* p23: warm charcoal, low env so the sky reflection doesn't tint it navy */ marbleBlack.map.repeat.set(1, 1);
 
   // waterjet "chain ring" mosaic floor (p19): white marble field, taupe striated rings with brown outlines
   // Rings ~0.27 m across on a 0.26 m grid, each overlapping its neighbours (woven: horizontal crossings
@@ -157,7 +158,7 @@ export async function build(ctx) {
   const ceramic = physM({ color: 0xf7f7f5, roughness: 0.12, clearcoat: 0.6, side: THREE.BackSide });
   // polished nickel (LOOKDEV recipe, a touch warm like the photos' fixtures) + warm nickel for trims
   // polished nickel (LOOKDEV): cool, silvery, mirror-like (the photos' fixtures are not brass)
-  const nickel = physM({ color: 0xd9dadb, roughness: 0.16, metalness: 1.0, envMapIntensity: 1.6 });
+  const nickel = physM({ color: 0xc9c2b6, roughness: 0.15, metalness: 1.0, envMapIntensity: 0.9 }); /* p20/p21: warm polished nickel, reads mid-grey-champagne, not white chrome */
   const warmNickel = nickel;
   const clipMat = physM({ color: 0xd4d6d8, roughness: 0.16, metalness: 1.0 });
   const steel = physM({ color: 0xc8cacc, roughness: 0.32, metalness: 1.0, anisotropy: 0.7 });
@@ -166,7 +167,7 @@ export async function build(ctx) {
   const glassEdge = std({ color: 0xdfe9e5, roughness: 0.1, transparent: true, opacity: 0.32 }); // low-iron: barely tinted edges
   const clearGlass = physM({ color: 0xffffff, roughness: 0.02, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 2.2, specularIntensity: 1, ior: 1.5 });
   const fridgeGlass = physM({ color: 0x2a2d2d, roughness: 0.03, transparent: true, opacity: 0.22, depthWrite: false, envMapIntensity: 0.8, specularIntensity: 1 });
-  const skyGlow = std({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 3.2, roughness: 1,
+  const skyGlow = std({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.8, roughness: 1,
     emissiveMap: kit.canvasTex(128, 256, (g, w, h) => { const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#f4f8ff'); gr.addColorStop(0.6, '#e6eefa'); gr.addColorStop(1, '#d4e2f4'); g.fillStyle = gr; g.fillRect(0, 0, w, h); }) });
   const bulbGlow = std({ color: 0xffffff, emissive: 0xffd9a0, emissiveIntensity: 9, roughness: 1 });
   const ceil = std({ color: 0xf2efe9, roughness: 0.95, side: THREE.DoubleSide });
@@ -470,13 +471,14 @@ export async function build(ctx) {
     // slipper/boat profile: curved outer belly, thin (~2 cm) rolled rim
     /* p19: modern freestanding oval soaker: oval footprint inset ~7 cm, straight walls flaring out to the rim,
        thin (~2 cm) flat rim, deep basin with a soft floor fillet (was egg-shaped: round base, belly bulge) */
-    const prof = [[0, 0.0], [0.29, 0.0], [0.312, 0.005], [0.326, 0.022], [0.333, 0.055], [0.348, 0.20], [0.367, 0.35], [0.386, 0.48], [0.397, 0.55], [0.401, 0.572], [0.399, 0.582], [0.393, 0.587], [0.385, 0.586], [0.381, 0.578], [0.378, 0.56], [0.368, 0.48], [0.347, 0.34], [0.318, 0.20], [0.29, 0.115], [0.262, 0.082], [0.22, 0.07], [0, 0.068]];
+    /* p20: double slipper: narrow pedestal base flaring out to a thin (~1.5 cm) rolled rim; rim ~0.52 m mid, ~0.63 m at both ends */
+    const prof = [[0, 0.0], [0.24, 0.0], [0.262, 0.005], [0.276, 0.022], [0.284, 0.055], [0.304, 0.20], [0.333, 0.33], [0.366, 0.43], [0.392, 0.49], [0.405, 0.512], [0.404, 0.522], [0.398, 0.527], [0.390, 0.526], [0.386, 0.518], [0.381, 0.50], [0.366, 0.43], [0.338, 0.31], [0.304, 0.19], [0.27, 0.11], [0.245, 0.08], [0.20, 0.068], [0, 0.066]];
     const pos = [], idx = [];
     for (const [rr, y] of prof) {
       const k = Math.min(1, rr / 0.2), a = rr, b = rr + dL * k;
       for (let i = 0; i < NS; i++) {
         const t = i / NS * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-        const yy = y + 0.045 * Math.pow(Math.max(0, s), 2.5) * Math.pow(Math.min(1, y / 0.58), 4); /* rim rises gently at the back (head) end */
+        const yy = y + 0.105 * Math.pow(Math.abs(s), 2.2) * Math.pow(Math.min(1, y / 0.52), 4); /* double slipper: rim rises at both ends */
         pos.push(a * Math.sign(c) * Math.pow(Math.abs(c), 2 / n), yy, b * Math.sign(s) * Math.pow(Math.abs(s), 2 / n));
       }
     }
@@ -631,7 +633,7 @@ export async function build(ctx) {
   }
 
   // ---- bath fill light (sconces + skylights read brighter in the photos than our shell lighting)
-  const fill = new THREE.PointLight(0xffe8cc, 1.4, 7.5, 1.5); fill.position.set(19.3, Y0 + 2.45, 17.4); fill.castShadow = false; bath.add(fill);
+  const fill = new THREE.PointLight(0xffe8cc, 0.5, 7.5, 1.5); fill.position.set(19.3, Y0 + 2.45, 17.4); fill.castShadow = false; bath.add(fill);
 
   // ================================================================== VESTIBULE (coffee bar, p23)
   const vest = kit.group(root, [0, 0, 0], 0, 'vestibule');
@@ -689,7 +691,7 @@ export async function build(ctx) {
     // built-in stainless coffee machine (~0.56 W x 0.45 H): brushed bezel, black control strip with a lit
     // display, dark recessed brew bay with spout block, drip grate and a cup
     { const cx = UF - 0.02, y0 = UY0 + 0.02, y1 = y0 + 0.45, z0 = 13.79, z1 = 14.33;
-      const ss = physM({ color: 0xd6d8da, roughness: 0.3, metalness: 0.8, anisotropy: 0.6 }); // brushed stainless that stays light in a dark room
+      const ss = physM({ color: 0xb4b5b4, roughness: 0.34, metalness: 1.0, anisotropy: 0.7, envMapIntensity: 0.75 }); /* p23 Wolf: brushed stainless, mid grey (was a white frame) */
       bx(L, ss, cx, y0, z0, cx + 0.025, y1, z1, 0.004);
       bx(L, ss, cx + 0.02, y0 + 0.012, z0 + 0.012, cx + 0.027, y1 - 0.095, z0 + 0.10, 0.002); bx(L, ss, cx + 0.02, y0 + 0.012, z1 - 0.10, cx + 0.027, y1 - 0.095, z1 - 0.012, 0.002); // raised side panels
       bx(L, blackGlass, cx + 0.024, y1 - 0.085, z0 + 0.035, cx + 0.028, y1 - 0.03, z1 - 0.035);
@@ -756,7 +758,7 @@ export async function build(ctx) {
     kit.add(gr, new THREE.BoxGeometry(0.62, 0.012, 0.34), M.paintWhite, [0, 0, 0]);
     for (let i = 0; i < 18; i++) kit.add(gr, new THREE.BoxGeometry(0.003, 0.012, 0.30), std({ color: 0x8e8c88, roughness: 0.8 }), [-0.28 + i * 0.033, -0.003, 0]);
     kit.canLights(vest, [[16.45, 12.02], [16.68, 12.95]], PLATE);
-    const vl = new THREE.PointLight(0xffe4c4, 2.0, 4.5, 1.6); vl.position.set(16.70, PLATE - 0.3, 12.5); vl.castShadow = false; vest.add(vl);
+    const vl = new THREE.PointLight(0xffe4c4, 0.8, 4.5, 1.6); vl.position.set(16.70, PLATE - 0.3, 12.5); vl.castShadow = false; vest.add(vl);
   }
 
   // ================================================================== PRIMARY CLOSET (plain walk-in)

@@ -43,9 +43,9 @@ function wallpaperTex(kit) { // light-grey linen weave with a fine, low-contrast
 function marbleTex(kit, seed = 3, size = 1024) { // Nero Marquina (honed): warm charcoal, sparse straight thin white veins, few branching ones
   const r = kit.rng(seed);
   return kit.canvasTex(size, size, (g, w, h) => {
-    g.fillStyle = '#262625'; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 160; i++) { const v = 38 + (r() - 0.5) * 14; g.fillStyle = `rgba(${v + 2},${v + 1},${v - 1},0.20)`; g.beginPath(); g.ellipse(r() * w, r() * h, 40 + r() * 160, 25 + r() * 90, r() * 3, 0, Math.PI * 2); g.fill(); }
-    for (let i = 0; i < 14000; i++) { const v = 28 + r() * 30; g.fillStyle = `rgba(${v},${v},${v - 2},0.16)`; g.fillRect(r() * w, r() * h, 1, 1); }
+    g.fillStyle = '#403f3c'; g.fillRect(0, 0, w, h); /* charcoal, not black: renders ~#2e2e2c under the bath's light */
+    for (let i = 0; i < 160; i++) { const v = 62 + (r() - 0.5) * 18; g.fillStyle = `rgba(${v + 2},${v + 1},${v - 1},0.20)`; g.beginPath(); g.ellipse(r() * w, r() * h, 40 + r() * 160, 25 + r() * 90, r() * 3, 0, Math.PI * 2); g.fill(); }
+    for (let i = 0; i < 14000; i++) { const v = 48 + r() * 34; g.fillStyle = `rgba(${v},${v},${v - 2},0.16)`; g.fillRect(r() * w, r() * h, 1, 1); }
     const line = (pts, lw, a) => { // draws with wrap-around copies so the tile repeats seamlessly
       for (const ox of [-w, 0, w]) for (const oy of [-h, 0, h]) {
         g.strokeStyle = `rgba(236,235,232,${a})`; g.lineWidth = lw; g.lineJoin = 'round'; g.beginPath();
@@ -65,8 +65,8 @@ function marbleTex(kit, seed = 3, size = 1024) { // Nero Marquina (honed): warm 
       for (const [kx, ky, ka] of kids) vein(kx, ky, ka, len * (0.15 + r() * 0.25), Math.max(0.6, lw * 0.75), a * 0.8, depth + 1);
     };
     const s = size / 1024;
-    for (let i = 0; i < 3; i++) vein(r() * w, r() * h, -0.75 + (r() - 0.5) * 0.4, (600 + r() * 500) * s, (0.9 + r() * 0.5) * s, 0.75, 0); // main diagonal veins
-    for (let i = 0; i < 4; i++) vein(r() * w, r() * h, 0.7 + (r() - 0.5) * 0.5, (150 + r() * 250) * s, 0.7 * s, 0.45, 1); // sparse fine cross veins
+    for (let i = 0; i < 5; i++) vein(r() * w, r() * h, -0.75 + (r() - 0.5) * 0.4, (600 + r() * 500) * s, (1.0 + r() * 0.6) * s, 0.9, 0); /* main diagonal white veins */
+    for (let i = 0; i < 9; i++) vein(r() * w, r() * h, 0.7 + (r() - 0.5) * 0.5, (150 + r() * 300) * s, 0.8 * s, 0.6, 1); /* fine cross veins */
   }, { repeat: [1 / 1.6, 1 / 1.6] });
 }
 function porcelainTex(kit, tw, th, base, seed) { // large-format grey porcelain, one tile per texture
@@ -262,7 +262,7 @@ export async function build(ctx) {
   // ---------------------------------------------------------------- materials
   const wpMap = wallpaperTex(kit);
   const wallpaper = std({ map: wpMap, bumpMap: wpMap, bumpScale: 0.12, roughness: 0.92 });
-  const warmWall = M.paintWhite.clone(); warmWall.color = new THREE.Color(0xf4f3f0); warmWall.emissive = new THREE.Color(0xffffff); warmWall.emissiveIntensity = 0.03; // neutral white
+  const warmWall = M.paintWhite.clone(); warmWall.color = new THREE.Color(0xf6ecdd); /* warm cream (p28/p29), was neutral and rendered blue-grey */ warmWall.emissive = new THREE.Color(0xffffff); warmWall.emissiveIntensity = 0.03;
   const hes = kit.pbrMaps('hessian_380', '1k', { repeat: [4, 4] });
   const upholstery = std({ color: 0x4a4a4e, roughness: 0.95, normalMap: hes.normalMap, normalScale: new THREE.Vector2(0.6, 0.6) });
   const duvet = std({ color: 0xf5f4f1, roughness: 0.95, side: THREE.DoubleSide, normalMap: kit.noiseNormal(256, 1.4, 12, 21), normalScale: new THREE.Vector2(0.4, 0.4) });
@@ -301,7 +301,7 @@ export async function build(ctx) {
   const porcelain = std({ color: 0xfbfbfa, roughness: 0.1 });
   const waffle = kit.canvasTex(128, 128, (g, w, h) => { g.fillStyle = '#9a9a9a'; g.fillRect(0, 0, w, h); g.fillStyle = '#3a3a3a'; for (let y = 0; y < h; y += 16) for (let x = 0; x < w; x += 16) g.fillRect(x + 3, y + 3, 10, 10); }, { srgb: false, repeat: [9, 9] });
   const towelBlack = std({ color: 0x6a6a6c, roughness: 1, bumpMap: waffle, bumpScale: 2.5, map: waffle });
-  const glassMat = physMat({ color: 0xeef5f2, roughness: 0.02, transparent: true, opacity: 0.06, metalness: 0, envMapIntensity: 1.2, side: THREE.DoubleSide, depthWrite: false });
+  const glassMat = physMat({ color: 0xeef5f2, roughness: 0.02, transparent: true, opacity: 0.05, metalness: 0, envMapIntensity: 0.3, specularIntensity: 0.6, side: THREE.FrontSide, depthWrite: false }); /* one face only + low env: the doubled grazing reflections read as a flat grey slab in p29 */
   const glassEdge = std({ color: 0xbfd8cf, roughness: 0.1, transparent: true, opacity: 0.28 });
   const opal = std({ color: 0xffffff, emissive: 0xfff3e2, emissiveIntensity: 0.9, roughness: 0.5 });
 
@@ -478,7 +478,7 @@ export async function build(ctx) {
   for (const z of [1.62, 4.62]) ao(X1 - 0.24, z, 0.95, 0.75, 0.5);
   // warm low sun through the side window: a soft patch on the floor by the wardrobe (non-shadow spot, 1 of 2 lights)
   {
-    const sunSpot = new THREE.SpotLight(0xe6eeff, 90, 12, 0.5, 1.0, 2); sunSpot.castShadow = false; /* cool soft daylight from the window */
+    const sunSpot = new THREE.SpotLight(0xfff1e0, 90, 12, 0.5, 1.0, 2); sunSpot.castShadow = false; /* soft warm daylight from the window (was cool blue: walls read blue-grey vs the photo's cream) */
     sunSpot.position.set(24.0, Y + 2.4, 3.45); sunSpot.target.position.set(19.5, Y + 0.6, 3.2);
     bed.add(sunSpot, sunSpot.target);
   }

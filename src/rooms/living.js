@@ -565,7 +565,7 @@ export async function build(ctx) {
   // ------------------------------------------------------------------ kentia palm (right foreground)
   {
     // potted kentia, ~2.6 m tall, 16 long arching fronds; pot sits just off-frame right of the right sofa's near end
-    const P0 = V3(5.70, 0, 7.88);
+    const P0 = V3(5.70, 0, 8.30); /* 0.42 m off the street-side wall: at 7.88 its leaflets reached through into the game room */
     const potM = std({ color: 0xd9d3c8, roughness: 0.8, normalMap: kit.noiseNormal(128, 2, 16, 13) });
     const pg = kit.group(root, [P0.x, 0, P0.z], 0, 'palmPot');
     kit.add(pg, kit.lathe([[0, 0], [0.22, 0], [0.27, 0.12], [0.29, 0.50], [0.27, 0.52], [0, 0.48]], 40), potM, [0, 0, 0]);
@@ -589,8 +589,9 @@ export async function build(ctx) {
       const hb = 0.80 + r() * 0.95;            // petiole height above the soil
       const L = 1.0 + r() * 0.35;               // arching rachis length
       const out = V3(Math.cos(az), 0, Math.sin(az));
-      if (out.z < 0) out.z = Math.max(out.z, -0.30 / (L + 0.3)); // street wall at z=7.37
-      out.normalize();
+      /* street/game-room wall at z=7.37: limit how far a frond leans toward it. Clamp the unit vector itself (clamping z and
+         then normalising turned a frond aimed straight at the wall back into (0,0,-1): its leaflets poked into the game room) */
+      { const lim = 0.30 / (L + 0.3); if (out.z < -lim) { out.z = -lim; out.x = (out.x >= 0 ? 1 : -1) * Math.sqrt(1 - lim * lim); } }
       const a = V3(P0.x + out.x * 0.05, 0.48, P0.z + out.z * 0.05);
       const top = a.clone().addScaledVector(UP, hb).addScaledVector(out, 0.12 + hb * 0.12);
       const pts = [a, a.clone().addScaledVector(UP, hb * 0.55).addScaledVector(out, 0.05), top,
