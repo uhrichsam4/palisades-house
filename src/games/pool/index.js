@@ -50,7 +50,7 @@ const CSS = `
 #pp-spin i { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: #d42a22; box-shadow: 0 0 0 2px rgba(212,42,34,.25); transition: transform .15s var(--eo); }
 #pp-spin b { position: absolute; left: 50%; top: -16px; translate: -50% 0; font: 600 10px/1 var(--mono); color: var(--tx2); white-space: nowrap; }
 body.pg-venue #help { display: none !important; }
-#pp-keys { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 9; display: flex; gap: 6px; pointer-events: none; flex-wrap: wrap; justify-content: center; }
+#pp-keys { position: fixed; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: min(92vw, 820px); bottom: 18px; z-index: 9; display: flex; gap: 6px; pointer-events: none; flex-wrap: wrap; justify-content: center; }
 .pp-card { position: fixed; left: 50%; top: 50%; translate: -50% -50%; z-index: 60; width: min(560px, calc(100vw - 32px)); background: var(--bg); border: var(--hair); border-radius: 6px; padding: 18px; box-sizing: border-box;
   box-shadow: 0 2px 6px -2px rgba(0,0,0,.2), 0 30px 80px rgba(0,0,0,.45); }
 .pp-card h2 { margin: 6px 0 12px; font-size: 34px; font-weight: 500; letter-spacing: -0.055em; line-height: 1; }
@@ -80,7 +80,7 @@ export function createPool(ctx, mp, hub) {
   let T = null;                   // replicated table state
   let anim = null;                // shot playback { res, t0, post, shooterId, n, pending }
   let local = { at: false, view: 'cue', userView: null, aim: 0, pitch: 0.32, dist: 0.95, power: 0, charging: false, chargeMode: null, spin: [0, 0], cue: null, placing: false,
-    stanceKey: '', lastAimSend: 0, aimSent: '', botAt: 0, botShot: null, camP: new THREE.Vector3(), camQ: new THREE.Quaternion(), camInit: false, iFroze: false, chargeT: 0, prevThird: true };
+    stanceKey: '', lastAimSend: 0, aimSent: '', botAt: 0, holdUntil: 0, botShot: null, camP: new THREE.Vector3(), camQ: new THREE.Quaternion(), camInit: false, iFroze: false, chargeT: 0, prevThird: true };
   const remoteAim = new Map(); // shooterId -> { dir, cue, p, s, at }
   let lastDrift = null, shotsPlayed = 0, idleSetBalls = true;
   const fast = { on: false }; // tests: skip the playback
@@ -100,7 +100,7 @@ export function createPool(ctx, mp, hub) {
   for (const n of [HUD, POWER, SPIN, KEYS]) n.style.pointerEvents = 'none';
   const $ = (id) => document.getElementById(id);
   let foulT = 0;
-  function banner(big, sub, ms = 2600) { ui.roll($('pp-foul-big'), big); ui.setHtml($('pp-foul-sub'), sub); ui.show(FOUL, true); clearTimeout(foulT); foulT = setTimeout(() => ui.show(FOUL, false), ms); }
+  function banner(big, sub, ms = 2600, hold = false) { if (hold) { local.holdUntil = performance.now() + ms + 300; local.botAt = Math.max(local.botAt, local.holdUntil); } ui.roll($('pp-foul-big'), big); ui.setHtml($('pp-foul-sub'), sub); ui.show(FOUL, true); clearTimeout(foulT); foulT = setTimeout(() => ui.show(FOUL, false), ms); }
 
   // ---------------------------------------------------------------- helpers
   const tw = (x, y, out = new THREE.Vector3()) => out.set(X0 + x, TABLE.y + R, Z0 + y);
@@ -133,7 +133,7 @@ export function createPool(ctx, mp, hub) {
     renderHud();
   }
   function resetTurn() {
-    local.charging = false; local.power = 0; local.botShot = null; local.botAt = performance.now() + 1100;
+    local.charging = false; local.power = 0; local.botShot = null; local.botAt = Math.max(performance.now() + 1100, local.holdUntil || 0); /* polish5: never shoot under a FOUL / TIME banner */
     if (T && myTurn()) {
       local.cue = cueStart(); local.placing = T.g.inHand === 'any';
       if (!local.placing || local.aim === null) { const b = T.g.balls; const tgt = T.g.broken ? null : [L * 0.75, W / 2]; if (tgt) local.aim = Math.atan2(tgt[1] - local.cue[1], tgt[0] - local.cue[0]); }
@@ -142,7 +142,7 @@ export function createPool(ctx, mp, hub) {
   }
   function afterShotUI(g0, g1) {
     if (g1.phase === 'over') return;
-    if (g1.foul) banner('FOUL', chip(g1.foul, 'BALL IN HAND · ' + turnName().toUpperCase(), 'role'));
+    if (g1.foul) banner('FOUL', chip(g1.foul, 'BALL IN HAND · ' + turnName().toUpperCase(), 'role'), 2600, true);
     else if (g1.turn !== g0.turn) banner(T.mode === 'practice' ? 'MISS' : turnName() + "'s turn", chip('TURN', turnName().toUpperCase(), 'alt'), 1600);
     else if (g1.groups[g1.turn] && !g0.groups[g0.turn]) banner(g1.groups[g1.turn] === 'solid' ? 'SOLIDS' : 'STRIPES', chip(turnName().toUpperCase(), 'SHOOTS ' + (g1.groups[g1.turn] === 'solid' ? 'SOLIDS 1-7' : 'STRIPES 9-15'), 'role'), 1800);
   }
@@ -411,7 +411,7 @@ export function createPool(ctx, mp, hub) {
     const g = T.g;
     if (!anim && g.phase === 'aim' && T.mode !== 'wait' && T.mode !== 'practice') {
       const ctl = controller(g.turn);
-      if (now - T.turnAt > TURN_MS && (ctl === me() || (now - T.turnAt > TURN_MS + 5000 && isPlayer()))) { const n = { ...T, g: timeoutFoul(g), rev: T.rev + 1, turnAt: now }; setState(n); broadcast(); banner('TIME', chip('FOUL', 'BALL IN HAND', 'role')); }
+      if (now - T.turnAt > TURN_MS && (ctl === me() || (now - T.turnAt > TURN_MS + 5000 && isPlayer()))) { const n = { ...T, g: timeoutFoul(g), rev: T.rev + 1, turnAt: now }; setState(n); broadcast(); banner('TIME', chip('FOUL', 'BALL IN HAND', 'role'), 2600, true); }
       else if (T.players[g.turn] === 'bot' && ctl === me() && now > local.botAt) {
         if (!local.botShot) { local.botShot = botShot(g, Math.random, 1); local.botAt = now + 650; }
         else { const s = local.botShot; local.botShot = null; shoot(s); }

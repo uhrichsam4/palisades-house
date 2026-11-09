@@ -16,7 +16,7 @@ import { aimArm } from '../arms.js';
 import { nextEmote } from '../../avatars/anim.js';
 
 const ICON = '<path d="M5 9V6.5a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3V11a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4z"/><path d="M5 9h4M8 15v2.5h5V15"/>';
-const IN = RING.rope - 0.35, FY = RING.y;
+const IN = RING.rope - 0.35, FY = RING.y, SEP = 0.7; /* SEP: min fighter centre distance (bodies never interpenetrate) */
 const AREA = { pos: [RING.cx - RING.half - 2.4, RING.y - RING.h, RING.cz + 1.2], yaw: -Math.PI / 2 };
 const PUNCH = { jab: { dmg: 6, cost: 10, reach: 0.95, at: 150, cd: 330 }, hook: { dmg: 12, cost: 20, reach: 0.8, at: 230, cd: 620 } };
 
@@ -180,7 +180,7 @@ export function createBoxing(ctx, mp, hub) {
         if (M.phase === 'down' && M.down === side || M.phase === 'over') { mx = mz = 0; f.blk = false; }
         const sp = (f.blk ? 1.2 : 2.4) * dt; let nx = f.x + (ux * mz - uz * mx) * sp, nz = f.z + (uz * mz + ux * mx) * sp;
         if (f.slip && now < f.slip) { nx += -uz * (f.slipDir || 1) * dt * 1.5; nz += ux * (f.slipDir || 1) * dt * 1.5; }
-        if (Math.hypot(nx - o.x, nz - o.z) < 0.55) { nx = f.x; nz = f.z; }
+        if (Math.hypot(nx - o.x, nz - o.z) < SEP) { nx = f.x; nz = f.z; }
         f.x = Math.max(RING.cx - IN, Math.min(RING.cx + IN, nx)); f.z = Math.max(RING.cz - IN, Math.min(RING.cz + IN, nz));
         f.st = Math.min(100, f.st + (f.blk ? 4 : 16) * dt);
         fistTest(side, now);
@@ -196,10 +196,19 @@ export function createBoxing(ctx, mp, hub) {
         _a.set(f.x + fwx * (pj === 'jab' ? 0.9 : 0.35) + fwz * 0.12, head - 0.05, f.z + fwz * (pj === 'jab' ? 0.9 : 0.35) - fwx * 0.12); aimArm(cr, 'L', _a, f.blk ? 1 : 0.85);
         if (pj !== 'hook') { _a.set(f.x + fwx * 0.35 - fwz * 0.12, head - (f.blk ? 0 : 0.12), f.z + fwz * 0.35 + fwx * 0.12); aimArm(cr, 'R', _a, 0.85); } }
     }
+    /* polish5: keep the two bodies apart (remote lerp / slips / round resets could overlap them); only move the sides this client drives */
+    if (M.players[0] && M.players[1]) { const a = F[0], b = F[1]; let dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+      if (d < SEP) { if (d < 1e-4) { dx = 1; dz = 0; d = 1; } const push = SEP - d, c0 = iControl(0), c1 = iControl(1), w = c0 && c1 ? 0.5 : 1; const ux = dx / d, uz = dz / d;
+        if (c0) { a.x -= ux * push * w; a.z -= uz * push * w; } if (c1) { b.x += ux * push * w; b.z += uz * push * w; }
+        for (const f of [a, b]) { f.x = Math.max(RING.cx - IN, Math.min(RING.cx + IN, f.x)); f.z = Math.max(RING.cz - IN, Math.min(RING.cz + IN, f.z)); } } }
     if (local.at && local.side >= 0) {
       const f = F[local.side], o = F[1 - local.side]; const dx = o.x - f.x, dz = o.z - f.z, d = Math.hypot(dx, dz) || 1;
       if (!st.thirdPerson) st.thirdPerson = true;
-      tgtP.set(f.x - dx / d * 2.4 + dz / d * 0.6, FY + 2.0, f.z - dz / d * 2.4 - dx / d * 0.6); _b.set((f.x + o.x) / 2, FY + 1.2, (f.z + o.z) / 2); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
+      /* polish5: higher (FY+2.6) and 1.1 m to the side so your back doesn't hide the opponent; clamped inside the ropes so they
+         never cross the view; aimed at the midpoint between the fighters */
+      const CL = RING.rope - 0.25; tgtP.set(f.x - dx / d * 1.9 + dz / d * 1.1, FY + 2.6, f.z - dz / d * 1.9 - dx / d * 1.1);
+      tgtP.x = Math.max(RING.cx - CL, Math.min(RING.cx + CL, tgtP.x)); tgtP.z = Math.max(RING.cz - CL, Math.min(RING.cz + CL, tgtP.z));
+      _b.set((f.x + o.x) / 2, FY + 1.0, (f.z + o.z) / 2); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
       if (!local.camInit) { local.camP.copy(tgtP); local.camQ.copy(tgtQ); local.camInit = true; }
       const k = 1 - Math.exp(-dt * 7); local.camP.lerp(tgtP, k); local.camQ.slerp(tgtQ, k); camera.position.copy(local.camP); camera.quaternion.copy(local.camQ);
     }

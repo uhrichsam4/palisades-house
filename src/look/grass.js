@@ -67,7 +67,7 @@ export function createGrass({ scene, sun, hemi }) {
   const U = { uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uWind: { value: 0.2 }, uWindDir: { value: new THREE.Vector2(1, 0) }, uY: { value: LAWNS[0].y }, uSnow: { value: 0 }, uFar: { value: 22 }, uKeep: { value: 1 },
     uTrample: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color() }, uSky: { value: new THREE.Color() }, uGround: { value: new THREE.Color() },
-    uRoot: { value: new THREE.Color(0x1f2a10) }, uTip: { value: new THREE.Color(0x6e7f34) } };
+    uRoot: { value: new THREE.Color(0x26301a) }, uTip: { value: new THREE.Color(0x74843f) } }; /* tip ~ the lawn texture's muted #6d8a3e (pool/props.js) */
   const mat = new THREE.ShaderMaterial({ uniforms: U, vertexShader: VERT, fragmentShader: FRAG, side: THREE.DoubleSide, fog: false });
   const mesh = new THREE.Mesh(g, mat); mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.name = 'look:grass';
   Object.assign(mesh.userData, { noProbe: true, noCull: true, keep: true, noPathTrace: true, waterSkip: true });

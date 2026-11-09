@@ -75,7 +75,7 @@ const MOD = {
   lastT: null, frame: 0, time: 0, shot: false,
   rt: null, capCam: new THREE.PerspectiveCamera(), scale: 0.75, uCapture: { value: null }, uCapSize: { value: new THREE.Vector2(1, 1) },
   lastScan: -1e9, tint: null, scene: null, sunDir: new THREE.Vector3(0.42, 0.62, 0.66).normalize(),
-  frustum: new THREE.Frustum(), m4: new THREE.Matrix4(), deep: new THREE.Color(0x0a5a6e),
+  frustum: new THREE.Frustum(), m4: new THREE.Matrix4(), deep: new THREE.Color(0x0c4446),
 };
 const _v = new THREE.Vector3(), _c = new THREE.Color(), _box = new THREE.Box3();
 
@@ -246,7 +246,7 @@ export function createWater(ctx, opt) {
   // surface
   const tris = clippedGrid(outline, opt.meshCell ?? 0.12);
   const sGeo = gridGeometry(tris, () => 0);
-  const mat = new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0.04, metalness: 0, ior: 1.333, specularIntensity: 1, envMapIntensity: opt.reflect ?? 0.85 });
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0.05, metalness: 0, ior: 1.333, specularIntensity: 1, envMapIntensity: opt.reflect ?? 1.0 });
   kit?.outdoor?.(mat);
   const surfU = { ...U, tSurf, uStatic, uBox, tCapture: MOD.uCapture, uSigma: sigma, uScatter: scatter, uSigmaS: { value: 0.8 }, uDownK: { value: 0.7 }, uDeepCol: { value: MOD.deep } };
   mat.onBeforeCompile = (sh) => {
@@ -413,7 +413,7 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
       // polish: the sky part follows daylight (≈0 at night, so only the pool lights show) and storms turn it grey-green
       const sk = window.__sky, dl = sk?.daylight ?? 1, sev = sk ? Math.min(1, sk.severity * 1.25) : 0;
       const illum = (0.06 * (0.05 + 0.95 * dl) + 0.07 * sun.I * Math.max(MOD.sunDir.y, 0)) * 1.6;
-      scatter.value.set(color.r * illum * 0.25, color.g * illum * 0.8, color.b * illum * 1.35);
+      scatter.value.set(color.r * illum * 0.35, color.g * illum * 0.8, color.b * illum * 0.9); /* teal-green, not electric blue */
       if (sev > 0.01) { const l = (scatter.value.x + scatter.value.y + scatter.value.z) / 3; scatter.value.set(scatter.value.x + (l * 0.8 - scatter.value.x) * sev, scatter.value.y + (l * 1.05 - scatter.value.y) * sev, scatter.value.z + (l * 0.85 - scatter.value.z) * sev); }
       // sim
       let steps = 0;

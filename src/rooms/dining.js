@@ -306,25 +306,37 @@ export async function build(ctx) {
   // ================================================================ linear brass chandelier
   // canopy + short 0.6 m stem to a 1.4 m horizontal brass spine along the table axis; five white linear
   // light bars hang at two offset levels on slim brass drops (upper pair, lower trio).
+  // r4 (p06/p07/p08): the fixture is a sculptural brass multi-arm linear chandelier: a slim stem to a small hub,
+  // thin brass tube arms branching horizontally at three tiers, each arm ending in a knuckle that carries a flat
+  // white rectangular bar shade (opal underside glowing softly, kept under the 1.6 bloom threshold).
   const ch = kit.group(root, [TABLE.x, 0, TABLE.z], TABLE.ry, 'chandelier');
-  const glow = std({ color: 0xfbf8f2, emissive: 0xfff1da, emissiveIntensity: 2.6, roughness: 0.5 });
-  const spineY = CEIL - 0.72;
-  add(ch, kit.cyl(0.06, 0.065, 0.025, 32), brass, [0, CEIL - 0.0125, 0]);
-  add(ch, kit.cyl(0.008, 0.008, CEIL - spineY, 12), brass, [0, (CEIL + spineY) / 2, 0]);
-  add(ch, kit.cyl(0.018, 0.014, 0.05, 16), brass, [0, spineY + 0.02, 0]);
-  add(ch, kit.cyl(0.009, 0.009, 1.40, 12), brass, [0, spineY, 0], [0, 0, Math.PI / 2]);
-  for (const s of [-1, 1]) add(ch, kit.sphere(0.013, 12, 8), brass, [s * 0.70, spineY, 0]);
-  // [centre x along spine, drop below spine, bar length]
-  const bars = [[-0.38, 0.20, 0.62], [0.44, 0.20, 0.52], [-0.52, 0.44, 0.56], [0.06, 0.44, 0.66], [0.58, 0.44, 0.50]];
-  for (const [bx, drop, bl] of bars) {
-    const y = spineY - drop;
-    for (const e of [-1, 1]) { // two drops per bar, to the spine
-      const dx = bx + e * (bl / 2 - 0.05);
-      add(ch, kit.cyl(0.0035, 0.0035, drop - 0.02, 8), brass, [dx, spineY - (drop - 0.02) / 2, 0]);
-    }
-    add(ch, kit.rbox(bl, 0.016, 0.034, 0.006), brass, [bx, y + 0.016, 0]);   // brass channel
-    add(ch, kit.rbox(bl - 0.01, 0.022, 0.03, 0.009), glow, [bx, y - 0.002, 0]); // opal diffuser
+  const shadeMat = std({ color: 0xf4f2ee, emissive: 0xfff1da, emissiveIntensity: 0.22, roughness: 0.55 });
+  const glow = std({ color: 0xfbf8f2, emissive: 0xfff1da, emissiveIntensity: 1.15, roughness: 0.5 });
+  const hubY = CEIL - 0.78;
+  add(ch, kit.cyl(0.055, 0.06, 0.022, 32), brass, [0, CEIL - 0.011, 0]);
+  add(ch, kit.cyl(0.012, 0.016, 0.05, 16), brass, [0, CEIL - 0.045, 0]);
+  add(ch, kit.cyl(0.0065, 0.0065, CEIL - 0.07 - (hubY - 0.30), 12), brass, [0, (CEIL - 0.07 + hubY - 0.30) / 2, 0]);
+  add(ch, kit.cyl(0.016, 0.016, 0.06, 16), brass, [0, hubY, 0]);
+  add(ch, kit.sphere(0.011, 12, 8), brass, [0, hubY - 0.30, 0]);
+  // [arm heading (rad, 0 = +x along the table), arm length, tier y offset from the hub, shade length]
+  const arms = [[0, 0.62, 0.0, 0.50], [Math.PI, 0.50, 0.0, 0.44], [Math.PI / 2, 0.34, -0.15, 0.40], [-Math.PI / 2, 0.40, -0.15, 0.46],
+    [0.35, 0.78, -0.30, 0.52], [Math.PI - 0.30, 0.72, -0.30, 0.48]];
+  const armGeos = [], knGeos = [], shadeGeos = [], glowGeos = [];
+  for (const [a, L, dy, sl] of arms) {
+    const y = hubY + dy, ex = Math.cos(a) * L, ez = -Math.sin(a) * L;
+    const t = kit.cyl(0.0055, 0.0055, L, 10); t.rotateZ(Math.PI / 2); t.rotateY(a); t.translate(ex / 2, y, ez / 2); armGeos.push(t);
+    const kn = kit.sphere(0.012, 10, 8); kn.translate(ex, y, ez); knGeos.push(kn);
+    // short drop from the knuckle to the shade's top; the bar shade runs perpendicular to its arm
+    const dr = kit.cyl(0.004, 0.004, 0.05, 8); dr.translate(ex, y - 0.025, ez); armGeos.push(dr);
+    const sh = kit.rbox(sl, 0.032, 0.055, 0.006); sh.rotateY(a + Math.PI / 2); sh.translate(ex, y - 0.066, ez); shadeGeos.push(sh);
+    const gl = new THREE.PlaneGeometry(sl - 0.02, 0.04); gl.rotateX(Math.PI / 2); gl.rotateY(a + Math.PI / 2); gl.translate(ex, y - 0.0825, ez); glowGeos.push(gl);
   }
+  // vertical stem through the tiers
+  armGeos.push(kit.cyl(0.0065, 0.0065, 0.30, 10).translate(0, hubY - 0.15, 0));
+  add(ch, kit.mergeGeometries(armGeos), brass);
+  add(ch, kit.mergeGeometries(knGeos), brass);
+  add(ch, kit.mergeGeometries(shadeGeos), shadeMat);
+  { const gm = add(ch, kit.mergeGeometries(glowGeos), glow); gm.castShadow = false; }
 
   // ================================================================ black sideboard
   // case with rounded vertical corners, four doors on 3 mm gaps with dark reveals, recessed slot pulls,
@@ -447,6 +459,22 @@ export async function build(ctx) {
       // leaving ~3.5 m clear in the middle (p06)
       panels.forEach((p, i) => { if (i === 0) { p.position.x = ow - pw - 0.03; p.position.z = z0; } else { p.position.x = 0.03 + (i - 1) * 0.012; p.position.z = z0 + i * 0.058; } });
       if (panels.length) { og.updateMatrixWorld(true); for (const set of [panels.slice(0, 1), panels.slice(1)]) { if (!set.length) continue; const bb = new THREE.Box3(); for (const p of set) bb.expandByObject(p); phys.boxAABB(bb.min.toArray(), bb.max.toArray()); } }
+      // Clear slider glass. Three or four M.glass panes stacked in the pocket each add ~14 % white + room
+      // reflection, so the stack read as an opaque grey/white slab (p05/p06). Real low-iron glass reflects
+      // ~8 % per pane at normal incidence and passes the bright yard: thinner, less env per pane, slight
+      // green-grey body tint, Fresnel still brightens it at grazing angles.
+      const sliderGlass = M.glass.clone();
+      sliderGlass.opacity = 0.035; sliderGlass.envMapIntensity = 0.45; sliderGlass.color.set(0xeef4f1); sliderGlass.specularIntensity = 0.8;
+      sliderGlass.name = 'dining:sliderGlass';
+      const reglaze = (g) => g.traverse((m) => { if (m.isMesh && m.name === 'glass') m.material = sliderGlass; });
+      reglaze(og);
+      // walk mode: src/building builds its own operable sash model inside this opening group after the pieces
+      // are built (multiplayer start); give it the same clear glass once it appears (checked twice a second, ~20 s max)
+      let tries = 0, acc = 0;
+      const stop = ctx.onUpdate((dt) => {
+        if (tries > 40) return; acc += dt; if (acc < 0.5) return; acc = 0; tries++;
+        const bm = og.getObjectByName('building:win:din-slider'); if (bm) { reglaze(bm); tries = 99; if (typeof stop === 'function') stop(); }
+      });
     }
   }
 

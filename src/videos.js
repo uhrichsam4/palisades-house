@@ -247,11 +247,12 @@ export function startVideos(ctx, mp) {
   let msgT = 0; function flash(t) { els.msg.textContent = t; msgT = performance.now() + 3000; }
   let hudKey = '';
   function hud(force) {
-    const k = W ? 'w:' + W.spot.id : near ? 'n:' + near.spot.id : '';
+    const k = W ? 'w:' + W.spot.id : near && looking ? 'n:' + near.spot.id : '';
     if (!force && k === hudKey && !(msgT && performance.now() > msgT)) return; hudKey = k;
     if (msgT && performance.now() > msgT) { els.msg.textContent = ''; msgT = 0; }
-    root.classList.toggle('near', !W && !!near); root.classList.toggle('on', !!W);
-    if (near && !W) els.watch.innerHTML = `▶ Watch: ${esc(near.spot.title)} <kbd>C</kbd>`;
+    root.classList.toggle('near', !W && !!near && looking); root.classList.toggle('on', !!W);
+    /* calm HUD: same chip language as the E interact prompt (src/interact.js), shown only while you face the card */
+    if (near && looking && !W) els.watch.innerHTML = `<span class="ix-k">C</span><span class="ix-sep">::</span><span class="ix-v">WATCH · ${esc(near.spot.title)}</span>`;
     if (W) { els.title.textContent = W.spot.title; els.rc.hidden = !rc; }
   }
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -276,7 +277,7 @@ export function startVideos(ctx, mp) {
   document.addEventListener('pointerlockchange', () => { if (W && W.lockedAtStart && !document.pointerLockElement) exit(); });
 
   // ---------------------------------------------------------------- per frame
-  let near = null; const tmpV = new THREE.Vector3(), camFwd = new THREE.Vector3();
+  let near = null, looking = false; const tmpV = new THREE.Vector3(), camFwd = new THREE.Vector3();
   ctx.onUpdate((dt, t) => {
     const now = performance.now();
     // live player camera pose (player.update ran just before us) = where an exit flies back to
@@ -300,11 +301,13 @@ export function startVideos(ctx, mp) {
       c.mat.opacity = Math.min(1, (CARD_SHOW - d) / 2);
       c.s.position.set(sp.x, sp.y + Math.sin(t * 1.6 + c.phase) * 0.035, sp.z);
       if (d < NEAR_WATCH && Math.abs(sp.y - (pp.y + 1.3)) < 1.5) { // pick the card you look at (then the nearest)
-        tmpV.copy(sp).sub(camera.position).normalize(); const score = d * 0.15 + (1 - tmpV.dot(camFwd));
-        if (score < bs) { bs = score; best = c; }
+        tmpV.copy(sp).sub(camera.position).normalize(); const dot = tmpV.dot(camFwd); const score = d * 0.15 + (1 - dot);
+        if (score < bs) { bs = score; best = c; best.dot = dot; }
       }
     }
     near = st.seat ? null : best;
+    /* calm HUD: the Watch prompt only shows while the card is within ~35 deg of where you look (C still works when near) */
+    looking = !!near && near.dot > 0.82;
 
     // watch camera
     if (W) {

@@ -6,7 +6,7 @@
 // mesh AND its collider (pool.js owns the deck, its hole and the basin colliders) so people can swim.
 import * as THREE from 'three';
 import { G, CENTER, STREET_Y, buildTerrain, padDist, fbm, vnoise, ridged, gully, ss } from './site/terrain.js';
-import { blobGeo, foliageMaterial, instances, palm, updateFloraLOD } from './site/flora.js';
+import { blobGeo, foliageMaterial, instances, palm, updateFloraLOD, cc0Plants, plantInstances } from './site/flora.js';
 import { createTrees } from './site/trees.js';
 import { COURT, courtMaterials, buildCourt, fenceLine } from './site/court.js';
 import { buildSportsCourt } from '../games/court.js';   // bigger court: tennis + basketball + boxing ring + gate
@@ -57,8 +57,9 @@ export async function build(ctx) {
 
   // ---------------------------------------------------------------- terrain colours
   const C = (h) => new THREE.Color().setHex(h);
-  const COL = { lawn: C(0x4d5233), lawn2: C(0x5a4f3e), sage: C(0x7a7e62), brown: C(0x6a5a48), olive2: C(0x4b5236), beige: C(0xb9a68a), spring: C(0x6c8e3c), scrub: C(0x3d5128), olive: C(0x6c6f45),
-    dirt: C(0xa39174), rock: C(0x9b9384), haze: C(0x9fb2b4), farGreen: C(0x6c9a40) };
+  /* Santa Monica Mountains chaparral: sage / olive / dusty green, tan-ochre rock and dry-grass patches (p00, p44) */
+  const COL = { lawn: C(0x55603a), lawn2: C(0x5f5a40), sage: C(0x7a7e62), brown: C(0x6a5a48), olive2: C(0x4b5236), beige: C(0xb9a68a), spring: C(0x6a7348), scrub: C(0x3e4a2d), olive: C(0x737250),
+    dirt: C(0xa08a68), rock: C(0xa48d6a), haze: C(0x9fb2b4), farGreen: C(0x66704c), dryGrass: C(0x9c8b5e), ochre: C(0xb09468) };
   const tmp = new THREE.Color(), t2 = new THREE.Color();
   const colorAt = (x, y, z, ny, out, nx = 0, nz = 0) => {
     const d = padDist(x, z), r = Math.hypot(x - CENTER[0], z - CENTER[1]);
@@ -67,7 +68,12 @@ export async function build(ctx) {
     out.lerp(COL.olive, ss(0.55, 0.9, m2) * 0.5);
     out.lerp(COL.scrub, ss(0.5, 0.8, 0.5 + 0.5 * fbm(x / 4, z / 4, 2, 12)) * 0.55);
     if (r > 120) out.lerp(COL.scrub, ss(0.45, 0.7, 0.5 + 0.5 * fbm(x / 55, z / 55, 3, 31)) * 0.75).lerp(COL.spring, ss(0.6, 0.85, 0.5 + 0.5 * fbm(x / 140, z / 140, 2, 33)) * 0.5);
+    /* large-scale variation so the canyon walls don't tile: dry-grass meadows on gentle ground, ochre outcrops on steep */
+    if (r > 40) { const big = 0.5 + 0.5 * fbm(x / 180 + 7.3, z / 140 - 2.1, 3, 83), med = 0.5 + 0.5 * fbm(x / 47, z / 47, 3, 85);
+      out.lerp(COL.dryGrass, ss(0.58, 0.8, big * 0.65 + med * 0.35) * ss(0.7, 0.9, ny) * 0.75 * ss(40, 120, r));
+      out.lerp(COL.sage, ss(0.3, 0.1, big) * 0.35); }
     const steep = ss(0.86, 0.6, ny); out.lerp(tmp.copy(COL.dirt).lerp(COL.rock, m2), steep * (0.35 + 0.6 * ss(0.4, 0.7, m1)));
+    if (r > 60) out.lerp(COL.ochre, ss(0.8, 0.6, ny) * ss(0.62, 0.8, 0.5 + 0.5 * fbm(x / 30 + 3.1, z / 30, 3, 87)) * 0.7);
     // fire roads on the mountain behind the street (p45): contour-ish bands
     // the mountain behind the street (p45): dark-olive chaparral mottled with sage, brown/grey dieback and
     // bare beige rock on the steep lower faces
@@ -78,7 +84,7 @@ export async function build(ctx) {
         .lerp(COL.brown, ss(0.6, 0.9, 0.5 + 0.5 * fbm(x / 28, z / 28, 3, 65)) * 0.65)
         .lerp(COL.rock, ss(0.68, 0.95, 0.5 + 0.5 * fbm(x / 35, z / 35, 2, 67)) * 0.4)
         .lerp(COL.beige, ss(0.9, 0.55, ny) * ss(0.45, 0.75, 0.5 + 0.5 * fbm(x / 60, z / 60, 3, 69)) * 0.85)
-        .lerp(COL.scrub, 0.45 * gully(x, z)).multiplyScalar(0.5);
+        .lerp(COL.scrub, 0.45 * gully(x, z)).multiplyScalar(0.62);
       out.lerp(t2, k);
     }
     // baked relief shading (light from the west, like the listing's afternoon aerial) so ridges and gullies read
@@ -115,12 +121,12 @@ export async function build(ctx) {
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D mottle;\nvarying float vWild;')
       .replace('#include <map_fragment>', `#ifdef USE_MAP
   vec4 sampledDiffuseColor = texture2D( map, vMapUv ) * ( 0.5 + 0.62 * texture2D( map, vMapUv * 0.047 + vec2( 0.31, 0.77 ) ).g );
-  float mt = texture2D( mottle, vMapUv * 0.012 ).g * texture2D( mottle, vMapUv * 0.0047 + vec2( 0.5, 0.21 ) ).g;
-  sampledDiffuseColor.rgb *= mix( 1.0, 0.3 + 0.95 * mt, vWild );
+  float mt = texture2D( mottle, vMapUv * 0.012 ).g * texture2D( mottle, mat2( 0.8, -0.6, 0.6, 0.8 ) * vMapUv * 0.0053 + vec2( 0.5, 0.21 ) ).g;
+  sampledDiffuseColor.rgb *= mix( 1.0, 0.42 + 0.8 * mt, vWild );
   diffuseColor *= sampledDiffuseColor;
 #endif`);
   };
-  groundMat.customProgramCacheKey = () => 'site-ground-3scale';
+  groundMat.customProgramCacheKey = () => 'site-ground-3scale-r';
   addHaze(groundMat);
   const ground = new THREE.Mesh(terr.geo, groundMat); ground.name = 'site-terrain'; ground.receiveShadow = true; ground.userData.keep = true; root.add(ground);
   phys.trimesh(terr.cgeo);
@@ -198,13 +204,14 @@ export async function build(ctx) {
   const shrubG = [blobGeo(kit, 3, 6, 1), blobGeo(kit, 8, 7, 1, 0.8), blobGeo(kit, 15, 5, 1, 1.1)];
   const crownG = blobGeo(kit, 21, 8, 1, 0.8);
   const lowG = blobGeo(kit, 30, 4, 0, 0.9);
-  const SHRUB = [0x4a5a32, 0x41532d, 0x5c6240, 0x37492a, 0x6a6c4a, 0x52693a, 0x586341, 0x3e5429];
+  const SHRUB = [0x4f5a36, 0x46512f, 0x5e6344, 0x3c472c, 0x6b6c4e, 0x55623d, 0x5d6446, 0x434e30];
   const TREE = [0x34502a, 0x3e562b, 0x4b5d34, 0x5f6b45, 0x324625, 0x46633a];
   const near = [[], [], []], far = [], trees = [], trunks = [];
   const real = [], rk = kit.rng(9917); // real branching trees + bushes (site/trees.js); `trees`/`trunks`/`near` stay as the blob fallback (?blobtrees=1)
   const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const pick2 = (a, r) => a[Math.floor(r() * a.length)];
   // leaf tint for the textured bushes from the blob palette: keep its hue/lightness differences, centred on white
-  const bushTint = (hex) => { const c = new THREE.Color(hex), hsl = {}; c.getHSL(hsl); return new THREE.Color().setHSL(hsl.h + 0.015, Math.min(0.3, hsl.s * 0.5), 0.5 + (hsl.l - 0.3) * 0.9).getHex(); };
+  const bushTint = (hex) => { const c = new THREE.Color(hex), hsl = {}; c.getHSL(hsl); return new THREE.Color().setHSL(hsl.h + 0.005, Math.min(0.22, hsl.s * 0.42), 0.43 + (hsl.l - 0.3) * 0.8).getHex(); };
   const yardOk = (x, z) => x < -6 || x > 52 || (z < -20 && z > -60);
   const acrossView = (x, z) => x > -6 && x < 24 && z < -16 && z > -55;   // porch view across the street: no forest
   const okSpot = (x, z) => (padDist(x, z) > 0.4 || yardOk(x, z)) && !onHouse(x, z) && !inTurf(x, z) && !onStreet(x, z);
@@ -281,6 +288,22 @@ export async function build(ctx) {
       near[k % 3].push({ x, y: y0, z, s: [s, sy, s], ry: rnd() * 6.3, color: pick(SHRUB.concat([0x56703a, 0x667a3c, 0x7a7a52])) }); }
     else if (rnd() < 0.16 && G - H(x, z) > 4) { const ht = bankHt(x, z, 2.5, 15); tree(x, z, Math.min(3.0, 1.4 + ht * 0.12 + rnd()), ht, pick(TREE.concat([0x5a7d34, 0x67853f, 0x6f7d4a]))); }
   }
+  /* p38 / p43 right side: the fence line behind the pool is backed by oaks, olives and pepper trees rooted a few metres
+     down the bank (crowns 2.5-7 m above the pad, rising toward the SW where the hillside climbs) + a broken row of bushes
+     right behind the pickets. Own rng (the shared one would reshuffle every later scatter); x <= 13 keeps p42's hedge view
+     and the open canyon view left of centre clear. Straight into `real` (branching trees, instanced per kind). */
+  { const rB = kit.rng(3881), FZ = 30.9;
+    /* nothing tall in x -1..9.5 near the fence: that is p43's view out from the fence (x 4) over low chaparral */
+    const BACK = [[10.2, 36.6, 3.4, 6.0, 'oak', 0x4b5d34], [9.8, 33.4, 2.6, 4.2, 'olive', 0x7a8a5e],
+      [-0.6, 34.0, 3.2, 4.8, 'sycamore', 0x6f7d4a], [-2.9, 36.4, 5.2, 6.8, 'oak', 0x46633a], [-5.4, 33.8, 4.0, 4.6, 'olive', 0x82906a],
+      [-7.4, 38.0, 6.2, 7.0, 'oak', 0x34502a], [-1.6, 40.6, 5.6, 6.4, 'sycamore', 0x5f6b45],
+      [11.2, 34.6, 2.4, 4.0, 'olive', 0x76865c], [12.6, 38.4, 3.0, 4.6, 'sycamore', 0x7a7a46], [-9.8, 34.6, 5.0, 5.2, 'sycamore', 0x5a7d34]];
+    for (const [x0, z0, top, w, kind, color] of BACK) { const x = x0 + (rB() - 0.5) * 0.6, z = z0 + (rB() - 0.5) * 0.6, y = H(x, z);
+      real.push({ x, y, z, h: Math.max(3.2, G + top + (rB() - 0.5) * 0.8 - y), w: w * (0.9 + rB() * 0.2), kind, color, ry: rB() * 6.3 }); }
+    for (let x = -3.0; x < 13.2; x += 1.15 + rB() * 0.9) { if (rB() < 0.22 || (x > 1.8 && x < 6.2)) continue;   /* gap in front of the p43 camera */
+      const z = FZ + 0.9 + rB() * 1.4, y = H(x, z), s = 0.9 + rB() * 0.7;
+      real.push({ x, y, z, h: Math.max(0.8, G + 0.75 + s - y), w: 1.4 + rB() * 1.0, ry: rB() * 6.3, kind: rB() < 0.5 ? 'bushB' : 'bushA', color: bushTint(pick2(SHRUB.concat([0x56703a, 0x667a3c]), rB)) }); }
+  }
   // hedges: dense rows behind the iron fence (p42) and along the court-end lawn
   const hedge = [];
   const hedgeRow = (a, b, off, s = 0.42) => {
@@ -300,11 +323,11 @@ export async function build(ctx) {
     farC.push({ x, y: H(x, z) - 0.3 * s, z, s: [s, s * (0.55 + rnd() * 0.3), s], ry: rnd() * 6.3, color: pick(z < -60 ? SHRUB : TREE) });
   }
   // chaparral clumps on the mountain face behind the street (p45 texture)
-  for (let k = 0; k < 60000 && farC.length < 24000; k++) {
+  for (let k = 0; k < 60000 && farC.length < 19000; k++) {
     const x = -220 + rnd() * 480, z = -58 - rnd() * 330; if (onHouse(x, z, 6) || nearRoad(x, z)) continue;
-    if (vnoise(x / 30, z / 30, 53) < -0.55) continue;
+    if (vnoise(x / 30, z / 30, 53) + 0.7 * vnoise(x / 85, z / 70, 57) < -0.45) continue;   /* bare rock / grass openings */
     const s = 2.0 + rnd() * 3.2;
-    farC.push({ x, y: H(x, z) - 0.35 * s, z, s: [s, s * (0.5 + rnd() * 0.3), s], ry: rnd() * 6.3, color: pick([0x46522f, 0x55623a, 0x6a7250, 0x7a7a5c, 0x6a5c48, 0x3a4630, 0x5e6a40, 0x8a8468]) });
+    farC.push({ x, y: H(x, z) - 0.35 * s, z, s: [s, s * (0.5 + rnd() * 0.3), s], ry: rnd() * 6.3, color: pick([0x46522f, 0x515c38, 0x5f6745, 0x6a6e52, 0x3c472e, 0x58633e, 0x4a5536, 0x77735a]) });
   }
   // low-poly stand-ins (same shapes at icosphere detail 0) for tiles away from the camera
   const shrubLo = [blobGeo(kit, 3, 6, 0), blobGeo(kit, 8, 7, 0, 0.8), blobGeo(kit, 15, 5, 0, 1.1)], crownLo = blobGeo(kit, 21, 8, 0, 0.8), lowLo = blobGeo(kit, 30, 1, 0, 0.9);
@@ -335,6 +358,21 @@ export async function build(ctx) {
   ctx.onUpdate(() => updateFloraLOD(ctx.camera.position));
   // tree trunks are solid near the lot
   for (const t of trunks) if (Math.hypot(t.x - CENTER[0], t.z - CENTER[1]) < 90) phys.boxAABB([t.x - 0.2, t.y, t.z - 0.2], [t.x + 0.2, t.y + 3, t.z + 0.2]);
+
+  // SW side yard: loose drift of CC0 silvery-sage shrubs (olive / westringia look) + ornamental grass clumps
+  try { const P = await cc0Plants(kit); const rP = kit.rng(611); const sh = [], gr = [];
+    const SAGE = [0x9aa48a, 0xa3ab92, 0x8e9a7e, 0xb0b49c, 0x86926f], GRASS = [0xb3aa82, 0xa8a27a, 0x9fa07a, 0xbcb08a];
+    const clear = (x, z) => !trunks.some(t => Math.hypot(t.x - x, t.z - z) < 1.7);
+    const cen = [];
+    for (let k = 0; k < 300 && cen.length < 9; k++) { const x = -10.5 + rP() * 3.9, z = 1 + rP() * 15; if (!clear(x, z) || cen.some(q => Math.hypot(q[0] - x, q[1] - z) < 1.6)) continue; cen.push([x, z]); }
+    /* each bush = 3 overlapping instances (different variants / turns) so the sapling model reads as a full shrub */
+    for (const [cx, cz] of cen) { const h0 = 0.9 + rP() * 0.6, c = pick(SAGE);
+      for (let j = 0; j < 2; j++) { const x = cx + (rP() - 0.5) * 0.4, z = cz + (rP() - 0.5) * 0.4, h = h0 * (0.85 + rP() * 0.25);
+        sh.push({ x, y: H(x, z) - 0.03, z, h, w: h * (1.3 + rP() * 0.4), ry: rP() * 6.3, color: c, v: 1 + 2 * j }); } }   /* the two lightest variants (~5k tris) */
+    for (let k = 0; k < 400 && gr.length < 24; k++) { const x = -10.6 + rP() * 4.0, z = 0.6 + rP() * 15.8; if (!clear(x, z) || cen.some(q => Math.hypot(q[0] - x, q[1] - z) < 0.9)) continue;
+      const h = 0.5 + rP() * 0.35; gr.push({ x, y: H(x, z) - 0.02, z, h, w: h * 1.15, ry: rP() * 6.3, color: pick(GRASS), v: 2 * (k % 2) }); }
+    plantInstances(root, P.shrub, sh, { shadow: false }); plantInstances(root, P.grass, gr, { shadow: false });
+  } catch (e) { console.error('[plants]', e); window.__errors?.push('plants: ' + (e.stack || e.message)); }
 
   // palms (p41 left behind the windscreen; p45 street + SW side)
   const pm = { palmTrunk: O(new THREE.MeshStandardMaterial({ color: 0x8a7a66, roughness: 0.95, normalMap: kit.noiseNormal(128, 4, 32, 3), normalScale: new THREE.Vector2(1, 1) })),
@@ -419,28 +457,31 @@ export async function build(ctx) {
 
   // far neighbourhoods (p42/p43): dense bands of small houses along the far ridge flanks, not the valley floor
   const far0 = [], farR = [];
-  for (let k = 0; k < 90000 && far0.length < 6500; k++) {
+  /* sparse, irregular clusters (not even bands): fewer, smaller, muted roofs/walls that sink into the haze */
+  for (let k = 0; k < 90000 && far0.length < 900; k++) {
     const x = -2200 + rnd() * 4400, z = 800 + rnd() * 2300;
-    const y = H(x, z); if (y < -40 || y > 140) continue;          // on the flanks / crest, not the canyon bottom
-    const mask = vnoise(x / 220, z / 220, 41) + 0.5 * vnoise(x / 60, z / 60, 43);
-    if (mask < 0.15) continue;
+    const y = H(x, z); if (y < -40 || y > 140) continue;          /* on the flanks / crest, not the canyon bottom */
+    const mask = vnoise(x / 260, z / 190, 41) + 0.6 * vnoise(x / 70, z / 55, 43) + 0.3 * vnoise(x / 23, z / 23, 45);
+    if (mask < 0.42 || rnd() < 0.35) continue;
     const y2 = H(x + 14, z), y3 = H(x, z + 14);
-    if (Math.abs(y2 - y) > 7 || Math.abs(y3 - y) > 7) continue;   // flattish lots only
-    const w = 7 + rnd() * 6, d = 6 + rnd() * 5, ry = Math.floor(rnd() * 4) * Math.PI / 2 + (rnd() - 0.5) * 0.4 + Math.atan2(x, z);
-    far0.push({ x, y: y - 2, z, s: [w, 6 + rnd() * 2, d], ry, color: pick([0xe6e1d6, 0xd9cfbc, 0xcfc4ae, 0xeeeae2, 0xc8b89c]) });
-    farR.push({ x, y: y + 4.0 + rnd() * 0.8, z, s: [w * 0.78, 2.2, d * 0.78], ry: ry + Math.PI / 4, color: pick([0x9a5a40, 0xa86a4c, 0x6a625a, 0x8a7d6c, 0xb07a58, 0x5e5a56]) });
+    if (Math.abs(y2 - y) > 7 || Math.abs(y3 - y) > 7) continue;   /* flattish lots only */
+    const w = 5.5 + rnd() * 5, d = 5 + rnd() * 4, ry = rnd() * Math.PI;
+    far0.push({ x, y: y - 2, z, s: [w, 5.5 + rnd() * 1.5, d], ry, color: pick([0x9e998c, 0x948d7c, 0x8a8372, 0xa6a196, 0x857c68]) });
+    farR.push({ x, y: y + 3.5 + rnd() * 0.6, z, s: [w * 0.78, 1.8, d * 0.78], ry: ry + Math.PI / 4, color: pick([0x7a5444, 0x86604a, 0x5a5650, 0x6e6658, 0x8a6a52, 0x4e4c48]) });
   }
   const unitBox = new THREE.BoxGeometry(1, 1, 1); unitBox.translate(0, 0.5, 0);
   const pyr = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1); pyr.translate(0, 0.5, 0);
-  const farWall = addHaze(O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }))), farRoof = addHaze(O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 })));
+  const farWall = addHaze(O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 })), 2600, 0.8), farRoof = addHaze(O(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 })), 2600, 0.8);
   for (const m of [instances(unitBox, farWall, far0), instances(pyr, farRoof, farR)]) { m.userData.keep = true; root.add(m); }
 
   // ---------------------------------------------------------------- atmosphere: far ridgelines + hazy sky
   farRidges(root);
   const view = ctx.params && ctx.params.get('view');
-  // The HDRI background is the Golden Gate hills (green cliffs + cumulus). Inside the walk-through and for the
-  // site photos we draw the Palisades sky instead; other pieces' photo shots keep the lead's background.
-  if (!ctx.shot || piece.photos.includes(view)) skyDome(root);
+  // The HDRI background is the Golden Gate hills (green cliffs + cumulus): every outdoor view (walk mode, free
+  // cams, the site / exterior / pool photos, the v.. videos) draws the Palisades sky instead; interior photo shots
+  // keep the lead's background. In walk mode src/sky hides this dome and draws its live sky.
+  const OUTDOOR = ['p00', 'p01', 'p44', 'p38', 'p39', 'p40', ...piece.photos];
+  if (!ctx.shot || !view || OUTDOOR.includes(view) || /^v\d/.test(view)) skyDome(root);
   // court views: aim the (global) sun's shadow frustum at the court so fences, poles and the house shade it
   if (ctx.sun && ['p41', 'p42', 'p45'].includes(view)) {
     const sun = ctx.sun, tgt = view === 'p45' ? new THREE.Vector3(18, 0, 12) : new THREE.Vector3(30, 0, 24), ext = view === 'p45' ? 44 : 30;

@@ -67,6 +67,7 @@ export async function build(ctx) {
   const SUN_K = 3.2;
   const sunBoost = (mat, k = SUN_K) => {
     const prev = mat.onBeforeCompile;
+    if (prev === THREE.Material.prototype.onBeforeCompile && mat.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) mat.userData.mergeSafe = true; /* sun-term scale only: mergeStatic may merge its meshes */
     mat.onBeforeCompile = (sh, r) => {
       if (prev) prev.call(mat, sh, r);
       sh.uniforms.uFamSun = { value: k };
@@ -110,16 +111,24 @@ export async function build(ctx) {
         a += (R() - 0.5) * 0.55 + (ang - a) * 0.3; const st = 3 + R() * 3; x += Math.cos(a) * st; y += Math.sin(a) * st; pts.push([x, y]);
         if (depth < 1 && R() < 0.004) vein(x, y, a + (R() < 0.5 ? 1 : -1) * (0.5 + R() * 0.7), len * (0.15 + R() * 0.25), width * 0.6, alpha * 0.8, depth + 1);
       }
+      // r4: width and brightness vary along the vein (pinch-and-swell), drawn in short runs; a very faint grey
+      // halo only; most of each vein is a hairline, it swells to ~2-3 px (5-7 mm) in a few places (photo p04)
+      const ph1 = R() * 6.28, ph2 = R() * 6.28, f1 = 0.01 + R() * 0.02, f2 = 0.035 + R() * 0.04;
       for (const [ox, oy] of [[0, 0], [w, 0], [-w, 0], [0, h], [0, -h], [w, h], [-w, -h], [w, -h], [-w, h]]) {
-        g.beginPath(); g.moveTo(pts[0][0] + ox, pts[0][1] + oy); for (const p of pts) g.lineTo(p[0] + ox, p[1] + oy);
-        g.strokeStyle = `rgba(220,220,214,${alpha * 0.25})`; g.lineWidth = width * 2.2; g.stroke();   // faint halo
-        g.strokeStyle = `rgba(240,240,236,${alpha})`; g.lineWidth = width; g.stroke();
+        g.lineCap = 'round';
+        for (let k = 1; k < pts.length; k += 3) {
+          const k1 = Math.min(pts.length - 1, k + 3), sw = 0.5 + 0.5 * Math.sin(k * f1 + ph1) * Math.sin(k * f2 + ph2);
+          const lw = width * (0.25 + 1.1 * sw * sw), al = alpha * (0.45 + 0.55 * sw);
+          g.beginPath(); g.moveTo(pts[k - 1][0] + ox, pts[k - 1][1] + oy); for (let q = k; q <= k1; q++) g.lineTo(pts[q][0] + ox, pts[q][1] + oy);
+          g.strokeStyle = `rgba(200,200,196,${al * 0.12})`; g.lineWidth = lw * 2.6; g.stroke();
+          g.strokeStyle = `rgba(232,232,228,${al})`; g.lineWidth = lw; g.stroke();
+        }
       }
     };
-    // r2: denser, bolder, less regular network (photo: 4-6 strong crossing veins per face + hairline branches)
-    for (let i = 0; i < 5; i++) vein((i + R() * 0.7) * w / 5, R() * h, -0.65 + (R() - 0.5) * 0.5, 900 + R() * 900, 2.2 + R() * 2.6, 0.95);
-    vein(R() * w, R() * h, 0.55 + (R() - 0.5) * 0.6, 500 + R() * 400, 1.8 + R() * 1.2, 0.85);   // one crossing vein
-    for (let i = 0; i < 5; i++) vein(R() * w, R() * h, -0.65 + (R() - 0.5) * 1.6, 120 + R() * 300, 0.8 + R() * 0.8, 0.45 + R() * 0.3, 1);
+    // r4: finer, varied network (photo: 4-5 long thin crossing veins per face + hairline branches), never bold
+    for (let i = 0; i < 5; i++) vein((i + R() * 0.7) * w / 5, R() * h, -0.65 + (R() - 0.5) * 0.5, 900 + R() * 900, 1.3 + R() * 1.1, 0.85);
+    vein(R() * w, R() * h, 0.55 + (R() - 0.5) * 0.6, 500 + R() * 400, 1.1 + R() * 0.6, 0.7);   /* one crossing vein */
+    for (let i = 0; i < 9; i++) vein(R() * w, R() * h, -0.65 + (R() - 0.5) * 1.6, 120 + R() * 300, 0.6 + R() * 0.5, 0.3 + R() * 0.3, 1);
   });
   const marble = new THREE.MeshPhysicalMaterial({ map: marbleMap, roughness: 0.34, clearcoat: 0.25, clearcoatRoughness: 0.35, normalMap: kit.noiseNormal(256, 0.4, 32, 9), normalScale: new THREE.Vector2(0.05, 0.05) });
 
@@ -132,8 +141,11 @@ export async function build(ctx) {
   const grass = new THREE.MeshStandardMaterial({ map: grassMap, roughness: 0.95, normalMap: kit.noiseNormal(256, 2, 64, 5), normalScale: new THREE.Vector2(0.3, 0.3) });
 
   // upholstery: warm beige woven linen (hessian weave normal, matte; metre-based UVs via uvBox)
-  const linen = kit.fabric.linen('#e6dccd', { scale: 2.6 });   // cream/greige performance linen (metre UVs -> ~0.38 m per tile)
+  const linen = kit.fabric.linen('#e6dccd', { scale: 4.2, roughness: 1.0, sheen: 0.75, sheenRoughness: 0.55, normalScale: 1.1 });   // cream/greige performance linen (metre UVs -> ~0.24 m per tile)
   linen.color.multiplyScalar(1.5);                              // the neutral weave map averages ~0.57: lift back to cream
+  // r4: woven upholstery has almost no dielectric spec lobe; the soft fuzz comes from sheen. Cutting the
+  // specular removes the plastic hot-spot along cushion crowns (critic: 'plastic')
+  linen.specularIntensity = 0.3;
   const ceramicWhite = new THREE.MeshStandardMaterial({ color: 0xf1ede6, roughness: 0.55 });
   const ceramicCream = new THREE.MeshStandardMaterial({ color: 0xe6dccb, roughness: 0.7 });
   const ceramicBlack = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5 });
@@ -284,6 +296,19 @@ export async function build(ctx) {
     const t = kit.canvasTex(256, 32, (c, w, h) => { const img = c.createImageData(w, h); for (let x = 0; x < w; x++) { const ph = (x % 16) / 16; const nx = Math.sin(ph * Math.PI * 2 - Math.PI / 2) * -0.0 + Math.cos(ph * Math.PI) * 0.9; for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; img.data[i] = (nx * 0.5 + 0.5) * 255; img.data[i + 1] = 128; img.data[i + 2] = Math.sqrt(Math.max(0, 1 - nx * nx)) * 127 + 128; img.data[i + 3] = 255; } } c.putImageData(img, 0, 0); }, { srgb: false });
     return t;
   })();
+  /* r4 (p04): reeded door fronts as filtered maps (normal + AO), not geometry: ~18 mm half-round reeds with a
+     narrow shadowed groove. Mipmapped maps keep the fine fluting from aliasing into moire at room distance and
+     cost nothing per frame. One reed per texture tile; the door face UVs run in metres/0.9 (boxMin tile 0.9). */
+  const REED = 0.018;
+  const reedNor = kit.canvasTex(64, 8, (c, w, h) => { const img = c.createImageData(w, h);
+    for (let x = 0; x < w; x++) { const t = (x + 0.5) / w, gw = 0.14; let nx = 0, nz = 1;
+      if (t > gw / 2 && t < 1 - gw / 2) { const u = (t - 0.5) / (0.5 - gw / 2); nx = u * 0.92; nz = Math.sqrt(Math.max(0, 1 - nx * nx)); }
+      for (let y = 0; y < h; y++) { const i = (y * w + x) * 4; img.data[i] = (nx * 0.5 + 0.5) * 255; img.data[i + 1] = 128; img.data[i + 2] = nz * 127 + 128; img.data[i + 3] = 255; } }
+    c.putImageData(img, 0, 0); }, { srgb: false, repeat: [0.9 / REED, 1] });
+  const reedAO = kit.canvasTex(64, 8, (c, w, h) => { for (let x = 0; x < w; x++) { const t = (x + 0.5) / w, e = Math.min(t, 1 - t);
+      const v = e < 0.07 ? 0.38 : 0.62 + 0.38 * Math.min(1, (e - 0.07) / 0.2); c.fillStyle = `rgb(${v * 255 | 0},${v * 255 | 0},${v * 255 | 0})`; c.fillRect(x, 0, 1, h); } },
+    { srgb: false, repeat: [0.9 / REED, 1] });
+  const reedOak = oak.clone(); reedOak.normalMap = reedNor; reedOak.normalScale = new THREE.Vector2(1, 1); reedOak.aoMap = reedAO; reedOak.aoMapIntensity = 1; reedOak.userData = {}; sunBoost(reedOak);
   const decorGrp = new THREE.Group(); decorGrp.name = 'fam-decor'; root.add(decorGrp);
   function shelving(zEnd, w, H = 3.15, D = 0.42, doors = 2) {
     const g = kit.group(root, [X0, 0, zEnd], Math.PI / 2, 'fam-shelving');
@@ -296,17 +321,12 @@ export async function build(ctx) {
     for (const y of [1.50, 2.05, 2.58]) boxMin(g, oak, T, y, 0.016, w - 2 * T, 0.036, D - 0.03, 0.9, ob);
     // reeded doors
     const dw = (w - 2 * T - 0.006 * (doors + 1)) / doors, dh = 0.98 - 0.085 - 0.006;
-    const flutes = new THREE.Group(); flutes.userData.noCollide = true; g.add(flutes);
-    const fl = 0.022; const flGeo = new THREE.CylinderGeometry(fl / 2, fl / 2, dh, 10, 1, false, 0, Math.PI); flGeo.rotateY(-Math.PI / 2);
     for (let d = 0; d < doors; d++) {
       const x0 = T + 0.006 + d * (dw + 0.006);
-      boxMin(g, oak, x0, 0.085, D - 0.03, dw, dh, 0.02, 0.9, ob);
-      const n = Math.floor(dw / fl); const pad = (dw - n * fl) / 2;
-      for (let k = 0; k < n; k++) { const m = mesh(flutes, flGeo, oak, [x0 + pad + fl / 2 + k * fl, 0.085 + dh / 2, D - 0.01]); m.userData.noCollide = true; }
+      boxMin(g, reedOak, x0, 0.085, D - 0.03, dw, dh, 0.02, 0.9, ob);
       // tiny black finger-pull notch
       boxMin(g, M.matteBlack, x0 + (d % 2 === 0 ? dw - 0.05 : 0.01), 0.085 + dh - 0.004, D - 0.012, 0.04, 0.006, 0.006);
     }
-    flutes.traverse(o => { if (o.isMesh) { const gg = o.geometry; if (!gg.userData.uvd) { gg.userData.uvd = 1; const p = gg.attributes.position; const uv = gg.attributes.uv; for (let i = 0; i < p.count; i++) uv.setXY(i, uv.getX(i) * 0.03, p.getY(i) / 0.9); } } });
     // collide: structure (not flutes)
     for (const c of g.children) if (c.isMesh) phys.solid(c);
     phys.boxLocal(g, w / 2, 0.49, D / 2, w / 2, 0.49, D / 2);
@@ -442,8 +462,8 @@ export async function build(ctx) {
   // seat cushions, and thick rounded arms at both ends; the -z arm's outer face is the big side seen in p04.
   // Cushions are subdivided rounded boxes (SDF rounding on a dense grid) so puff, sag and creases actually bend.
   function softBox(w, h, d, r, puff = 0, o = {}) {
-    const step = o.step || 0.035, n = (v) => Math.max(2, Math.min(28, Math.ceil(v / step)));
-    let g = new THREE.BoxGeometry(w, h, d, n(w), n(h), n(d)); g.deleteAttribute('uv'); g.deleteAttribute('normal');
+    const step = o.step || 0.035, n = (v, cap = 28) => Math.max(2, Math.min(cap, Math.ceil(v / step)));
+    let g = new THREE.BoxGeometry(w, h, d, o.channels ? n(w, 72) : n(w), n(h), n(d)); g.deleteAttribute('uv'); g.deleteAttribute('normal');
     g = mergeVertices(g, 1e-5);
     const p = g.attributes.position, hx = w / 2, hy = h / 2, hz = d / 2;
     const rr = Math.max(0.002, Math.min(r, hx - 1e-3, hy - 1e-3, hz - 1e-3));
@@ -455,7 +475,9 @@ export async function build(ctx) {
       const u = x / hx, v = z / hz, f = Math.max(0, 1 - (u * u + v * v) / 2);
       if (y > 0) {
         y += puff * f * (y / hy);                                                     // domed top
-        if (o.channels) y -= o.channels * Math.pow(Math.abs(Math.sin(Math.PI * (x + hx) / o.pitch)), 0.5) * f * (y / hy);
+        // channel tufting: rounded rolls with sharp stitched creases at the seams (1 - |sin|^0.5 is 1 on the seam,
+        // 0 on the roll crown); the crease keeps a little depth right to the cushion edge so it reads in side light
+        if (o.channels) y -= o.channels * (1 - Math.pow(Math.abs(Math.sin(Math.PI * (x + hx) / o.pitch)), 0.5)) * (0.35 + 0.65 * f) * (y / hy);
         if (o.sag) y -= o.sag * Math.exp(-((u - o.sagU) ** 2) * 3) * (y / hy);        // sat-in sag
       } else y -= puff * 0.25 * f * (-y / hy);
       const pinch = 1 - (o.pinch ?? 0.03) * Math.abs(u * v) * Math.max(0, y / hy);    // corners pulled in
@@ -477,10 +499,10 @@ export async function build(ctx) {
       up(softBox(w, 0.23, D - 0.01, 0.03, 0.003), [cx, BASE + 0.115, D / 2]);
       // channel-tufted seat cushion (channels run front-to-back), slight sat-in sag
       const sd = D - BT - 0.02;
-      up(softBox(w - 0.004, 0.15, sd, 0.04, 0.022, { channels: 0.055, pitch: w / 4, sag: 0.01, sagU: (R() - 0.5) * 0.6, pinch: 0.015, step: 0.02 }), [cx, BASE + 0.23 + 0.07, BT + sd / 2 + 0.005]);
+      up(softBox(w - 0.004, 0.15, sd, 0.04, 0.026, { channels: 0.045, pitch: (w - 0.004) / 4, sag: 0.01, sagU: (R() - 0.5) * 0.6, pinch: 0.015, step: 0.014 }), [cx, BASE + 0.23 + 0.07, BT + sd / 2 + 0.005]);
       // tall back block to the floor, puffy front, soft rounded top
       // vertical channel tufting across the back's front face (photo p05), crisp tight top edge
-      const bg = softBox(w, BT, BH - BASE, 0.03, 0.018, { pinch: 0.008, channels: 0.05, pitch: w / 4, step: 0.02 }); bg.rotateX(Math.PI / 2);   // puff -> +z (front)
+      const bg = softBox(w, BT, BH - BASE, 0.03, 0.022, { pinch: 0.008, channels: 0.040, pitch: w / 4, step: 0.016 }); bg.rotateX(Math.PI / 2);   // puff -> +z (front)
       up(bg, [cx, BASE + (BH - BASE) / 2, BT / 2], [-0.02, 0, 0]);
     }
     // thick track arms (full depth, nearly back height: the near end reads as one broad side face in p04)
@@ -529,8 +551,19 @@ export async function build(ctx) {
   }
   // swivel barrel chairs: low continuous taupe boucle tub, ~0.85 W x 0.75 H, back wraps ~270 deg, seat at ~0.45
   // warm camel/taupe boucle (photo: plush, nubby, light catching the loops) — fabric library, metre UVs below
-  const boucleTub = sunBoost(kit.fabric.boucle('#b09a80', { scale: 1, side: THREE.DoubleSide, normalScale: 2.4 }));
-  boucleTub.map = null; boucleTub.aoMap = null;   // the scan's colour/AO tiles read as a plaid at chair scale; keep the loop normal + sheen
+  // r4: chenille/boucle pile: strong, fairly tight sheen (light rakes across the nubs and rims glow), almost no
+  // dielectric spec, rough base. Low-frequency pile shading map (canvas, metre UVs) breaks the flat plastic tone.
+  const boucleTub = sunBoost(kit.fabric.boucle('#b5a38e', { scale: 1, side: THREE.DoubleSide, normalScale: 2.2, roughness: 1.0, sheen: 1.0, sheenRoughness: 0.5, sheenColor: '#e2cdb2' }));
+  boucleTub.aoMap = null; boucleTub.specularIntensity = 0.25;
+  { const rp = kit.rng(314);
+    boucleTub.map = kit.canvasTex(512, 512, (g, w, h) => {
+      g.fillStyle = '#c4c4c4'; g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 260; i++) { const x = rp() * w, y = rp() * h, r = 20 + rp() * 70, v = 170 + rp() * 70;
+        for (const [ox, oy] of [[0, 0], [w, 0], [-w, 0], [0, h], [0, -h]]) { const gr = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+          gr.addColorStop(0, `rgba(${v | 0},${v | 0},${v | 0},0.18)`); gr.addColorStop(1, `rgba(${v | 0},${v | 0},${v | 0},0)`); g.fillStyle = gr; g.fillRect(x + ox - r, y + oy - r, 2 * r, 2 * r); } }
+      for (let i = 0; i < 9000; i++) { const v = 150 + rp() * 100; g.fillStyle = `rgba(${v | 0},${v | 0},${v | 0},0.35)`; g.beginPath(); g.arc(rp() * w, rp() * h, 1 + rp() * 2.2, 0, 6.28); g.fill(); }
+    }, { repeat: [0.25, 0.25] });
+    boucleTub.color.multiplyScalar(1.7); }
   const metreUV = (geo, su, sv) => { const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv); return geo; };
   const BT_TILE = 0.11; // metres per boucle texture tile
   function barrelChair(x, z, faceTo) {

@@ -478,7 +478,7 @@ export async function build(ctx) {
   for (const z of [1.62, 4.62]) ao(X1 - 0.24, z, 0.95, 0.75, 0.5);
   // warm low sun through the side window: a soft patch on the floor by the wardrobe (non-shadow spot, 1 of 2 lights)
   {
-    const sunSpot = new THREE.SpotLight(0xe6eeff, 90, 12, 0.5, 1.0, 2); // cool soft daylight from the window sunSpot.castShadow = false;
+    const sunSpot = new THREE.SpotLight(0xe6eeff, 90, 12, 0.5, 1.0, 2); sunSpot.castShadow = false; /* cool soft daylight from the window */
     sunSpot.position.set(24.0, Y + 2.4, 3.45); sunSpot.target.position.set(19.5, Y + 0.6, 3.2);
     bed.add(sunSpot, sunSpot.target);
   }

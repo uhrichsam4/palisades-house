@@ -338,7 +338,25 @@ export function singlePassFaintGlass(scene, maxOpacity = 0.4) {
     ok.set(m, (ok.get(m) ?? true) && flat);
   } });
   let n = 0; for (const [m, flat] of ok) if (flat) { m.forceSinglePass = true; n++; }
+  // shared glass (e.g. kit M.glass on window panes AND on decanters/jars): the flat panes get a one-pass twin of the
+  // material, so only the solid pieces keep the two-pass flip (each flip re-derives the program key: ~5 us a draw).
+  // The twin shares the hooks/userData and copies the base's mutable values before each draw (onBeforeRender).
+  scene.traverse(o => {
+    const m = o.material; if (!o.isMesh || !m || Array.isArray(m) || !ok.has(m) || ok.get(m) || o.userData.glassTwin) return;
+    if (o.isInstancedMesh || o.isBatchedMesh || o.isSkinnedMesh || o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender) return;
+    const g = o.geometry; if (!g.boundingBox) g.computeBoundingBox(); g.boundingBox.getSize(_s); if (Math.min(_s.x, _s.y, _s.z) >= 0.001) return;
+    let v = TWINS.get(m); if (!v) { v = m.clone(); v.onBeforeCompile = m.onBeforeCompile; v.customProgramCacheKey = m.customProgramCacheKey; v.userData = m.userData; v.forceSinglePass = true; TWINS.set(m, v); }
+    o.material = v; o.userData.glassTwin = m; o.onBeforeRender = twinSync; n++;
+  });
   return n;
+}
+const TWINS = new WeakMap();
+const TWIN_KEYS = ['envMap', 'envMapIntensity', 'opacity', 'roughness', 'metalness', 'specularIntensity', 'ior', 'transmission', 'thickness', 'emissiveIntensity', 'depthWrite', 'depthTest', 'transparent', 'toneMapped', 'visible', 'map', 'alphaMap', 'normalMap', 'roughnessMap'];
+function twinSync() { // this = the mesh; keep the twin equal to its base material (base may be retuned at runtime: sky, probes)
+  const b = this.userData.glassTwin, v = this.material; if (!b || v === b) return;
+  for (let i = 0; i < TWIN_KEYS.length; i++) { const k = TWIN_KEYS[i]; if (v[k] !== b[k] && b[k] !== undefined) { const st = k === 'map' || k === 'alphaMap' || k === 'normalMap' || k === 'roughnessMap' || k === 'transparent'; v[k] = b[k]; if (st) v.needsUpdate = true; } }
+  if (!v.color.equals(b.color)) v.color.copy(b.color); if (b.emissive && !v.emissive.equals(b.emissive)) v.emissive.copy(b.emissive);
+  if (b.specularColor && !v.specularColor.equals(b.specularColor)) v.specularColor.copy(b.specularColor);
 }
 
 // ---------------------------------------------------------------- N8AO transparency passes without full-scene walks

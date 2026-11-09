@@ -32,6 +32,8 @@ Everything else in the furnish module is procedural (geometry + canvas-drawn pri
 | Asset | Used for | Source | Licence |
 |---|---|---|---|
 | `assets/ph/steel_frame_shelves_01/` (1k) | garage shelving units | Poly Haven, "Steel Frame Shelves 01", https://polyhaven.com/a/steel_frame_shelves_01 | CC0 1.0 |
+| `assets/ph/shrub_02/` (1k) | silvery olive / westringia shrubs (front beds, side yard, pool planters) | Poly Haven, "Shrub 02", https://polyhaven.com/a/shrub_02 | CC0 1.0 |
+| `assets/ph/grass_medium_02/` (1k) | ornamental grass clumps | Poly Haven, "Grass Medium 02", https://polyhaven.com/a/grass_medium_02 | CC0 1.0 |
 
 ## Cars (`assets/cars/`, used by `src/cars/`)
 

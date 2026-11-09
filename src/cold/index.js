@@ -67,6 +67,9 @@ export function startCold(ctx, api) {
     for (const [id] of rooms) { const E = expo.get(id) || 0, T = roomT.get(id); const kH = 0.012, kO = 0.025 * E; const Teq = (kH * HEAT + kO * out) / (kH + kO); roomT.set(id, T + (Teq - T) * Math.min(1, (kH + kO) * dt)); }
     // floor patches grow where precip lands inside
     for (const e of emitters) { if (!e.precip) continue; const hits = blow.hits.get(e.id) || 0; blow.hits.set(e.id, 0); patches.touch(e, e.snow ? 'snow' : 'wet', Math.min(0.05, hits * 0.0012 + e.strength * 0.004)); }
+    /* polish5: a snow drift only lasts while its room is at / below freezing; once the air there is above +0.5 °C it melts to a wet patch */
+    for (const [id, p] of patches.map) { if (!p.e) continue; const t = roomT.get(p.e.room) ?? HEAT;
+      if (p.kind === 'snow' && t > 0.5) patches.melt(id); else if (p.kind === 'wet' && t < -0.5 && p.e.snow && emitters.includes(p.e)) patches.freeze(id); }
     ice.step(S.tempC, dt);
   }
   const _v = new THREE.Vector3();
@@ -105,8 +108,8 @@ export function startCold(ctx, api) {
     // chatter
     if (level >= 1) { chatT -= dt; if (chatT <= 0) { chatT = level === 1 ? 4 + Math.random() * 3 : 1.6 + Math.random(); audio.chatter(level === 1 ? 0.4 : 0.9); } }
     // HUD
-    const showT = air < 12 || body < 99.5;
-    overlay.set({ frost: THREE.MathUtils.clamp((75 - body) / 75, 0, 1), white: level === 3 ? 0.8 : body < 8 ? (8 - body) / 8 * 0.4 : 0, temp: showT ? Math.round(st.inWater && st.water ? waterTemp(st.water) : air) : null, body: level ? LEVELS[level].toUpperCase() : (body < 99.5 ? 'OK' : ''), level: LEVELS[level] });
+    const showT = air < 6 || body < 92; /* calm HUD: only when the cold actually matters */
+    overlay.set({ frost: THREE.MathUtils.clamp((75 - body) / 75, 0, 1), white: level === 3 ? 0.8 : body < 8 ? (8 - body) / 8 * 0.4 : 0, temp: showT ? Math.round(st.inWater && st.water ? waterTemp(st.water) : air) : null, body: level ? LEVELS[level].toUpperCase() : (body < 92 ? 'OK' : ''), level: LEVELS[level] });
     // sync shiver level
     sendT -= dt; if (level !== sentLevel || sendT <= 0) { sentLevel = level; sendT = 5; ch.send({ k: 's', l: level }); }
   }

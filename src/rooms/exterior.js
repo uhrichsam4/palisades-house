@@ -16,6 +16,7 @@
 // built as "min of planes" per convex-ish part (straight hip/gable geometry), with a 0.22 m heel so the soffit
 // underside meets the wall plate, black fascia skirts on every edge and ridge caps on hips/ridges.
 import { STREET_Y, FRONT } from './site/terrain.js';
+import { cc0Plants, plantInstances } from './site/flora.js';
 export const piece = { rooms: [], photos: ["p00", "p01", "p44"] };
 export const ownCeiling = [];
 export const views = {
@@ -93,7 +94,7 @@ export async function build(ctx) {
   function sidingTex() {
     const W = 512, H = 512, pxm = W / 2.4, n = vnoise(3, 8); const hgt = new Float32Array(W * H);
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const u = (x / pxm) % 0.30; hgt[y * W + x] = (u < 0.05 ? 1 : 0) + n(x / W, y / H) * 0.05; }
-    const map = pixelTex(W, H, (x, y) => { const u = (x / pxm) % 0.30; const v = 242 + (n(x / W, y / H) - 0.5) * 6 - (u > 0.05 && u < 0.058 ? 14 : 0); return [v, v - 1, v - 5]; });
+    const map = pixelTex(W, H, (x, y) => { const u = (x / pxm) % 0.30; const v = 240 + (n(x / W, y / H) - 0.5) * 6 - (u > 0.05 && u < 0.058 ? 16 : 0); return [v, v - 3, v - 10]; }); /* warm white ~#efece6 (p01), not blue-grey */
     return { map, normalMap: normalFromHeight(hgt, W, H, 1.6) };
   }
   // ---- vertical-plank garage door: 512 px = 1.2 m, 0.15 m boards
@@ -103,7 +104,7 @@ export async function build(ctx) {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const u = (x / pxm) % 0.15; hgt[y * W + x] = u < 0.006 ? 0 : 1; }
     const map = pixelTex(W, H, (x, y) => { const b = Math.floor(x / pxm / 0.15) % 8; const u = (x / pxm) % 0.15;
       const grain = Math.sin((x * 0.9 + n(x / W * 4 % 1, y / H) * 60) * 0.35) * 4 + (n((x / W * 3) % 1, (y / H * 0.5) % 1) - 0.5) * 16;
-      let v = 1 + tones[b] / 60 + grain / 70; if (u < 0.006) v *= 0.4; return [44 * v, 41 * v, 39 * v]; });
+      let v = 1 + tones[b] / 60 + grain / 70; if (u < 0.006) v *= 0.4; return [47 * v, 37 * v, 31 * v]; }); /* dark espresso-stained wood ~#2f251f (p01: near-black doors, grain just visible) */
     return { map, normalMap: normalFromHeight(hgt, W, H, 3.0) };
   }
   function speckleTex(W, base, spread, seed, opt = {}) { // generic mottled surface (concrete, gravel, soil, turf, asphalt)
@@ -132,9 +133,13 @@ export async function build(ctx) {
   const trimMat = std({ color: 0x2b211c, roughness: 0.5 });           // belly band / frieze (very dark brown, p00)
   const capMat = std({ color: 0x2f2f30, roughness: 0.9 });             // ridge caps
   const sd = sidingTex(); sd.map.repeat.set(1 / 2.4, 1 / 2.4); sd.normalMap.repeat.set(1 / 2.4, 1 / 2.4);
-  const sidingMat = std({ map: sd.map, normalMap: sd.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.82, side: THREE.DoubleSide });
+  const sidingMat = std({ map: sd.map, normalMap: sd.normalMap, normalScale: new THREE.Vector2(0.75, 0.75), roughness: 0.85, side: THREE.DoubleSide }); sidingMat.envMapIntensity = 0.6;
   const stucco = M.extWhite; kit.outdoor(stucco);
   const stuccoD = M.extWhiteDouble; kit.outdoor(stuccoD);
+  /* facade (p01): warm white, a visible fine stucco texture on the lower storey, less blue sky sheen */
+  for (const m of [stucco, stuccoD]) { m.color = new THREE.Color(0xefece6); m.envMapIntensity = 0.6; }
+  if (stucco.normalMap) stucco.normalScale = new THREE.Vector2(0.4, 0.4);
+
   const dt = doorTex();
   const concrete = speckleTex(512, [146, 140, 131], [14, 8, 10], 21, { nStrength: 0.8 }); concrete.map.repeat.set(0.4, 0.4); concrete.normalMap.repeat.set(0.4, 0.4);
   const concreteMat = std({ map: concrete.map, normalMap: concrete.normalMap, normalScale: new THREE.Vector2(0.3, 0.3), roughness: 0.92 });
@@ -148,12 +153,16 @@ export async function build(ctx) {
   const asphalt = speckleTex(512, [96, 93, 90], [12, 8, 26], 61, { pebbles: 0.05, pebbleAmp: 40, nStrength: 1.5 }); asphalt.map.repeat.set(0.25, 0.25); asphalt.normalMap.repeat.set(0.25, 0.25);
   const asphaltMat = std({ map: asphalt.map, normalMap: asphalt.normalMap, roughness: 0.95 });
   const timberMat = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1, 0.3] }), color: 0xb07a52, roughness: 0.8 });
-  const doorMatFor = (w, h) => { const m = std({ map: dt.map.clone(), normalMap: dt.normalMap.clone(), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.55, metalness: 0.05 });
+  const doorMatFor = (w, h) => { const m = std({ map: dt.map.clone(), normalMap: dt.normalMap.clone(), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.6, metalness: 0 });
     m.map.repeat.set(w / 1.2, h / 1.2); m.normalMap.repeat.set(w / 1.2, h / 1.2); m.map.needsUpdate = m.normalMap.needsUpdate = true; return m; };
+  /* garage door inner face: white steel, 4 sections per 2.4 m + shallow stamped rails */
+  const steelTex = (() => { const W = 256, hgt = new Float32Array(W * W); for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) { const v = (y / W * 4) % 1; hgt[y * W + x] = (v < 0.03 ? 0 : 1) + (Math.abs(v - 0.5) < 0.18 ? 0.25 : 0); }
+    return { map: pixelTex(W, W, (x, y) => { const v = (y / W * 4) % 1; const c = v < 0.03 ? 200 : 236; return [c, c, c - 2]; }), normalMap: normalFromHeight(hgt, W, W, 2.0) }; })();
+  const steelMat = std({ color: 0xffffff, roughness: 0.45, metalness: 0.2 });
   const lanternMetal = std({ color: 0x151413, roughness: 0.45, metalness: 0.6 });
   const lanternGlass = kit.outdoor(new THREE.MeshPhysicalMaterial({ color: 0xfff1d8, roughness: 0.15, transparent: true, opacity: 0.35, depthWrite: false }));
   const bulbMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffd9a0, emissiveIntensity: 0.45 });
-  const skyGlass = kit.outdoor(new THREE.MeshPhysicalMaterial({ color: 0x4f8a80, roughness: 0.04, metalness: 0.1, clearcoat: 1, envMapIntensity: 1.6 }));
+  const skyGlass = kit.outdoor(new THREE.MeshPhysicalMaterial({ color: 0x1c2428, roughness: 0.05, metalness: 0.1, clearcoat: 1, envMapIntensity: 1.0 })); /* dark tinted glass that reflects the sky (was a glowing cyan) */
   const winGlass = kit.outdoor(new THREE.MeshPhysicalMaterial({ color: 0x5a646c, roughness: 0.04, metalness: 0.3, envMapIntensity: 2.2 }));
 
   // ================================================================ roof engine
@@ -175,33 +184,72 @@ export async function build(ctx) {
   const area = (poly) => { let a = 0; for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
   const segDist = (p, a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1]; const L2 = dx * dx + dz * dz; let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dz) / L2; t = Math.max(0, Math.min(1, t)); return Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dz * t); };
 
+  /* Buried roof geometry: where one roof part runs under another (eaves/soffits/fascia of rear-ne, primary and the
+     garage wing overlap above the upstairs primary suite) the hidden part used to hang through the vaulted ceilings
+     (p17/p19). Inside the CUT room rects, roof surface / soffit / fascia / ridge pieces that sit below another part's
+     roof surface are dropped (never visible from outside: they're under that other roof). */
+  const CUT = ['primaryBed', 'primaryBath'].map(id => P.ROOMS[id]?.rect).filter(Boolean).map(r => [r[0] - 0.16, r[1] - 0.16, r[2] + 0.16, r[3] + 0.16]);
+  const inCut = (x, z) => CUT.some(r => x > r[0] && x < r[2] && z > r[1] && z < r[3]);
+  const inPoly = (x, z, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  let allParts = [];
+  const buried = (x, z, y, self) => { if (!inCut(x, z)) return false; for (const q of allParts) if (q !== self && inPoly(x, z, q.foot) && heightOf(q.planes, x, z) > y + 0.04) return true; return false; };
+  /* split a roof-plane polygon into the bits outside the CUT rects (whole) and a 0.25 m grid of cells inside them */
+  function cutPieces(poly) {
+    if (!CUT.length) return [poly];
+    let out = [poly];
+    for (const r of CUT) {
+      const next = [];
+      for (const pc of out) {
+        next.push(clip(pc, ([x]) => x - r[0]), clip(pc, ([x]) => r[2] - x));
+        const mid = clip(clip(pc, ([x]) => r[0] - x), ([x]) => x - r[2]);
+        next.push(clip(mid, ([, z]) => z - r[1]), clip(mid, ([, z]) => r[3] - z));
+        const ins = clip(clip(mid, ([, z]) => r[1] - z), ([, z]) => z - r[3]);
+        if (ins.length >= 3) { const G = 0.25;
+          for (let gx = r[0]; gx < r[2]; gx += G) { const cx = clip(clip(ins, ([x]) => gx - x), ([x]) => x - Math.min(r[2], gx + G)); if (cx.length < 3) continue;
+            for (let gz = r[1]; gz < r[3]; gz += G) { const c = clip(clip(cx, ([, z]) => gz - z), ([, z]) => z - Math.min(r[3], gz + G)); if (c.length >= 3) next.push(c); } } }
+      }
+      out = next.map(dedupe).filter(pc => pc.length >= 3 && Math.abs(area(pc)) > 1e-6);
+    }
+    return out;
+  }
   // part = { planes, foot } -> accumulates into buffers
   function roofPart(part, acc) {
     const { planes, foot } = part;
     const onFoot = (p) => { for (let k = 0; k < foot.length; k++) if (segDist(p, foot[k], foot[(k + 1) % foot.length]) < 1e-4) return k; return -1; };
     for (let i = 0; i < planes.length; i++) {
-      const A = planes[i]; let poly = foot.map(p => [p[0], p[1]]);
-      for (let j = 0; j < planes.length && poly.length >= 3; j++) if (j !== i) { const B = planes[j]; poly = clip(poly, ([x, z]) => hAt(A, x, z) - hAt(B, x, z) - 1e-7); }
-      poly = dedupe(poly); if (poly.length < 3 || Math.abs(area(poly)) < 1e-4) continue;
-      const tris = THREE.ShapeUtils.triangulateShape(poly.map(p => V2(p[0], p[1])), []);
+      const A = planes[i]; let poly0 = foot.map(p => [p[0], p[1]]);
+      for (let j = 0; j < planes.length && poly0.length >= 3; j++) if (j !== i) { const B = planes[j]; poly0 = clip(poly0, ([x, z]) => hAt(A, x, z) - hAt(B, x, z) - 1e-7); }
+      poly0 = dedupe(poly0); if (poly0.length < 3 || Math.abs(area(poly0)) < 1e-4) continue;
       const tx = -A.nz, tz = A.nx, k = Math.sqrt(1 + A.s * A.s);
       const vtx = (p, dy) => [p[0], hAt(A, p[0], p[1]) + dy, p[1]];
       const uvOf = (p) => [p[0] * tx + p[1] * tz, ((p[0] - A.px) * A.nx + (p[1] - A.pz) * A.nz) * k];
-      for (const [a, b, c] of tris) {
-        let P0 = poly[a], P1 = poly[b], P2 = poly[c];
-        const cy = (P1[1] - P0[1]) * (P2[0] - P0[0]) - (P1[0] - P0[0]) * (P2[1] - P0[1]);
-        if (cy < 0) { const t = P1; P1 = P2; P2 = t; }
-        for (const p of [P0, P1, P2]) { acc.top.push(...vtx(p, 0)); acc.uv.push(...uvOf(p)); acc.und.push(...vtx(p, -TH)); }
+      for (const poly of cutPieces(poly0)) {
+        let cx = 0, cz = 0; for (const p of poly) { cx += p[0]; cz += p[1]; } cx /= poly.length; cz /= poly.length;
+        if (buried(cx, cz, hAt(A, cx, cz), part)) continue;
+        const tris = THREE.ShapeUtils.triangulateShape(poly.map(p => V2(p[0], p[1])), []);
+        for (const [a, b, c] of tris) {
+          let P0 = poly[a], P1 = poly[b], P2 = poly[c];
+          const cy = (P1[1] - P0[1]) * (P2[0] - P0[0]) - (P1[0] - P0[0]) * (P2[1] - P0[1]);
+          if (cy < 0) { const t = P1; P1 = P2; P2 = t; }
+          for (const p of [P0, P1, P2]) { acc.top.push(...vtx(p, 0)); acc.uv.push(...uvOf(p)); acc.und.push(...vtx(p, -TH)); }
+        }
       }
+      const poly = poly0;
       for (let e = 0; e < poly.length; e++) {
         const a = poly[e], b = poly[(e + 1) % poly.length];
         const fa = onFoot(a), fb = onFoot(b); const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        if (fa >= 0 && fb >= 0 && onFoot(mid) >= 0) { // eave / rake skirt (fascia)
-          const ya = hAt(A, a[0], a[1]), yb = hAt(A, b[0], b[1]); const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          const FD = TH + 0.09; // fascia board hangs a little below the soffit (p01: deep black fascia)
-          acc.skirt.push(a[0], ya + 0.01, a[1], b[0], yb + 0.01, b[1], b[0], yb - FD, b[1], a[0], ya + 0.01, a[1], b[0], yb - FD, b[1], a[0], ya - FD, a[1]);
-          acc.skirtUV.push(0, 1, L, 1, L, 0, 0, 1, L, 0, 0, 0);
+        if (fa >= 0 && fb >= 0 && onFoot(mid) >= 0) { /* eave / rake skirt (fascia), in 0.1 m steps where it crosses a CUT room */
+          const FD = TH + 0.09; /* fascia board hangs a little below the soffit (p01: deep black fascia) */
+          const L0 = Math.hypot(b[0] - a[0], b[1] - a[1]); const hit = CUT.some(r => Math.max(a[0], b[0]) > r[0] && Math.min(a[0], b[0]) < r[2] && Math.max(a[1], b[1]) > r[1] && Math.min(a[1], b[1]) < r[3]); const n = hit ? Math.max(1, Math.ceil(L0 / 0.1)) : 1;
+          for (let q = 0; q < n; q++) {
+            const pa = [a[0] + (b[0] - a[0]) * q / n, a[1] + (b[1] - a[1]) * q / n], pb = [a[0] + (b[0] - a[0]) * (q + 1) / n, a[1] + (b[1] - a[1]) * (q + 1) / n];
+            const mx = (pa[0] + pb[0]) / 2, mz = (pa[1] + pb[1]) / 2; if (n > 1 && buried(mx, mz, hAt(A, mx, mz) - FD, part)) continue;
+            const ya = hAt(A, pa[0], pa[1]), yb = hAt(A, pb[0], pb[1]); const u0 = L0 * q / n, u1 = L0 * (q + 1) / n;
+            acc.skirt.push(pa[0], ya + 0.01, pa[1], pb[0], yb + 0.01, pb[1], pb[0], yb - FD, pb[1], pa[0], ya + 0.01, pa[1], pb[0], yb - FD, pb[1], pa[0], ya - FD, pa[1]);
+            acc.skirtUV.push(u0, 1, u1, 1, u1, 0, u0, 1, u1, 0, u0, 0);
+          }
         } else if (onFoot(mid) < 0) { // hip / ridge
+          if (buried(mid[0], mid[1], hAt(A, mid[0], mid[1]), part)) continue;
           const key = [a, b].map(p => p.map(v => v.toFixed(3)).join(',')).sort().join('|');
           if (!acc.ridgeKeys.has(key)) { acc.ridgeKeys.add(key); acc.ridges.push([[a[0], hAt(A, a[0], a[1]), a[1]], [b[0], hAt(A, b[0], b[1]), b[1]]]); }
         }
@@ -276,6 +324,7 @@ export async function build(ctx) {
   const byName = new Map(); shellRoot?.traverse(o => { if (o.isMesh && o.name) { if (!byName.has(o.name)) byName.set(o.name, []); byName.get(o.name).push(o); } });
   const fasciaPos = [], fasciaUV = [], ridgeList = [];
   if (!noRoof) {
+    allParts = Object.values(PARTS).flat();
     for (const [id, parts] of Object.entries(PARTS)) {
       const acc = newAcc(); for (const p of parts) roofPart(p, acc);
       const top = geoFrom(acc.top, acc.uv), und = geoFrom(acc.und, acc.uv);
@@ -341,6 +390,25 @@ export async function build(ctx) {
     kit.add(root, geo, trimMat, [(a[0] + b[0]) / 2 + n[0] * d / 2, 3.24 + h / 2, (a[1] + b[1]) / 2 + n[1] * d / 2]);
     kit.add(root, new THREE.BoxGeometry(n[0] ? d + 0.02 : L, 0.03, n[0] ? L : d + 0.02), trimMat, [(a[0] + b[0]) / 2 + n[0] * (d + 0.02) / 2, 3.24 + h, (a[1] + b[1]) / 2 + n[1] * (d + 0.02) / 2]);
   }
+  /* soft shade under the eaves (p01: the wall darkens towards the soffit): one alpha-gradient strip per upper exterior
+     wall edge that has an eave (roof underside just outside the wall at plate height; gable ends are skipped), one draw */
+  if (!noRoof) {
+    const grad = kit.canvasTex(4, 64, (g2, w2, h2) => { const gr = g2.createLinearGradient(0, 0, 0, h2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g2.fillStyle = gr; g2.fillRect(0, 0, w2, h2); }, { srgb: false });
+    const aoMat = new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: grad, transparent: true, opacity: 0.28, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, fog: true });
+    const pos = [], uv = []; const ext = P.EXT[1]; const HH = 0.95;
+    let sa = 0; for (let i = 0; i < ext.length; i++) { const a = ext[i], b = ext[(i + 1) % ext.length]; sa += a[0] * b[1] - b[0] * a[1]; }
+    for (let i = 0; i < ext.length; i++) {
+      const a = ext[i], b = ext[(i + 1) % ext.length]; const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz); if (L < 0.3) continue;
+      const ox = Math.sign(sa) * dz / L, oz = -Math.sign(sa) * dx / L; const mx = (a[0] + b[0]) / 2 + ox * 0.22, mz = (a[1] + b[1]) / 2 + oz * 0.22;
+      let hy = Infinity; for (const q of Object.values(PARTS).flat()) if (inPoly(mx, mz, q.foot)) hy = Math.min(hy, heightOf(q.planes, mx, mz));
+      if (!(hy < PLATE + HEEL + 0.4)) continue; /* no eave here (gable end or no roof) */
+      const top = PLATE, bot = PLATE - HH, o = 0.012; const A0 = [a[0] + ox * o, a[1] + oz * o], B0 = [b[0] + ox * o, b[1] + oz * o];
+      pos.push(A0[0], top, A0[1], B0[0], top, B0[1], B0[0], bot, B0[1], A0[0], top, A0[1], B0[0], bot, B0[1], A0[0], bot, A0[1]);
+      uv.push(0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0);
+    }
+    if (pos.length) { const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g2.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      const am = new THREE.Mesh(g2, aoMat); am.name = 'eaveShade'; am.renderOrder = 2; am.castShadow = am.receiveShadow = false; am.side = THREE.DoubleSide; aoMat.side = THREE.DoubleSide; am.userData.noProbe = true; root.add(am); }
+  }
   // white battens on the front gable (p01: two full-height battens dividing the upper face in three)
   if (!noRoof) { const gG = PARTS['garage-wing'][0].planes;
     for (const x of [15.0, 18.3]) { const top = heightOf(gG, x, 0.35) - TH; const h = top - 3.46;
@@ -380,6 +448,9 @@ export async function build(ctx) {
     const fr = 0.075, fm = doorMatFor(1.2, 1.2);
     for (const [bw, bh, x, y] of [[w, fr, w / 2, h - fr / 2], [w, fr, w / 2, fr / 2], [fr, h, fr / 2, h / 2], [fr, h, w - fr / 2, h / 2]]) kit.add(g, new THREE.BoxGeometry(bw, bh, 0.02), fm, [x, y, -0.03]);
     kit.add(g, new THREE.BoxGeometry(w, 0.02, 0.06), M.matteBlack, [w / 2, 0.01, -0.01]); // rubber seal
+    /* inside face (garage side): white steel sectional panels instead of the walnut box face */
+    { const pm = steelMat.clone(); pm.map = steelTex.map.clone(); pm.normalMap = steelTex.normalMap.clone(); pm.map.repeat.set(w / 2.4, h / 2.4); pm.normalMap.repeat.set(w / 2.4, h / 2.4); pm.map.needsUpdate = pm.normalMap.needsUpdate = true;
+      kit.add(g, new THREE.PlaneGeometry(w - 0.01, h - 0.01), pm, [w / 2, h / 2, 0.0262]); }
   }
 
   // ================================================================ wall lanterns (black box lanterns)
@@ -462,9 +533,11 @@ export async function build(ctx) {
         flatQuad(g, [[L(za) + lo, za], [R(za) - hi, za], [R(zb) - hi, zb], [L(zb) + lo, zb]], (x, z) => dY(x, z) + 0.012, concreteMat, 1);
       }
     }
-    // polish: the joints read as glowing green lines from the street; use a dark grey-brown grit (soil speckle, greyed down)
-    const jointMat = std({ map: soil.map, normalMap: soil.normalMap, color: 0x8a847c, roughness: 1 });
-    const tm = flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) - 0.004, jointMat, 1);
+    /* p00/p01: muted green artificial-turf strips between the slabs (not black lines): blade normal, rough 1, low sky
+       reflection so they don't glow; raised to 5 mm under the slab top so the step doesn't read as a dark AO groove */
+    const jt = speckleTex(256, [95, 122, 53], [10, 9, 18], 33, { blades: true, nStrength: 2.5, tint: [6, 8, 0] }); jt.map.repeat.set(3, 3); jt.normalMap.repeat.set(3, 3);
+    const jointMat = std({ map: jt.map, normalMap: jt.normalMap, normalScale: new THREE.Vector2(0.8, 0.8), roughness: 1 }); jointMat.envMapIntensity = 0.35;
+    const tm = flatQuad(g, [[dX0, 0.35], [dLeft(0.35), 0.35], [dLeft(FRONT_Z), FRONT_Z], [dX0, FRONT_Z]], (x, z) => dY(x, z) + 0.007, jointMat, 1);
     surfCollider(tm);
     // side skirt down below the street on the flared (court) side
     for (const [xa, za, xb, zb] of [[dLeft(0.35), 0.35, dLeft(FRONT_Z), FRONT_Z]]) {
@@ -552,10 +625,21 @@ export async function build(ctx) {
   wallBox(-6.0, FRONT_Z, 3.0, FRONT_Z + 0.22, -0.02);
   wallBox(-6.2, FRONT_Z, -6.0, 7.07, -0.1);
   flatQuad(root, [[-6, FRONT_Z + 0.22], [3.0, FRONT_Z + 0.22], [3.0, -3.1], [7.0, -3.1], [7.0, 2.35], [5.3, 2.35], [5.3, 4.43], [5.01, 4.43], [5.01, 7.07], [0.35, 7.07], [0.35, 16.0], [-6, 16.0]], YARD_Y, gravelMat, 1);
-  { // curved lawn (artificial turf) towards the SW
+  { // curved lawn towards the SW
+    /* same muted lawn as the pool's (pool/props.js): #6d8a3e + blade specks + 1.5 m mowing stripes, rendered through
+       0xb4b4b4 (the bright turf speckle read lime in p01) */
+    const rL = kit.rng(5);
+    const lawnMap = kit.canvasTex(512, 512, (g, w, h) => {
+      g.fillStyle = '#6d8a3e'; g.fillRect(0, 0, w, h);
+      g.fillStyle = 'rgba(40,52,20,0.10)'; g.fillRect(0, 0, w / 2, h);
+      g.fillStyle = 'rgba(214,220,170,0.07)'; g.fillRect(w / 2, 0, w / 2, h);
+      for (let k = 0; k < 42000; k++) { const v = (rL() - 0.5) * 60; g.fillStyle = `rgba(${96 + v},${122 + v},${62 + v * 0.6},0.45)`; g.fillRect(rL() * w, rL() * h, 1, 2 + rL() * 3); }
+      for (let k = 0; k < 160; k++) { g.fillStyle = `rgba(${120 + rL() * 30},${118 + rL() * 20},${70},0.12)`; g.beginPath(); g.arc(rL() * w, rL() * h, 3 + rL() * 9, 0, 7); g.fill(); }
+    }, { repeat: [1 / 3, 1 / 3] });
+    const lawnMat = std({ map: lawnMap, color: 0xb4b4b4, roughness: 0.95, normalMap: kit.noiseNormal(256, 2.2, 48, 21), normalScale: new THREE.Vector2(0.45, 0.45) });
     const pts = []; for (let i = 0; i <= 24; i++) { const a = Math.PI * 0.5 * i / 24; pts.push([-6 + 5.2 * Math.cos(a) * 1.0, -4.3 + 7.5 * Math.sin(a)]); }
     pts.push([-6, -4.3]);
-    flatQuad(root, pts, YARD_Y + 0.02, turfMat);
+    flatQuad(root, pts, YARD_Y + 0.02, lawnMat);
   }
   // house-number pillar "17609" at the foot of the steps by the sidewalk (p01)
   {
@@ -588,36 +672,29 @@ export async function build(ctx) {
     wallBox(dLeft(FRONT_Z) + 0.05, FRONT_Z - 0.05, dLeft(FRONT_Z) + 0.75, FRONT_Z + 0.55, WALK_Y + 1.0);
   }
 
-  // ================================================================ planting (instanced foliage blobs + grass tufts)
+  // ================================================================ planting (shared CC0 shrub + grass models, site/flora.js)
+  /* p01: loose silvery olive / westringia shrubs and ornamental grasses (was lollipop topiaries + blob clusters).
+     Same positions as before; each plant = 1-2 overlapping shrub_02 instances tinted around 0x9aa48a. */
   {
-    const blob = new THREE.IcosahedronGeometry(1, 2); { const p = blob.attributes.position; const v = new THREE.Vector3(); const nz = vnoise(99, 8);
-      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const k = 0.82 + 0.36 * nz((v.x + 1) / 2 % 1, ((v.y + v.z) / 4 + 0.5) % 1); v.multiplyScalar(k); p.setXYZ(i, v.x, v.y, v.z); }
-      blob.computeVertexNormals(); }
-    const leaf = speckleTex(256, [205, 210, 196], [26, 30, 80], 71, { pebbles: 0.25, pebbleAmp: -70, nStrength: 4 }); leaf.map.repeat.set(3, 3); leaf.normalMap.repeat.set(3, 3);
-    const leafMat = std({ map: leaf.map, normalMap: leaf.normalMap, normalScale: new THREE.Vector2(1.6, 1.6), roughness: 0.85 });
-    const inst = [], tufts = []; const r = kit.rng(5150);
+    const r = kit.rng(5150); const sh = [], shS = [], gr = [];
     const yardY = (z) => YARD_Y;
-    const COL = { olive: 0x8d9a7c, lav: 0x7d876c, box: 0x4a6532, hedge: 0x41592c, grass: 0xa49c72, dark: 0x34492a, sage: 0x9aa58a };
+    const TINT = { olive: 0xa3ab92, lav: 0x8e9a7e, box: 0x86926f, hedge: 0x7f8c68, dark: 0x6f7c5c, sage: 0x9aa48a };
+    const GRASS = [0xb3aa82, 0xa8a27a, 0x9fa07a, 0xbcb08a];
+    const jit = (hex) => new THREE.Color(hex).offsetHSL((r() - 0.5) * 0.02, (r() - 0.5) * 0.06, (r() - 0.5) * 0.06).getHex();
     // plant(x, z, yBase, height, width, type)
-    const plant = (x, z, y, h, w, type) => {
-      const n = Math.max(4, Math.round(h * w * 16)); const c = new THREE.Color(COL[type]);
-      for (let i = 0; i < n; i++) {
-        const t = r(), a = r() * Math.PI * 2, rad = (0.15 + 0.85 * Math.sqrt(r())) * w * 0.35 * (1 - 0.5 * t);
-        const s = w * (0.20 + r() * 0.14) * (type === 'olive' || type === 'hedge' ? 0.9 : 1.0);
-        const cc = c.clone().offsetHSL((r() - 0.5) * 0.03, (r() - 0.5) * 0.08, (r() - 0.5) * 0.10);
-        inst.push({ p: [x + Math.cos(a) * rad, y + s * 0.6 + t * (h - s * 1.2), z + Math.sin(a) * rad], s: [s, s * (type === 'olive' || type === 'hedge' ? 1.25 : 0.85), s], c: cc });
-      }
-    };
-    const tuft = (x, z, y, h, w, type = 'grass') => tufts.push({ p: [x, y, z], s: [w, h, w], c: new THREE.Color(COL[type]).offsetHSL((r() - 0.5) * 0.03, (r() - 0.5) * 0.1, (r() - 0.5) * 0.12) });
-    // stems for olives (thin dark trunks)
-    const stemMat = std({ color: 0x5b5148, roughness: 0.9 });
-    const olive = (x, z, y, h) => { plant(x, z, y + h * 0.18, h * 0.82, h * 0.5, 'olive'); for (let i = 0; i < 3; i++) { const a = r() * 6.28; kit.add(root, kit.cyl(0.018, 0.025, h * 0.45, 6), stemMat, [x + Math.cos(a) * 0.06, y + h * 0.22, z + Math.sin(a) * 0.06], [Math.cos(a) * 0.12, 0, Math.sin(a) * 0.12]); } };
-    // walk / driveway strip planter (soil follows the stepped walls)
-    for (let z = -6.2; z < 0.2; z += 0.85) { const y = stripTop(z) - 0.07; if (r() < 0.5) plant(11.25, z, y, 0.5, 0.4, 'box'); else tuft(11.25, z, y, 0.7, 0.35, 'grass'); }
+    /* the sapling-like model reads fuller with overlapping, differently turned instances: 2 for the tall ones, 1 for
+       the small (front-view GPU budget: ~5k tris per instance, alpha-tested) */
+    const plant = (x, z, y, h, w, type, list = sh) => { const c = jit(TINT[type] ?? TINT.sage), n = list === shS ? 2 : 1;
+      for (let j = 0; j < n; j++) { const hh = h * (0.8 + r() * 0.3); list.push({ x: x + (r() - 0.5) * 0.3 * w, y: y - 0.03, z: z + (r() - 0.5) * 0.3 * w, h: hh, w: Math.max(w * 1.5, hh * 1.05), ry: r() * 6.3, color: c, v: j === 1 ? 3 : 1 }); } };
+    const tuft = (x, z, y, h, w, type = 'grass') => { if (type !== 'grass') return plant(x, z, y, h * 0.85, w, type);
+      gr.push({ x, y: y - 0.02, z, h: h * 0.9, w: w * 1.3, ry: r() * 6.3, color: GRASS[Math.floor(r() * GRASS.length)], v: gr.length % 5 }); };
+    const olive = (x, z, y, h) => plant(x, z, y, h, h * 0.62, 'olive', shS);
+    // walk / driveway strip planter (soil follows the stepped walls): ornamental grasses along the stairs, a few sage
+    for (let z = -6.2; z < 0.2; z += 0.6) { const y = stripTop(z) - 0.07; if (r() < 0.25) plant(11.25, z, y, 0.55, 0.45, 'sage'); else tuft(11.25, z, y, 0.75 + r() * 0.2, 0.42, 'grass'); }
     // turret / ledge planter (v01/v09: ornamental grasses + rosemary behind the seat ledge, a small tree near the cheek)
     olive(6.0, 3.0, SOIL, 1.9); olive(7.7, 0.4, SOIL, 1.5);
     for (let t = 0.08; t < 0.95; t += 0.12) { const x = LEDGE_S[0] + (LEDGE_B[0] - LEDGE_S[0]) * t - 0.55, z = LEDGE_S[1] + (LEDGE_B[1] - LEDGE_S[1]) * t - 0.4;
-      tuft(x, z, SOIL, 0.55 + r() * 0.3, 0.5, r() < 0.5 ? 'grass' : 'sage'); }
+      tuft(x, z, SOIL, 0.55 + r() * 0.3, 0.5, r() < 0.6 ? 'grass' : 'sage'); }
     for (const [x, z] of [[7.6, 1.6], [8.0, 1.0], [7.5, 0.2], [8.8, 0.1], [7.3, 2.3], [6.5, 2.85]]) plant(x, z, SOIL, 0.65 + r() * 0.2, 0.75, 'sage');
     // SW block front bed + DG yard: sparse, varied (p00: olives, grasses, a few dark shrubs on warm gravel)
     for (let x = 0.9; x < 5.0; x += 1.3) tuft(x, 6.2 + (r() - 0.5) * 0.4, YARD_Y, 0.7, 0.55, r() < 0.5 ? 'grass' : 'sage');
@@ -627,24 +704,25 @@ export async function build(ctx) {
     // terrace bed along the sidewalk: row of upright silver-green shrubs/grasses (p00)
     for (let x = -5.6; x < 2.6; x += 0.85) { const xx = x + (r() - 0.5) * 0.2, zz = -5.8 + (r() - 0.5) * 0.3;
       if (r() < 0.7) plant(xx, zz, YARD_Y, 1.2 + r() * 0.5, 0.75, 'sage'); else tuft(xx, zz, YARD_Y, 1.0 + r() * 0.3, 0.8, 'grass'); }
-    // left of the driveway: upright green shrubs ~2 m on the sleeper terraces (p01)
-    for (let i = 0; i < 6; i++) { const x = dLeft(-4.1) + 1.0 + i * 0.95 + (r() - 0.5) * 0.3, z = -4.1 + (r() - 0.5) * 0.7; plant(x, z, SL_TOP(2), 1.6 + r() * 0.6, 0.6, r() < 0.5 ? 'hedge' : 'box'); }
+    // left of the driveway: upright silvery shrubs ~2 m on the sleeper terraces (p01)
+    for (let i = 0; i < 6; i++) { const x = dLeft(-4.1) + 1.0 + i * 0.95 + (r() - 0.5) * 0.3, z = -4.1 + (r() - 0.5) * 0.7; plant(x, z, SL_TOP(2), 1.6 + r() * 0.6, 0.9, r() < 0.5 ? 'olive' : 'sage', shS); }
     for (let i = 0; i < 10; i++) { const k = i % 2; const x = dLeft(-5.0) + 0.6 + i * 0.55 + (r() - 0.5) * 0.2, z = -6.2 + k * 0.85 + 0.3;
-      if (r() < 0.5) plant(x, z, SL_TOP(k), 0.9 + r() * 0.5, 0.7, 'box'); else tuft(x, z, SL_TOP(k), 0.8, 0.6, 'sage'); }
-    // grass tufts: bundles of thin blades
-    if (tufts.length) {
-      const blades = []; const rb = kit.rng(808);
-      for (let i = 0; i < 16; i++) { const c = new THREE.ConeGeometry(0.035, 1, 3, 1); c.translate(0, 0.5, 0); c.scale(1, 0.7 + rb() * 0.3, 1);
-        c.rotateX((rb() - 0.2) * 0.45); c.rotateY(rb() * 6.28); c.translate((rb() - 0.5) * 0.2, 0, (rb() - 0.5) * 0.2); blades.push(c.toNonIndexed()); }
-      const tg = kit.mergeGeometries(blades); tg.computeVertexNormals();
-      const tm = new THREE.InstancedMesh(tg, std({ roughness: 0.9, side: THREE.DoubleSide }), tufts.length); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
-      tufts.forEach((b, i) => { q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0)); tm.setMatrixAt(i, m4.compose(new THREE.Vector3(...b.p), q, new THREE.Vector3(...b.s))); tm.setColorAt(i, b.c); });
-      tm.castShadow = true; tm.receiveShadow = true; tm.name = 'grassTufts'; root.add(tm);
-    }
-    // rear: shrubs by the kitchen + family (p44 foreground of the house)
-    const blobs = new THREE.InstancedMesh(blob, leafMat, inst.length); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
-    inst.forEach((b, i) => { q.setFromEuler(new THREE.Euler(r() * 6, r() * 6, r() * 6)); blobs.setMatrixAt(i, m4.compose(new THREE.Vector3(...b.p), q, new THREE.Vector3(...b.s))); blobs.setColorAt(i, b.c); });
-    blobs.castShadow = true; blobs.receiveShadow = true; blobs.name = 'shrubs'; root.add(blobs);
+      if (r() < 0.5) plant(x, z, SL_TOP(k), 0.9 + r() * 0.5, 0.7, 'sage'); else tuft(x, z, SL_TOP(k), 0.8, 0.6, 'grass'); }
+    try { const P = await cc0Plants(kit);
+      plantInstances(root, P.shrub, shS, { shadow: true }); plantInstances(root, P.shrub, sh, { shadow: false }); plantInstances(root, P.grass, gr, { shadow: false });
+      /* foliage core: the sapling-like shrub_02 reads as bare twigs on gravel on its own; a soft, dark, lumpy mass inside
+         each shrub (one instanced draw, ~80 tris each) makes the beds read as the full silvery shrubs of p01 */
+      const coreGeo = new THREE.SphereGeometry(1, 12, 8); { const p = coreGeo.attributes.position, v = new THREE.Vector3();
+        for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const k = 0.78 + 0.13 * Math.sin(v.x * 6.3 + v.z * 4.1) * Math.cos(v.y * 5.2) + 0.09 * Math.sin(v.z * 11.0 + v.y * 9.0);
+          p.setXYZ(i, v.x * k, Math.max(-0.3, v.y) * k, v.z * k); }
+        coreGeo.computeVertexNormals(); }
+      const leafN = kit.noiseNormal(256, 2.2, 22, 41); leafN.repeat.set(3, 2);
+      const coreMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, normalMap: leafN, normalScale: new THREE.Vector2(1.6, 1.6) });
+      const all = [...shS, ...sh]; const core = new THREE.InstancedMesh(coreGeo, coreMat, all.length); const o3 = new THREE.Object3D(), cc = new THREE.Color();
+      all.forEach((it, i) => { o3.position.set(it.x, it.y + it.h * 0.36, it.z); o3.rotation.set(0, it.ry, 0); o3.scale.set(it.w * 0.27, it.h * 0.3, it.w * 0.27); o3.updateMatrix();
+        core.setMatrixAt(i, o3.matrix); core.setColorAt(i, cc.setHex(it.color).offsetHSL(0, 0.04, 0).multiplyScalar(0.46)); });
+      core.castShadow = false; core.receiveShadow = true; core.computeBoundingSphere(); core.userData.keep = true; core.name = 'cc0plants-core'; root.add(core);
+    } catch (e) { console.error('[front plants]', e); window.__errors?.push('front plants: ' + (e.stack || e.message)); }
   }
 
   // ================================================================ dynamic props: two planter pots by the door, a ball on the lawn

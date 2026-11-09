@@ -155,6 +155,16 @@ function setAO(mode, { full = null, samples = 0 } = {}) {
   const half = full !== null ? !full : !SHOT && ((mode !== 'High' && mode !== 'Ultra') || qStage >= 1);
   Object.assign(n8.configuration, { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6, gammaCorrection: false, halfRes: half, depthAwareUpsampling: true, denoiseRadius: 10 });
   if (samples) Object.assign(n8.configuration, { aoSamples: samples, denoiseSamples: 16, denoiseRadius: 8 });
+  aoIn = null; aoRoom();
+}
+/* interiors want tight contact shadows (corners, under furniture: ~0.5 m radius, stronger); the 0.9 m radius suits the
+   facade/garden. Uniform-only changes (no recompile), re-checked with the room HUD lookup each frame. */
+let aoIn = null;
+function aoRoom() {
+  if (!n8 || !n8.enabled) return; const p = camera.position; const level = p.y > 3.2 ? 1 : 0; let inside = false;
+  for (const id in P.ROOMS) { const r = P.ROOMS[id]; if (r.level !== level || r.outdoor) continue; const q = r.rect; if (p.x > q[0] - 0.05 && p.x < q[2] + 0.05 && p.z > q[1] - 0.05 && p.z < q[3] + 0.05) { inside = true; break; } }
+  if (inside === aoIn) return; aoIn = inside;
+  Object.assign(n8.configuration, inside ? { aoRadius: 0.5, distanceFalloff: 0.35, intensity: 3.0 } : { aoRadius: 0.9, distanceFalloff: 0.35, intensity: 2.6 });
 }
 // quality tier + render resolution (walk mode; see perf.js)
 // stage = Ultra 120 Hz lever (perf.js createQuality): 1 AO half-res + quarter bloom, 2 2k shadow map + slower door
@@ -430,7 +440,7 @@ async function main() {
         else render();
       } finally { scene.matrixWorldAutoUpdate = true; }
     }
-    hud(player); lap('hud');
+    hud(player); aoRoom(); lap('hud');
     gpuT.end(); lastWork = performance.now() - now;
   };
   // ---- frame-rate setting (settings.fpsCap): '60' / '120' = rAF loop that skips frames to hold the cap;

@@ -17,6 +17,7 @@
 import * as THREE from 'three';
 import { createWater } from '../water/index.js';
 import { makeMaterials, sectional, firePit, clubChair, teakBench, pingPong, planter, fence } from './pool/props.js';
+import { cc0Plants, plantInstances } from './site/flora.js';
 
 export const piece = { rooms: [], photos: ["p38", "p39", "p40"] };
 export const ownCeiling = [];
@@ -172,14 +173,14 @@ export async function build(ctx) {
   // daytime listing-photo views, where the lights are off)
   const view = new URLSearchParams(globalThis.location?.search || '').get('view');
   const lightsOn = !piece.photos.includes(view);
-  const HUES = [0.76, 0.66, 0.52], spaCol = new THREE.Color();
+  const HUES = [0.47, 0.51, 0.54], spaCol = new THREE.Color();   /* aqua drift, not a neon purple/blue cycle */
   const setSpa = (t) => {
     const p = (t / 7) % HUES.length, i = Math.floor(p), f = p - i, s = f * f * (3 - 2 * f);
     const h = HUES[i] + (HUES[(i + 1) % HUES.length] - HUES[i]) * s;
-    spaCol.setHSL(h, 0.95, 0.55);
-    M.spaGlow.emissive.copy(spaCol); M.spaLens.color.copy(spaCol).lerp(new THREE.Color(1, 1, 1), 0.35).multiplyScalar(3);
+    spaCol.setHSL(h, 0.55, 0.5);
+    M.spaGlow.emissive.copy(spaCol); M.spaLens.color.copy(spaCol).lerp(new THREE.Color(1, 1, 1), 0.45).multiplyScalar(2.2);
   };
-  M.spaGlow.emissiveIntensity = lightsOn ? 1.2 : 0;
+  M.spaGlow.emissiveIntensity = lightsOn ? 0.85 : 0;
   if (!lightsOn) M.spaLens.color.set(0xd8dcdc);
   else { setSpa(0); ctx.onUpdate((dt, t) => setSpa(t)); }
   ctx.onUpdate((dt, t) => { M.spill.alphaMap.offset.y = (t * 0.9) % 1; });
@@ -202,8 +203,9 @@ export async function build(ctx) {
   AABB(P.x0, DEEP - 0.6, P.z0, P.x1, DEEP - 0.04, P.z1);
 
   // ================= WATER
-  const pool = createWater(ctx, { outline: POOL_OUTLINE, surfaceY: WATER, floorY: poolFloorY, color: 0x2fb7c9, name: 'pool' });
-  createWater(ctx, { outline: SPA_OUTLINE, surfaceY: SPA_WATER, floorY: spaFloorY, color: 0x2fb7c9, name: 'spa' });
+  // darker, less saturated teal-green (p38: the water mirrors the hills; not swimming-pool cyan)
+  const pool = createWater(ctx, { outline: POOL_OUTLINE, surfaceY: WATER, floorY: poolFloorY, color: 0x3e8a85, reflect: 1.1, name: 'pool' });
+  createWater(ctx, { outline: SPA_OUTLINE, surfaceY: SPA_WATER, floorY: spaFloorY, color: 0x3e8a85, reflect: 1.1, name: 'spa' });
 
   // ================= DECK (pavers house -> lawn, hole over pool + spa)
   const deckOutline = [
@@ -242,10 +244,14 @@ export async function build(ctx) {
   solids.push(clubChair(kit, root, M, [1.80, DECK, 30.10], Math.PI / 2 + 0.6));
   solids.push(teakBench(kit, root, M, [2.95, DECK, 28.35], -0.25));
   solids.push(pingPong(kit, root, M, [19.6, DECK, 24.9], 0));
-  solids.push(planter(kit, root, M, [-2.7, DECK, 16.9], 1.2, 3));
-  solids.push(planter(kit, root, M, [-2.7, DECK, 30.2], 1.1, 4));
-  solids.push(planter(kit, root, M, [22.6, DECK, 22.2], 1.2, 5));
-  solids.push(planter(kit, root, M, [16.9, DECK, 28.4], 1.0, 6));
+  // planters: CC0 silvery shrubs (olive / westringia look) instanced in one draw per variant
+  let plants = null, plantLib = null;
+  try { plantLib = await cc0Plants(kit); plants = []; } catch (e) { console.error('[pool plants]', e); window.__errors?.push('pool plants: ' + (e.stack || e.message)); }
+  solids.push(planter(kit, root, M, [-2.7, DECK, 16.9], 1.2, 3, plants));
+  solids.push(planter(kit, root, M, [-2.7, DECK, 30.2], 1.1, 4, plants));
+  solids.push(planter(kit, root, M, [22.6, DECK, 22.2], 1.2, 5, plants));
+  solids.push(planter(kit, root, M, [16.9, DECK, 28.4], 1.0, 6, plants));
+  if (plants) plantInstances(root, plantLib.shrub, plants);
   for (const s of solids) {
     // one box per seat module, not one for the whole sectional (it is U-shaped)
     if (s.children.every(c => c.isGroup)) for (const c of s.children) phys.solidGroup(c); else phys.solidGroup(s);

@@ -316,12 +316,12 @@ export async function build(ctx) {
   const aoMat = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false });
   const ao = (parent, cx, cz, w, d, op, y, ry = 0, s = 0.22) => { const m = kit.add(parent, aoGeo(w, d, s, op), aoMat, [cx, y, cz], [0, ry, 0], { shadow: false }); m.receiveShadow = false; m.renderOrder = 2; return m; };
   // neutral warm-white paint (#EEEBE6-ish on screen): counters the warm cast the global grade puts on paintWhite
-  const paintN = M.paintWhite.clone(); paintN.color = new THREE.Color(0xedf0f6);
+  const paintN = M.paintWhite.clone(); paintN.color = new THREE.Color(0xefeeea); /* neutral (was 0xedf0f6: cold lavender cast in p24) */
 
   // ================================================================ BEDROOM A
   const bed = kit.group(root, [0, 0, 0], 0, 'bedA');
   // ---- vaulted ceiling (front-gable vault, ridge along z at the room centre): soft gradient, darker toward the ridge
-  const vaultMat = M.ceilingWhite.clone(); vaultMat.color = new THREE.Color(0xf0f2f6); vaultMat.emissive = new THREE.Color(0xffffff); vaultMat.emissiveIntensity = 0.2; vaultMat.emissiveMap = vaultGlowTex(kit);
+  const vaultMat = M.ceilingWhite.clone(); vaultMat.color = new THREE.Color(0xf1f0ec); vaultMat.emissive = new THREE.Color(0xffffff); vaultMat.emissiveIntensity = 0.2; vaultMat.emissiveMap = vaultGlowTex(kit);
   const vault = kit.vault(bed, BED.rect, 'z', PLATE, RIDGE_Y, vaultMat, paintN, 0, true);
   // neutral paint over the three painted walls; the SW wall brightens toward the street window (daylight falloff)
   {
@@ -471,6 +471,8 @@ export async function build(ctx) {
     const hz = kit.canvasTex(256, 128, (g, w, h) => { g.fillStyle = '#f6f5f2'; g.fillRect(0, 0, w, h); g.filter = 'blur(8px)'; for (let i = 0; i < 40; i++) { g.fillStyle = r() < 0.6 ? 'rgba(160,190,150,0.22)' : 'rgba(220,170,170,0.2)'; g.beginPath(); g.ellipse(r() * w, h * (0.35 + r() * 0.65), 8 + r() * 30, 6 + r() * 20, 0, 0, Math.PI * 2); g.fill(); } });
     const m = kit.add(bed, new THREE.PlaneGeometry(o.w - 0.04, o.head - o.sill - 0.04), std({ color: 0xffffff, map: hz, emissive: 0xffffff, emissiveMap: hz, emissiveIntensity: 1.25, roughness: 1, transparent: true, opacity: 0.8, depthWrite: false }), [o.at[0], Y + (o.sill + o.head) / 2, BED.z0 - 0.25], [0, 0, 0], { shadow: false });
     m.renderOrder = 1;
+    /* only for this room's own photo views: from the street shots (p00/p01) it read as a glowing blob in the window */
+    const v = ctx.params?.get?.('view'); if (v && !piece.photos.includes(v)) m.visible = false;
   }
   // ---- framed horse etching on the street wall, left of the window
   {
@@ -513,8 +515,10 @@ export async function build(ctx) {
   // ---- warm daylight key through the street window (non-shadow spot, 1 of 2 lights)
   {
     const o = ctx.plan.OPENINGS.find(q => q.id === 'bA-front');
-    const key = new THREE.SpotLight(0xfff3e8, 80, 11, 0.62, 0.9, 2); key.castShadow = false;
-    key.position.set(o.at[0] - 0.3, Y + o.head + 0.4, BED.z0 - 1.2); key.target.position.set(o.at[0] + 0.9, Y + 0.4, BED.z0 + 3.4);
+    /* source just inside the glass, past the roman shade: from outside it blasted the shade into a glowing blob seen from
+       the street; intensity/cone rescaled (inverse square, same footprint) so the room is lit as before */
+    const key = new THREE.SpotLight(0xfff3e8, 43, 11, 0.78, 0.9, 2); key.castShadow = false;
+    key.position.set(o.at[0] - 0.3, Y + o.head + 0.1, BED.z0 + 0.35); key.target.position.set(o.at[0] + 0.9, Y + 0.4, BED.z0 + 3.4);
     bed.add(key, key.target);
   }
 

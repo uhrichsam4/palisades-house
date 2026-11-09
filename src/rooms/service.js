@@ -190,13 +190,15 @@ export async function build(ctx) {
     const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     for (let j = 0; j <= NV; j++) {
       const v = j / NV; const y = -len * v;
-      const a = topW + (w / 2 - topW) * sm(0, 0.2, v) + 0.01 * v; const b = 0.02 + (d / 2 - 0.02) * sm(0, 0.28, v);
+      /* coat on a hook: bunched collar, quick shoulders, A-line flare and a flat front (was a round bottle section) */
+      const a = topW + (w / 2 * 0.78 - topW) * sm(0, 0.1, v) + w / 2 * 0.24 * sm(0.1, 1, v); const b = 0.015 + (d / 2 * 0.8 - 0.015) * sm(0.02, 0.45, v);
       const q = quilt ? 1 + 0.09 * (Math.pow(Math.abs(Math.sin(Math.PI * v * quilt)), 0.6) - 0.6) * sm(0.08, 0.2, v) : 1;
       for (let i = 0; i <= NU; i++) {
         const u = i / NU, t = u * Math.PI * 2; const c = Math.cos(t), s = Math.sin(t);
         const fold = 1 + 0.07 * Math.sin(t * folds + ph + v * 2.5) * sm(0.12, 0.5, v) + 0.03 * Math.sin(t * 11 + v * 9 + ph);
         const hem = v > 0.97 ? (v - 0.97) * 4 : 0;
-        pos.push(a * c * q * fold * (1 - hem), y + 0.012 * Math.sin(t * 3 + ph) * v, b * s * q * fold * (1 - hem) + lean * v * v);
+        const placket = s > 0 ? 1 - 0.18 * Math.exp(-(((t - Math.PI / 2) / 0.18) ** 2)) * sm(0.08, 0.3, v) : 1;
+        pos.push(a * Math.sign(c) * Math.pow(Math.abs(c), 0.75) * q * fold * (1 - hem), y + 0.012 * Math.sin(t * 3 + ph) * v, b * s * placket * q * fold * (1 - hem) + lean * v * v);
         uv.push(u * 2, v * 2);
       }
     }
@@ -718,26 +720,50 @@ export async function build(ctx) {
   }
 
   // =====================================================================================
-  // GARAGE (rect x 11.42..22.80, z 0.65..7.05) — plain 3-car garage: sealed concrete, white walls,
-  // LED shop lights, door openers + tracks, white storage cabinets, a few loose things.
+  // GARAGE (rect x 11.42..22.80, z 0.65..7.05) — clean, lit luxury 3-car garage: light grey flake epoxy,
+  // white walls, flush LED ceiling panels, white steel door insides, black steel shelving with bins on the
+  // back wall, workbench + pegboard, wall EV charger, white storage cabinets on the NE wall. Car bays stay clear
+  // (z < 6.5 between the side walls; the cars live in the driveway, src/cars).
   // =====================================================================================
   {
     const ga = kit.group(root, [0, 0, 0], 0, 'garage');
-    const conc = std({ ...kit.pbrMaps('concrete_floor_worn_001', '1k', { repeat: [1 / 3, 1 / 3] }), color: 0xd9d7d2, roughness: 0.7 });
-    conc.normalScale = new THREE.Vector2(0.6, 0.6);
-    kit.floorFinish(ga, 'garage', conc);
-    // expansion joints in the slab
-    for (const x of [15.2, 19.0]) add(ga, kit.box(0.008, 0.002, 6.4), M.matteBlack, [x, 0.006, 3.85]);
-    add(ga, kit.box(11.38, 0.002, 0.008), M.matteBlack, [17.11, 0.006, 3.85]);
-    // LED shop lights
-    const ledM = std({ color: 0xffffff, emissive: 0xf4f7ff, emissiveIntensity: 2.4, roughness: 1 });
-    for (const x of [13.6, 17.1, 20.6]) for (const z of [2.6, 5.2]) { RB(ga, mat.grille, x - 0.62, 2.99, z - 0.06, 1.24, 0.05, 0.12, 0.01); add(ga, kit.box(1.18, 0.004, 0.08), ledM, [x, 2.988, z], [0, 0, 0], { shadow: false }); }
+    /* flake epoxy: light grey base, dense grey/charcoal/white/tan chips, glossy topcoat */
+    const flake = kit.canvasTex(1024, 1024, (g, w, h) => {
+      const r = kit.rng(77); g.fillStyle = '#b8babb'; g.fillRect(0, 0, w, h);
+      const cols = ['#8d9092', '#6b6e70', '#3a3c3e', '#d9dadb', '#f1f1ef', '#a59d92', '#9fa3a6'];
+      for (let i = 0; i < 26000; i++) {
+        const x = r() * w, y = r() * h, s = 1.2 + r() * 3.6; g.fillStyle = cols[(r() * cols.length) | 0];
+        g.beginPath(); const n = 4 + ((r() * 3) | 0), a0 = r() * 6.28; for (let k = 0; k < n; k++) { const a = a0 + k / n * 6.283, rr = s * (0.5 + r() * 0.6); g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } g.fill();
+      }
+    }, { repeat: [1 / 0.9, 1 / 0.9] });
+    const epoxy = physMat({ map: flake, color: 0xffffff, roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.12,
+      roughnessMap: null, normalMap: kit.noiseNormal(256, 0.6, 24, 21), normalScale: new THREE.Vector2(0.08, 0.08) });
+    kit.floorFinish(ga, 'garage', epoxy);
+    /* sealed saw-cut joints show faintly through the epoxy */
+    const jointM = std({ color: 0x7f8284, roughness: 0.5 });
+    for (const x of [15.2, 19.0]) add(ga, kit.box(0.006, 0.0015, 6.4), jointM, [x, 0.0055, 3.85], [0, 0, 0], { shadow: false });
+    /* white base cove where the epoxy meets the walls (8 cm) */
+    { const cove = std({ color: 0xc9cbcc, roughness: 0.35 });
+      RB(ga, cove, 11.42, 0, 6.97, 0.5, 0.08, 0.08, 0.01); RB(ga, cove, 13.3, 0, 6.97, 9.5, 0.08, 0.08, 0.01);
+      RB(ga, cove, 11.42, 0, 0.65, 0.08, 0.08, 6.4, 0.01); }
+    /* flush LED panels (2 x 0.6 m) in a 4 x 2 grid: aluminium trim + emissive diffuser, no real lights */
+    {
+      const ledM = std({ color: 0xffffff, emissive: 0xf6f8ff, emissiveIntensity: 2.2, roughness: 1 });
+      const trimM = std({ color: 0xe9eaeb, roughness: 0.35, metalness: 0.4 });
+      const trims = [], lens = [];
+      for (const x of [13.1, 15.95, 18.8, 21.4]) for (const z of [2.3, 4.9]) {
+        const t = new THREE.BoxGeometry(0.64, 0.02, 1.24); t.translate(x, 3.04, z); trims.push(t);
+        const l = new THREE.PlaneGeometry(0.58, 1.18); l.rotateX(Math.PI / 2); l.translate(x, 3.0285, z); lens.push(l);
+      }
+      add(ga, kit.mergeGeometries(trims), trimM, [0, 0, 0], [0, 0, 0], { shadow: false });
+      add(ga, kit.mergeGeometries(lens), ledM, [0, 0, 0], [0, 0, 0], { shadow: false });
+    }
     // openers: motor head + rail per door, door tracks
     const doors = [[20.45, 2.75], [15.25, 5.50]];
     for (const [dx, dw] of doors) {
       RB(ga, mat.galv, dx - 0.025, 2.56, 0.7, 0.05, 0.05, 3.2, 0.005);
       const mh = kit.group(ga, [dx, 2.6, 4.05]);
-      RB(mh, std({ color: 0x6d7276, roughness: 0.5, metalness: 0.2 }), -0.2, -0.1, -0.2, 0.4, 0.2, 0.4, 0.03);
+      RB(mh, std({ color: 0xe6e7e8, roughness: 0.4, metalness: 0.1 }), -0.2, -0.1, -0.2, 0.4, 0.2, 0.4, 0.03);
       add(mh, kit.box(0.18, 0.012, 0.12), std({ color: 0xffffff, emissive: 0xfff4dd, emissiveIntensity: 0.6, transparent: true, opacity: 0.85 }), [0, -0.105, 0]);
       for (const sx of [-1, 1]) RB(ga, mat.galv, dx + sx * 0.15 - 0.015, 2.7, 4.04, 0.03, 0.35, 0.03, 0.003);
       for (const sx of [-1, 1]) {
@@ -745,23 +771,116 @@ export async function build(ctx) {
         RB(ga, mat.galv, x - 0.03, 0, 0.66, 0.06, 2.5, 0.06, 0.004);
         RB(ga, mat.galv, x - 0.03, 2.5, 0.66, 0.06, 0.06, 2.9, 0.004);
       }
-      RB(ga, std({ color: 0x8c8f92, roughness: 0.4, metalness: 0.6 }), dx - dw / 2, 2.47, 0.67, dw, 0.08, 0.08, 0.03); // torsion spring tube
+      RB(ga, std({ color: 0x8c8f92, roughness: 0.4, metalness: 0.6 }), dx - dw / 2, 2.47, 0.67, dw, 0.08, 0.08, 0.03); /* torsion spring tube */
     }
-    // white storage: upper + base cabinets and a tall unit along the NE wall (x 22.80)
+    /* door insides: the shell's door slab is dark on both faces, so give its garage face white steel sections
+       (children of the shell's door group, so they swing up with it when the door opens / hide when it breaks) */
     {
-      const cab = kit.group(ga, [22.80, 0, 1.5], -Math.PI / 2, 'garageCabinets'); // local +x along +z world, +z into the garage
+      const S = 512, hgt = new Float32Array(S * S);
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const v = (y / S * 4) % 1; const u = (x / S * 2) % 1;
+        const rib = Math.abs(v - 0.5) < 0.36 && (Math.abs(u - 0.5) < 0.47) ? 0.6 : 0; hgt[y * S + x] = (v < 0.02 || v > 0.985 ? 0 : 1) + rib * 0.4 + 0.15 * Math.sin(v * 6.283 * 7); }
+      const nCan = document.createElement('canvas'); nCan.width = nCan.height = S; const nc = nCan.getContext('2d'); const id = nc.createImageData(S, S);
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+        const hx = hgt[y * S + ((x + 1) % S)] - hgt[y * S + ((x + S - 1) % S)], hy = hgt[((y + 1) % S) * S + x] - hgt[((y + S - 1) % S) * S + x];
+        const nx = -hx * 2.5, ny = hy * 2.5, nz = 1, l = Math.hypot(nx, ny, nz); const i = (y * S + x) * 4;
+        id.data[i] = (nx / l * 0.5 + 0.5) * 255; id.data[i + 1] = (ny / l * 0.5 + 0.5) * 255; id.data[i + 2] = (nz / l * 0.5 + 0.5) * 255; id.data[i + 3] = 255; }
+      nc.putImageData(id, 0, 0); const nTex = new THREE.CanvasTexture(nCan); nTex.wrapS = nTex.wrapT = THREE.RepeatWrapping;
+      const gTex = kit.canvasTex(256, 256, (g, w, h) => { g.fillStyle = '#f3f3f1'; g.fillRect(0, 0, w, h); for (let k = 0; k <= 4; k++) { g.fillStyle = '#c9cac8'; g.fillRect(0, k * h / 4 - 2, w, 4); } });
+      for (const meta of ctx.shell?.openings || []) {
+        if (meta.o.type !== 'garage' || !meta.panel) continue;
+        const w = meta.p0.distanceTo(meta.p1), h = meta.y1 - meta.y0, z = (meta.zSet ?? 0.1) + 0.05 + 0.0265;
+        const fm = physMat({ map: gTex.clone(), normalMap: nTex.clone(), color: 0xe4e4e2, roughness: 0.38, metalness: 0.15, clearcoat: 0.3, clearcoatRoughness: 0.3 });
+        fm.map.repeat.set(1, h / 2.4); fm.normalMap.repeat.set(Math.max(1, Math.round(w / 1.5)) / 2, h / 2.4); fm.map.needsUpdate = fm.normalMap.needsUpdate = true;
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.02, h - 0.02), fm); face.position.set(w / 2, h / 2, z); face.receiveShadow = true; meta.panel.add(face);
+        /* galvanised struts on the top three section joints + hinges + roller brackets, merged per door */
+        const parts = [];
+        const bx = (sw, sh, sd, x, y, zz) => { const b = new THREE.BoxGeometry(sw, sh, sd); b.translate(x, y, zz); parts.push(b); };
+        for (let k = 1; k < 4; k++) { const y = h * k / 4; bx(w - 0.12, 0.05, 0.03, w / 2, y + 0.06, z + 0.015);
+          for (let j = 0; j <= Math.round(w / 1.2); j++) bx(0.06, 0.09, 0.012, 0.06 + (w - 0.12) * j / Math.round(w / 1.2), y, z + 0.006); }
+        bx(0.05, 0.12, 0.03, w / 2, 1.0, z + 0.015);
+        const sm = new THREE.Mesh(kit.mergeGeometries(parts), mat.galv); sm.castShadow = false; sm.receiveShadow = true; meta.panel.add(sm);
+      }
+    }
+    /* white storage: upper + base cabinets and a tall unit along the NE wall (x 22.80) */
+    {
+      const cab = kit.group(ga, [22.80, 0, 1.5], -Math.PI / 2, 'garageCabinets');
       RB(cab, mat.lacquer, 0, 0.1, 0, 4.2, 0.8, 0.6, 0.004);
       RB(cab, M.matteBlack, 0.05, 0, 0.05, 4.1, 0.1, 0.5, 0.002);
       RB(cab, std({ color: 0x5c5b58, roughness: 0.6 }), -0.01, 0.9, -0.01, 4.22, 0.03, 0.64, 0.004);
       RB(cab, mat.lacquer, 0, 1.6, 0, 4.2, 0.9, 0.38, 0.004);
       for (let i = 0; i < 6; i++) { const x0 = i * 0.7 + 0.005; shaker(cab, x0, 0.12, 0.6, 0.69, 0.76, mat.lacquer, 0.06); shaker(cab, x0, 1.61, 0.38, 0.69, 0.88, mat.lacquer, 0.06); pull(cab, x0 + (i % 2 ? 0.06 : 0.63), 0.8, 0.62, 0.14); pull(cab, x0 + (i % 2 ? 0.06 : 0.63), 1.7, 0.4, 0.14); }
+      /* under-cabinet LED strip */
+      add(cab, kit.box(4.1, 0.006, 0.02), std({ color: 0xffffff, emissive: 0xfff6ea, emissiveIntensity: 2.0 }), [2.1, 1.595, 0.3], [0, 0, 0], { shadow: false });
       phys.boxAABB([22.20, 0, 1.5], [22.80, 0.93, 5.7]); phys.boxAABB([22.42, 1.6, 1.5], [22.80, 2.5, 5.7]);
     }
-    // EV charger + electrical panel on the back wall
-    { const ev = kit.group(ga, [21.6, 1.25, 7.05]); RB(ev, std({ color: 0xf0f0f0, roughness: 0.3 }), -0.13, -0.18, -0.09, 0.26, 0.36, 0.09, 0.03); add(ev, kit.box(0.08, 0.02, 0.005), std({ color: 0x22c55e, emissive: 0x22c55e, emissiveIntensity: 1.5 }), [0, 0.1, 0.002]); add(ev, kit.torus(0.12, 0.012, 8, 32, Math.PI * 1.6), M.matteBlack, [0.22, -0.1, -0.03], [0, 0, 0]); }
-    RB(ga, std({ color: 0xb9bcbe, roughness: 0.5, metalness: 0.5 }), 13.4, 1.1, 6.95, 0.42, 0.75, 0.1, 0.01);
-    // step/landing at the mudroom door
-    RB(ga, conc, 11.95, 0, 6.65, 0.9, 0.06, 0.4, 0.01);
+    /* black steel shelving with grey bins + coloured lids on the back wall (x 13.95 .. 17.65), instanced bins */
+    {
+      const sh = kit.group(ga, [0, 0, 0], 0, 'garageShelving');
+      const steel = mat.blackPowder, deck = std({ color: 0x2a2b2d, roughness: 0.6, metalness: 0.4 });
+      const D = 0.55, z0 = 7.05 - D - 0.02, levels = [0.12, 0.62, 1.12, 1.62, 2.12];
+      for (const [x0, W] of [[13.95, 1.8], [15.85, 1.8]]) {
+        for (const x of [x0, x0 + W - 0.035]) for (const z of [z0, z0 + D - 0.035]) RB(sh, steel, x, 0, z, 0.035, 2.2, 0.035, 0.003);
+        for (const y of levels) { RB(sh, deck, x0, y, z0, W, 0.025, D, 0.004); RB(sh, steel, x0, y - 0.02, z0 - 0.005, W, 0.045, 0.02, 0.003); }
+        phys.boxAABB([x0, 0, z0], [x0 + W, 2.2, 7.05]);
+      }
+      const binG = kit.rbox(0.40, 0.30, 0.50, 0.02); binG.translate(0, 0.15, 0);
+      const lidG = kit.rbox(0.42, 0.03, 0.52, 0.01); lidG.translate(0, 0.315, 0);
+      const binM = physMat({ color: 0x4a4d50, roughness: 0.45, clearcoat: 0.2 }), lidM = std({ color: 0xffffff, roughness: 0.5 });
+      const slots = []; for (const [x0, W] of [[13.95, 1.8], [15.85, 1.8]]) for (const y of levels.slice(0, 4)) for (let i = 0; i < 4; i++) slots.push([x0 + 0.24 + i * 0.44, y + 0.026, z0 + D / 2]);
+      const r = kit.rng(5); const keep = slots.filter(() => r() > 0.12);
+      const bins = new THREE.InstancedMesh(binG, binM, keep.length), lids = new THREE.InstancedMesh(lidG, lidM, keep.length);
+      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), one = new THREE.Vector3(1, 1, 1), c = new THREE.Color();
+      const lidCols = [0xd9a521, 0xd9a521, 0x1f2124, 0x1f2124, 0x2f5f8f];
+      keep.forEach(([x, y, z], i) => { e.set(0, (r() - 0.5) * 0.05, 0); q.setFromEuler(e); m4.compose(new THREE.Vector3(x + (r() - 0.5) * 0.02, y, z + (r() - 0.5) * 0.03), q, one);
+        bins.setMatrixAt(i, m4); lids.setMatrixAt(i, m4); lids.setColorAt(i, c.set(lidCols[(i * 7 + (i >> 2)) % lidCols.length])); });
+      for (const im of [bins, lids]) { im.castShadow = true; im.receiveShadow = true; im.instanceMatrix.needsUpdate = true; sh.add(im); }
+      lids.instanceColor.needsUpdate = true;
+    }
+    /* workbench (butcher-block top, black steel drawers) + white pegboard with tools, x 18.05 .. 20.25 */
+    {
+      const wb = kit.group(ga, [19.15, 0, 7.05 - 0.34], 0, 'workbench'); const W = 2.1, D = 0.66;
+      const top = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [2, 0.6] }), color: 0xd2a676, roughness: 0.55 });
+      RB(wb, top, -W / 2, 0.88, -D / 2, W, 0.045, D, 0.006);
+      for (const sx of [-1, 1]) RB(wb, mat.blackPowder, sx * (W / 2 - 0.3) - 0.28, 0.08, -D / 2 + 0.03, 0.56, 0.8, D - 0.06, 0.006);
+      RB(wb, mat.blackPowder, -W / 2 + 0.6, 0.12, -D / 2 + 0.04, W - 1.2, 0.04, D - 0.1, 0.004);
+      RB(wb, M.matteBlack, -W / 2 + 0.05, 0, -D / 2 + 0.08, W - 0.1, 0.08, D - 0.14, 0.004);
+      for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) {
+        const y = 0.12 + k * 0.19; RB(wb, std({ color: 0x1b1c1e, roughness: 0.45, metalness: 0.5 }), sx * (W / 2 - 0.3) - 0.26, y, -D / 2 + 0.005, 0.52, 0.17, 0.03, 0.006);
+        add(wb, kit.box(0.30, 0.012, 0.012), mat.galv, [sx * (W / 2 - 0.3), y + 0.13, -D / 2 - 0.004]);
+      }
+      phys.solidGroup(wb);
+      const pegTex = kit.canvasTex(512, 256, (g, w, h) => { g.fillStyle = '#f2f2f0'; g.fillRect(0, 0, w, h); g.fillStyle = '#9a9c9d'; for (let y = 4; y < h; y += 8) for (let x = 4; x < w; x += 8) { g.beginPath(); g.arc(x, y, 1.4, 0, 6.283); g.fill(); } });
+      const peg = add(ga, new THREE.PlaneGeometry(2.0, 1.0), std({ map: pegTex, roughness: 0.6 }), [19.15, 1.48, 7.05 - 0.012], [0, Math.PI, 0], { shadow: false });
+      peg.receiveShadow = true;
+      RB(ga, std({ color: 0xdedfe0, roughness: 0.4, metalness: 0.3 }), 18.13, 0.96, 7.05 - 0.03, 2.04, 0.025, 0.02, 0.003);
+      /* tools on the pegboard (merged): wrenches, screwdrivers, hammer, tape measures, a level */
+      const tm = std({ color: 0xb9bdc1, roughness: 0.3, metalness: 0.9 }), red = std({ color: 0xb3261e, roughness: 0.45 }), blk = std({ color: 0x18191b, roughness: 0.5 });
+      const zf = 7.05 - 0.03;
+      for (let i = 0; i < 8; i++) { const L = 0.14 + i * 0.02; add(ga, kit.box(0.014, L, 0.006), tm, [18.35 + i * 0.05, 1.70 - L / 2, zf]); add(ga, kit.torus(0.014, 0.004, 6, 12), tm, [18.35 + i * 0.05, 1.71, zf]); }
+      for (let i = 0; i < 6; i++) { add(ga, kit.cyl(0.011, 0.011, 0.09, 8), i % 2 ? red : blk, [18.85 + i * 0.045, 1.40, zf - 0.005]); add(ga, kit.cyl(0.003, 0.003, 0.11, 6), tm, [18.85 + i * 0.045, 1.30, zf - 0.005]); }
+      add(ga, kit.box(0.03, 0.3, 0.02), blk, [19.55, 1.62, zf - 0.01]); add(ga, kit.box(0.14, 0.035, 0.03), tm, [19.55, 1.78, zf - 0.012]);
+      for (let i = 0; i < 2; i++) add(ga, kit.cyl(0.04, 0.04, 0.035, 18), i ? blk : std({ color: 0xe0b021, roughness: 0.45 }), [19.75 + i * 0.12, 1.55, zf - 0.02], [Math.PI / 2, 0, 0]);
+      add(ga, kit.box(0.9, 0.05, 0.025), std({ color: 0xe0b021, roughness: 0.45 }), [19.4, 1.88, zf - 0.01]);
+      /* on the bench: a red tool chest, a work lamp */
+      RB(ga, red, 19.75, 0.925, 6.55, 0.45, 0.28, 0.3, 0.01); add(ga, kit.box(0.2, 0.015, 0.02), mat.galv, [19.975, 1.15, 6.54]);
+      { const b = add(ga, kit.rbox(0.24, 0.06, 0.12, 0.01), std({ color: 0xf0b323, roughness: 0.5 }), [18.6, 0.955, 6.6]); phys.dynamic(b, { mass: 1.2 }); }
+    }
+    /* EV charger: white rounded body, black glass face with a green status bar, cable coiled on a holster */
+    {
+      const ev = kit.group(ga, [21.55, 1.2, 7.05], 0, 'evCharger');
+      add(ev, kit.rbox(0.20, 0.34, 0.07, 0.03, 4), mat.applWhite, [0, 0, -0.035]);
+      add(ev, kit.rbox(0.15, 0.26, 0.01, 0.02, 3), mat.blackGlass, [0, 0.01, -0.071]);
+      add(ev, kit.box(0.06, 0.008, 0.004), std({ color: 0x22c55e, emissive: 0x22c55e, emissiveIntensity: 2.0 }), [0, 0.09, -0.077], [0, 0, 0], { shadow: false });
+      add(ev, kit.rbox(0.06, 0.09, 0.07, 0.015), mat.applWhite, [0.24, -0.05, -0.035]);
+      add(ev, kit.torus(0.14, 0.011, 8, 40), mat.nylonBlack, [0.24, -0.22, -0.06], [0, 0, 0]);
+      add(ev, kit.tube([[0, -0.17, -0.04], [0.02, -0.3, -0.05], [0.14, -0.38, -0.06], [0.24, -0.36, -0.06]], 0.011, 20), mat.nylonBlack);
+      add(ev, kit.rbox(0.05, 0.11, 0.05, 0.015), mat.nylonBlack, [0.24, -0.03, -0.08]);
+    }
+    RB(ga, std({ color: 0xb9bcbe, roughness: 0.5, metalness: 0.5 }), 13.3, 1.1, 6.95, 0.42, 0.75, 0.1, 0.01);
+    /* step/landing at the mudroom door */
+    RB(ga, epoxy, 11.95, 0, 6.65, 0.9, 0.06, 0.4, 0.01);
+    /* rubber mat at the door + a wall-mounted hose reel by the cabinets */
+    add(ga, kit.rbox(0.9, 0.012, 0.6, 0.004), std({ color: 0x1c1c1d, roughness: 0.95 }), [12.4, 0.006, 6.3], [0, 0, 0], { shadow: false });
     kit.canLights(ga, [[12.4, 6.4]], 3.05);
     // loose items (dynamic): basketball, two cartons, a cone, a bucket
     { const b = add(ga, kit.sphere(0.12, 32, 16), std({ color: 0xc8611d, roughness: 0.7, normalMap: kit.noiseNormal(128, 4, 48, 8), normalScale: new THREE.Vector2(0.6, 0.6) }), [21.6, 0.12, 6.3]); phys.dynamic(b, { mass: 0.6, shape: 'ball', restitution: 0.75 }); }

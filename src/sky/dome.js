@@ -1,6 +1,8 @@
 // Sky dome: one big inverted sphere drawn after the opaque pass (depth-tested, so only sky pixels shade).
-// Daytime keeps the real HDRI (assets/ph/golden_gate_hills: its land below the ridge line, its sky with the
-// sun glare painted out); dusk/night/clouds replace the sky part with a procedural one: gradient + sun glow,
+// Daytime keeps the real HDRI's sky (assets/ph/golden_gate_hills, sun glare painted out) but never its land: the
+// site's terrain + far ridges are the land, and toward the HDRI's ridge line its sky fades into our procedural
+// horizon + a pale aerial-haze band (hazeC = the site's far-terrain haze colour), so the far hills, the ridges and
+// the sky all melt into the same haze; dusk/night/clouds replace the sky part with a procedural one: gradient + sun glow,
 // a 2-layer noise cloud deck, stars, moon, lightning. The same mesh is captured into a small cube map every
 // couple of seconds and prefiltered (PMREM) into ENV.outdoor, so facades, pool and terrain are lit and
 // reflect the sky you actually see.
@@ -16,9 +18,9 @@ void main() {
 }`;
 
 const FRAG = /* glsl */`
-uniform sampler2D tHdr; uniform sampler2D tHz; uniform sampler2D tNoise;
+uniform sampler2D tHdr; uniform sampler2D tHz; uniform sampler2D tNoise; uniform sampler2D tHorC;
 uniform float rotY, uTime, skyDay, starAmt, cover, cdark, flash, haze, fogAmt, sunVis, moonVis;
-uniform vec3 sunDir, moonDir, refSun, zenithC, horizonC, glowC, landC, fogC, cloudLit, cloudShade, sunC;
+uniform vec3 sunDir, moonDir, refSun, zenithC, horizonC, glowC, landC, fogC, hazeC, cloudLit, cloudShade, sunC;
 uniform vec2 cloudOff;
 varying vec3 vDir;
 float hash3( vec3 p ) { p = fract( p * 0.1031 ); p += dot( p, p.zyx + 31.32 ); return fract( ( p.x + p.y ) * p.z ); }
@@ -28,8 +30,16 @@ void main() {
   float az = atan( d.z, d.x ) - rotY;
   vec2 uv = vec2( fract( az * 0.15915494 + 0.5 ), el * 0.31830989 + 0.5 );
   float hz = texture2D( tHz, vec2( uv.x, 0.5 ) ).r;
-  float land = 1.0 - smoothstep( hz - 0.003, hz + 0.003, el );
+  /* no HDRI land (it read as a second, photographed mountain range behind ours): below the horizon = haze; under the
+     (smoothed) HDRI ridge line the photographed sky continues as the average colour of the sky just above it (land
+     pixels never show; a procedural fill there left a visible seam) */
+  float land = 1.0 - smoothstep( -0.03, 0.0, d.y );
   vec3 hdr = texture2D( tHdr, uv ).rgb;
+  float e0 = hz + 0.025;
+  vec3 hdrS = hdr;
+  /* under the ridge line: the photographed sky's own mean colour 12-18 deg up at this azimuth (tHorC, 32 bins, linear);
+     stretching the row above the ridge down drew vertical streaks under every photographed cloud */
+  if ( el < e0 + 0.03 ) hdrS = mix( texture2D( tHorC, vec2( uv.x, 0.5 ) ).rgb, hdr, smoothstep( e0, e0 + 0.03, el ) );
   // ---- sky
   float h = max( d.y, 0.0 );
   float sd = dot( d, sunDir );
@@ -42,8 +52,8 @@ void main() {
   sky += glowC * ( pow( toward, 3.0 ) * exp( -h * 3.5 ) + 0.6 * pow( max( sd, 0.0 ), 10.0 ) + 0.25 * pow( toward, 2.0 ) * ( 1.0 - h ) );
   // daytime: the photographed sky, its own sun glare painted out (our sun is drawn below)
   float ref = smoothstep( 0.9925, 0.9995, dot( d, refSun ) );
-  vec3 hsky = mix( min( hdr, vec3( 2.5 ) ), mix( horizonC, zenithC, 0.55 ) * 1.25, ref );
-  sky = mix( sky, hsky, skyDay * ( 1.0 - land ) );
+  vec3 hsky = mix( min( hdrS, vec3( 2.5 ) ), mix( horizonC, zenithC, 0.55 ) * 1.25, ref );
+  sky = mix( sky, hsky, skyDay );
   // ---- clouds (two noise octaves sets projected on a flat deck)
   float cl = 0.0;
   if ( cover > 0.01 ) {
@@ -80,8 +90,11 @@ void main() {
     float disk = smoothstep( 0.99996, 0.99998, sd );
     sky += sunC * ( disk * 60.0 + pow( max( sd, 0.0 ), 900.0 ) * 3.0 ) * sunVis * ( 1.0 - cl * 0.97 );
   }
-  // ---- land (the HDRI's ground and hills, lit by our sun/sky)
-  vec3 col = mix( sky, hdr * landC, land );
+  // ---- aerial haze toward the horizon (p38: hazy, almost white low sky), then below the horizon the haze itself
+  sky = mix( sky, hazeC, exp( -max( d.y, 0.0 ) * 11.0 ) * 0.62 * ( 1.0 - 0.6 * cl ) );
+  /* straight down keeps the HDRI ground (lit like before): the captured ENV.outdoor's lower half is the ground bounce
+     every outdoor material gets; only the strip just under the horizon (seen past the terrain edge) is haze */
+  vec3 col = mix( sky, mix( hazeC, hdr * landC, smoothstep( 0.03, 0.15, -d.y ) ), land );
   col = mix( col, fogC, clamp( haze * exp( -abs( d.y ) * 9.0 ) + fogAmt * ( 1.0 - 0.25 * h ), 0.0, 1.0 ) );
   col += flash * vec3( 0.5, 0.55, 0.7 ) * ( 1.0 - land ) * 0.25;
   gl_FragColor = vec4( max( col, vec3( 0.0 ) ), 1.0 );
@@ -107,17 +120,41 @@ function noiseTexture(size = 256) {
   t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t;
 }
 function horizonTexture() {
-  const n = HORIZON_DECIDEG.length, data = new Float32Array(n);
-  for (let i = 0; i < n; i++) data[i] = HORIZON_DECIDEG[i] / 10 * Math.PI / 180;
+  /* a smooth upper envelope of the HDRI's ridge line (max over +-34 deg of azimuth, then a +-17 deg box blur: never below
+     the ridge): the photographed sky fades in above it, and the fade no longer traces the HDRI's own hill silhouettes */
+  const n = HORIZON_DECIDEG.length, raw = HORIZON_DECIDEG.map(v => v / 10 * Math.PI / 180), data = new Float32Array(n);
+  const dil = raw.map((_, i) => { let m = 0; for (let k = -48; k <= 48; k++) m = Math.max(m, raw[(i + k + n) % n]); return m; });
+  for (let i = 0; i < n; i++) { let s = 0; for (let k = -24; k <= 24; k++) s += dil[(i + k + n) % n]; data[i] = s / 49; }
   const t = new THREE.DataTexture(data, n, 1, THREE.RedFormat, THREE.FloatType); t.wrapS = THREE.RepeatWrapping; t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; return t;
+}
+
+// mean colour of the HDRI's sky in the 12-18 deg elevation band (above its highest ridge, 10.6 deg) per azimuth bin
+// (u = column / width, as the dome samples it); which image half is the sky is detected (brighter half)
+function horizonColours(tex, bins = 32) {
+  const out = new Float32Array(bins * 4).fill(0.3);
+  const img = tex?.image;
+  if (img?.data && img.width && img.height) {
+    const { data, width: W, height: H } = img, st = data.length / (W * H);
+    const f = data.constructor.name === 'Uint16Array' ? THREE.DataUtils.fromHalfFloat : (v) => v;
+    const lum = (r) => { let a = 0; for (let x = 0; x < W; x += 16) { const i = (r * W + x) * st; a += f(data[i]) + f(data[i + 1]) + f(data[i + 2]); } return a; };
+    const topSky = lum(Math.round(H * 0.2)) > lum(Math.round(H * 0.8));
+    const row = (elDeg) => { const v = 0.5 - elDeg / 180; return Math.min(H - 1, Math.max(0, Math.round((topSky ? v : 1 - v) * H))); };
+    const acc = new Float64Array(bins * 4);
+    for (let e = 12; e <= 18; e += 1) { const r = row(e);
+      for (let x = 0; x < W; x += 2) { const b = Math.min(bins - 1, Math.floor(x / W * bins)), i = (r * W + x) * st;
+        acc[b * 4] += f(data[i]); acc[b * 4 + 1] += f(data[i + 1]); acc[b * 4 + 2] += f(data[i + 2]); acc[b * 4 + 3]++; } }
+    for (let b = 0; b < bins; b++) for (let k = 0; k < 3; k++) out[b * 4 + k] = Math.min(1.5, acc[b * 4 + k] / Math.max(1, acc[b * 4 + 3]));
+  }
+  const hf = new Uint16Array(out.length); for (let i = 0; i < out.length; i++) hf[i] = THREE.DataUtils.toHalfFloat(out[i]);   /* half float: linear filtering without an extension */
+  const t = new THREE.DataTexture(hf, bins, 1, THREE.RGBAFormat, THREE.HalfFloatType); t.wrapS = THREE.RepeatWrapping; t.magFilter = t.minFilter = THREE.LinearFilter; t.needsUpdate = true; return t;
 }
 
 export function createDome(renderer) {
   const V = () => ({ value: new THREE.Vector3() }), C = () => ({ value: new THREE.Color() }), F = (v = 0) => ({ value: v });
   const uniforms = {
-    tHdr: { value: null }, tHz: { value: horizonTexture() }, tNoise: { value: noiseTexture() },
+    tHdr: { value: null }, tHz: { value: horizonTexture() }, tNoise: { value: noiseTexture() }, tHorC: { value: horizonColours(null) },
     rotY: F(), uTime: F(), skyDay: F(1), starAmt: F(), cover: F(), cdark: F(), flash: F(), haze: F(), fogAmt: F(), sunVis: F(1), moonVis: F(),
-    sunDir: V(), moonDir: V(), refSun: V(), zenithC: C(), horizonC: C(), glowC: C(), landC: C(), fogC: C(), cloudLit: C(), cloudShade: C(), sunC: C(),
+    sunDir: V(), moonDir: V(), refSun: V(), zenithC: C(), horizonC: C(), glowC: C(), landC: C(), fogC: C(), hazeC: C(), cloudLit: C(), cloudShade: C(), sunC: C(),
     cloudOff: { value: new THREE.Vector2() },
   };
   const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: FRAG, side: THREE.BackSide, depthWrite: false, depthTest: true, fog: false, toneMapped: true });
@@ -156,5 +193,6 @@ export function createDome(renderer) {
     renderer.setRenderTarget(prevT); renderer.xr.enabled = xr;
     return true;
   }
-  return { mesh, uniforms, captureEnv, envStep, startEnv() { if (face < 0) face = 0; }, get envBusy() { return face >= 0; }, get envTexture() { return envRT?.texture || null; } };
+  function setHdr(tex) { uniforms.tHdr.value = tex; uniforms.tHorC.value.dispose(); uniforms.tHorC.value = horizonColours(tex); }
+  return { mesh, uniforms, setHdr, captureEnv, envStep, startEnv() { if (face < 0) face = 0; }, get envBusy() { return face >= 0; }, get envTexture() { return envRT?.texture || null; } };
 }

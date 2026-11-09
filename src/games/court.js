@@ -37,7 +37,7 @@ export function buildSportsCourt(kit, root, phys, M, ctx) {
   L(cx - lw / 2, cz - svc, cx + lw / 2, cz + svc);
   L(cx - lw / 2, cz - hl, cx + lw / 2, cz - hl + 0.2); L(cx - lw / 2, cz + hl - 0.2, cx + lw / 2, cz + hl);
   const lm = kit.add(root, kit.mergeGeometries(lines), M.line, [0, 0, 0], [0, 0, 0], { shadow: false }); lm.receiveShadow = true;
-  // ---- basketball lines (amber), keys tinted, 3-pt arcs, centre circle
+  // ---- basketball lines: low-contrast secondary lines (pale grey-green, multi-sport court style), keys a subtle darker tint
   const bl = [], BY = y + 0.0385; const bz = BB.z, BW = 7.0;   // court half-width (z 0.5 .. 13.5 clipped to 12.5)
   const z0 = bz - 6.0, z1 = bz + 6.0;
   L(BB.x0 + 0.15, z0, BB.x1 - 0.15, z0 + lw, BY, bl); L(BB.x0 + 0.15, z1 - lw, BB.x1 - 0.15, z1, BY, bl);
@@ -57,8 +57,8 @@ export function buildSportsCourt(kit, root, phys, M, ctx) {
     const ex = rx + d * Math.sqrt(BB.three * BB.three - 5.6 * 5.6);
     L(Math.min(bx, ex), rz - 5.6 - lw / 2, Math.max(bx, ex), rz - 5.6 + lw / 2, BY, bl); L(Math.min(bx, ex), rz + 5.6 - lw / 2, Math.max(bx, ex), rz + 5.6 + lw / 2, BY, bl);
   }
-  const amber = O(new THREE.MeshStandardMaterial({ color: 0xe0a33a, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
-  const keyM = O(new THREE.MeshStandardMaterial({ color: 0x5a2f26, roughness: 0.88, transparent: true, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
+  const amber = O(new THREE.MeshStandardMaterial({ color: 0x5f6b58, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+  const keyM = O(new THREE.MeshStandardMaterial({ color: 0x1f2a14, roughness: 0.9, transparent: true, opacity: 0.35, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false }));
   kit.add(root, kit.mergeGeometries(bl), amber, [0, 0, 0], [0, 0, 0], { shadow: false }).receiveShadow = true;
   kit.add(root, kit.mergeGeometries(keyFill), keyM, [0, 0, 0], [0, 0, 0], { shadow: false }).receiveShadow = true;
 
@@ -145,22 +145,42 @@ export function buildSportsCourt(kit, root, phys, M, ctx) {
 
   // ---- boxing ring: skirted platform, canvas, padded corner posts (red / blue / white), 3 ropes, steps, stools
   { const R = RING; const top = R.y; const h = R.half, rh = R.rope;
-    const skirt = O(new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.8 }));
-    const canvas = O(new THREE.MeshStandardMaterial({ color: 0x2a4f8f, roughness: 0.92, map: M.blue.map || null }));
-    const apron = O(new THREE.MeshStandardMaterial({ color: 0x6d717a, roughness: 0.9 }));
+    /* real ring materials: woven cotton-duck canvas (weave normal, scuffs, faded corners), black vinyl skirt
+       with a soft sheen, glossy vinyl-wrapped ropes, padded vinyl turnbuckle covers */
+    const weave = kit.canvasTex(256, 256, (g, w, hh) => { const r = kit.rng(12); g.fillStyle = '#808080'; g.fillRect(0, 0, w, hh);
+      for (let yy = 0; yy < hh; yy += 4) for (let xx = 0; xx < w; xx += 4) { const o = ((xx + yy) / 4) % 2; g.fillStyle = o ? '#a0a0a0' : '#606060'; g.fillRect(xx, yy, o ? 4 : 3, o ? 3 : 4); }
+      for (let k = 0; k < 800; k++) { g.fillStyle = `rgba(128,128,255,${0.1 + r() * 0.1})`; g.fillRect(r() * w, r() * hh, 1, 1); } }, { srgb: false });
+    const wn = (() => { const t = new THREE.CanvasTexture(weave.image); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(60, 60); return t; })();
+    const canvasMap = kit.canvasTex(1024, 1024, (g, w, hh) => { const r = kit.rng(19); g.fillStyle = '#e9e6de'; g.fillRect(0, 0, w, hh);
+      for (let k = 0; k < 140; k++) { const x = r() * w, yy = r() * hh, rr = 20 + r() * 120; const gr = g.createRadialGradient(x, yy, 0, x, yy, rr); gr.addColorStop(0, `rgba(150,140,120,${0.05 + r() * 0.08})`); gr.addColorStop(1, 'rgba(150,140,120,0)'); g.fillStyle = gr; g.fillRect(x - rr, yy - rr, rr * 2, rr * 2); }
+      for (let k = 0; k < 400; k++) { g.strokeStyle = `rgba(90,85,80,${0.04 + r() * 0.06})`; g.lineWidth = 1 + r() * 2; g.beginPath(); const x = r() * w, yy = r() * hh, a = r() * 6.3, l = 10 + r() * 50; g.moveTo(x, yy); g.lineTo(x + Math.cos(a) * l, yy + Math.sin(a) * l); g.stroke(); }
+      g.strokeStyle = 'rgba(30,60,120,0.75)'; g.lineWidth = 26; g.beginPath(); g.arc(w / 2, hh / 2, w * 0.22, 0, 6.283); g.stroke();
+      g.fillStyle = 'rgba(30,60,120,0.75)'; g.font = 'bold 64px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('PALISADES', w / 2, hh / 2); });
+    const skirt = O(new THREE.MeshPhysicalMaterial({ color: 0x141418, roughness: 0.55, sheen: 0.4, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x444444) }));
+    const canvas = O(new THREE.MeshStandardMaterial({ map: canvasMap, color: 0xffffff, roughness: 0.95, normalMap: wn, normalScale: new THREE.Vector2(0.35, 0.35) }));
+    const apron = O(new THREE.MeshStandardMaterial({ color: 0x2b2d33, roughness: 0.75 }));
     kit.add(root, kit.box(2 * h, R.h - 0.06, 2 * h), skirt, [R.cx, G + (R.h - 0.06) / 2, R.cz]);
     kit.add(root, kit.box(2 * h, 0.06, 2 * h), apron, [R.cx, top - 0.03, R.cz]);
     kit.add(root, kit.box(2 * rh, 0.012, 2 * rh), canvas, [R.cx, top + 0.006, R.cz], [0, 0, 0], { shadow: false }).receiveShadow = true;
     phys.boxAABB([R.cx - h, G, R.cz - h], [R.cx + h, top, R.cz + h]);
-    const padM = [0xb3201f, 0xf2f2ee, 0x1d4fb5, 0xf2f2ee].map(c => O(new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 })));
+    const padM = [0xa51d1c, 0xe8e8e3, 0x1b46a0, 0xe8e8e3].map(c => O(new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.35 })));
     const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
     corners.forEach(([sx, sz], i) => { const x = R.cx + sx * rh, z = R.cz + sz * rh;
       kit.add(root, kit.cyl(0.06, 0.06, 1.55, 12), steel, [x, top + 0.75, z]);
       kit.add(root, kit.rbox(0.24, 1.15, 0.24, 0.06, 3), padM[i], [x, top + 0.82, z]);
       phys.boxAABB([x - 0.14, top, z - 0.14], [x + 0.14, top + 1.5, z + 0.14]); });
-    const ropeM = [0xc0262b, 0xf0f0ec, 0x1f52b8].map(c => O(new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 })));
-    [0.45, 0.8, 1.15].forEach((ry, k) => { for (let i = 0; i < 4; i++) { const [ax, az] = corners[i], [bx, bz] = corners[(i + 1) % 4];
-      kit.add(root, kit.tube([[R.cx + ax * rh, top + ry, R.cz + az * rh], [R.cx + (ax + bx) / 2 * rh, top + ry - 0.04, R.cz + (az + bz) / 2 * rh], [R.cx + bx * rh, top + ry, R.cz + bz * rh]], 0.022, 16), ropeM[k]); } });
+    const ropeM = [0xa8211f, 0xe6e6e1, 0x1b46a0].map(c => O(new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 })));
+    const ropeY = [0.45, 0.8, 1.15];
+    ropeY.forEach((ry, k) => { const rg = []; for (let i = 0; i < 4; i++) { const [ax, az] = corners[i], [bx, bz] = corners[(i + 1) % 4]; const pts = [];
+      for (let j = 0; j <= 8; j++) { const t = j / 8, sg = 0.05 * Math.sin(Math.PI * t); pts.push([R.cx + (ax + (bx - ax) * t) * rh, top + ry - sg, R.cz + (az + (bz - az) * t) * rh]); }
+      rg.push(kit.tube(pts, 0.024, 32)); }
+      kit.add(root, kit.mergeGeometries(rg), ropeM[k]); });
+    /* white vertical rope ties (two per side) + steel turnbuckle eyes at each post */
+    { const tieM = O(new THREE.MeshStandardMaterial({ color: 0xe6e6e1, roughness: 0.8 })); const tg = [];
+      for (let i = 0; i < 4; i++) { const [ax, az] = corners[i], [bx, bz] = corners[(i + 1) % 4];
+        for (const t of [1 / 3, 2 / 3]) { const g = new THREE.BoxGeometry(Math.abs(bx - ax) > 0 ? 0.04 : 0.055, ropeY[2] - ropeY[0] + 0.06, Math.abs(bz - az) > 0 ? 0.04 : 0.055);
+          g.translate(R.cx + (ax + (bx - ax) * t) * rh, top + (ropeY[0] + ropeY[2]) / 2 - 0.045, R.cz + (az + (bz - az) * t) * rh); tg.push(g); } }
+      kit.add(root, kit.mergeGeometries(tg), tieM, [0, 0, 0], [0, 0, 0], { shadow: false }); }
     // rope colliders (keep fighters + walkers inside / outside)
     for (const [a, b] of [[[-1, -1], [1, -1]], [[1, -1], [1, 1]], [[-1, 1], [1, 1]]]) phys.boxAABB([R.cx + Math.min(a[0], b[0]) * rh - 0.04, top, R.cz + Math.min(a[1], b[1]) * rh - 0.04], [R.cx + Math.max(a[0], b[0]) * rh + 0.04, top + 1.2, R.cz + Math.max(a[1], b[1]) * rh + 0.04]);
     // steps on the west side (toward the court), turnbuckle gap: west ropes have no collider so you can climb in
@@ -196,7 +216,9 @@ const VCSS = `
 .cv-ban { position: fixed; left: 50%; top: 28%; translate: -50% 0; z-index: 56; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 24px 12px;
   background: rgba(30,30,30,.86); border: var(--hair); border-radius: 6px; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
 .cv-ban .big { font: 500 54px/1 "Geist", -apple-system, Inter, sans-serif; letter-spacing: -0.06em; }
-.cv-keys { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 9; display: flex; gap: 6px; pointer-events: none; flex-wrap: wrap; justify-content: center; }
+/* polish5: centred with auto margins (left:50% + translateX was overridden by .pg-stage's transform, so the row started at the
+   centre line and a lone chip wrapped); capped width so it wraps into balanced rows, not one orphan chip */
+.cv-keys { position: fixed; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: min(92vw, 820px); bottom: 18px; z-index: 9; display: flex; gap: 6px; pointer-events: none; flex-wrap: wrap; justify-content: center; }
 .cv-bar { width: 150px; height: 8px; border-radius: 2px; background: #1a1a1a; border: var(--hair); overflow: hidden; } .cv-bar i { display: block; height: 100%; background: #f2c84b; transition: width .12s linear; }
 .cv-bar.hp i { background: #e4573d; } .cv-bar.st i { background: #5aa0e8; }
 .cv-meter { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 9; width: 260px; display: flex; flex-direction: column; gap: 5px; align-items: center; pointer-events: none; }
@@ -253,4 +275,12 @@ export function venue(ctx, mp, hub, { chan, title, place }) {
 }
 
 // lazily-built stand-in avatar for bots (one per game, created on first use)
-export async function botAvatar(ctx, hue, name) { const { createAvatar } = await import('../avatar.js'); const cr = createAvatar(ctx, { hue, name, local: false, seed: 7 }); return cr; }
+/* realistic library character picked from the hue (different per game); mannequin only if the file fails to load */
+export async function botAvatar(ctx, hue, name) {
+  try {
+    const L = await import('../avatars/library.js'); const { createCustomAvatar } = await import('../avatars/index.js');
+    const d = L.defaultDesc('bot:' + hue); const asset = await L.loadLibraryAsset(d.id);
+    return createCustomAvatar(ctx, asset, { name, local: false, hue, height: d.ht, flip: false });
+  } catch (e) { console.warn('[games] bot character failed, using the mannequin:', e.message); }
+  const { createAvatar } = await import('../avatar.js'); return createAvatar(ctx, { hue, name, local: false, seed: 7 });
+}

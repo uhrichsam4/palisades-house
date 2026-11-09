@@ -13,7 +13,7 @@ if (!process.env.SHOT_NICE && process.platform === 'darwin') {
 const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2); const opt = (k, d) => { const a = argv.find(x => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : d; };
 const ROOT = path.resolve(argv.find(a => !a.startsWith('--')) || HERE);
-const SECS = +opt('secs', 3); const EXTRA = opt('q', ''); const EVAL = opt('eval', ''); const CPUPROF = argv.includes('--cpuprof'); const EVAL_SRC = EVAL ? fs.readFileSync(EVAL, 'utf8') : '';
+const SECS = +opt('secs', 3); const EXTRA = opt('q', ''); const EVAL = opt('eval', ''); const CPUPROF = argv.includes('--cpuprof'); const PNG = opt('png', ''); const EVAL_SRC = EVAL ? fs.readFileSync(EVAL, 'utf8') : '';
 const LOCKS = path.join(HERE, 'shots', '.locks'); fs.mkdirSync(LOCKS, { recursive: true });
 const SLOTS = Number(process.env.SHOT_SLOTS || 1); let slot = null; const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 while (!slot) {
@@ -36,7 +36,7 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   page.on('pageerror', e => out.errors.push(String(e.message).slice(0, 200)));
-  await page.goto(`http://127.0.0.1:${port}/index.html?menu=0&tod=11:00&weather=clear${EXTRA ? '&' + EXTRA : ''}`, { waitUntil: 'load', timeout: 90000 });
+  await page.goto(`http://127.0.0.1:${port}/index.html?menu=0${/(^|&)tod=/.test(EXTRA) ? '' : '&tod=11:00'}&weather=clear${EXTRA ? '&' + EXTRA : ''}`, { waitUntil: 'load', timeout: 90000 });
   await page.waitForFunction(() => window.__ready === true && window.__player, null, { timeout: 240000, polling: 300 });
   await page.waitForFunction(() => window.__probes, null, { timeout: 180000, polling: 500 }).catch(() => {});
   await sleep(3000);
@@ -75,6 +75,7 @@ try {
       const dts = profile.timeDeltas; for (let i = 0; i < profile.samples.length; i++) { const n = byId.get(profile.samples[i]); const cf = n.callFrame; const key = (cf.functionName || '(anon)') + ' ' + cf.url.replace(/^.*\/(src|vendor)\//, '$1/') + ':' + (cf.lineNumber + 1); self.set(key, (self.get(key) || 0) + (dts[i] || 0) / 1000); }
       const F = Math.max(1, out.spots[k].frames); out.spots[k].cpu = [...self].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k2, v]) => [k2, +(v / F).toFixed(3)]); await cdp.detach();
     }
+    if (PNG) { fs.mkdirSync(PNG, { recursive: true }); await page.locator('#c').screenshot({ path: path.join(PNG, k + '.png') }); } /* --png=dir: gameplay still per spot */
     if (EVAL_SRC) out.spots[k].eval = await page.evaluate(EVAL_SRC); // --eval=file.js: extra in-page probe per spot (expression -> JSON)
   }
   await ctx.close();

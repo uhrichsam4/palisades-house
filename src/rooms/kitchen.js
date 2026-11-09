@@ -61,16 +61,17 @@ export async function build(ctx) {
     const layer = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
     const halo = layer(), core = layer(); const gh = halo.getContext('2d'), gc = core.getContext('2d');
     const vein = (cx, x, y, ang, len, width, alpha) => {
-      cx.strokeStyle = `rgba(118,116,112,${alpha})`; cx.lineWidth = width; cx.lineCap = 'round';
+      cx.strokeStyle = `rgba(132,130,127,${alpha})`; cx.lineWidth = width; cx.lineCap = 'round';
       cx.beginPath(); cx.moveTo(x, y); let a = ang;
       for (let s = 0; s < len; s += 14) { a += (R() - 0.5) * 0.35; x += Math.cos(a) * 14; y += Math.sin(a) * 14; cx.lineTo(x, y);
         if (R() < 0.02) { const bx2 = x, by2 = y; cx.stroke(); vein(cx, bx2, by2, a + (R() - 0.5) * 1.6, len * 0.25, width * 0.6, alpha * 0.8); cx.beginPath(); cx.moveTo(x, y); } }
       cx.stroke();
     };
     // soft grey veins (p09): wide blurred halo + a thin, light core; no wiry dark lines
-    for (let i = 0; i < 6; i++) { const x = R() * w, y = R() * h, a = -0.7 + (R() - 0.5) * 0.6; for (const dx of [-w, 0, w]) for (const dy of [-h, 0, h]) { vein(gh, x + dx, y + dy, a, 1600, 14, 0.13); vein(gc, x + dx, y + dy, a, 1600, 2.6, 0.62); } }
-    for (let i = 0; i < 14; i++) { const x = R() * w, y = R() * h, a = -0.6 + (R() - 0.5) * 1.2; vein(gc, x, y, a, 600, 1.5, 0.34); }
-    g.save(); g.filter = 'blur(12px)'; g.drawImage(halo, 0, 0); g.filter = 'blur(1.1px)'; g.drawImage(core, 0, 0); g.restore();
+    /* r4 (p08/p09): fine soft grey Calacatta veins: hairline cores (1.2-1.8 px = 1.3-1.9 mm), low contrast, a broad faint halo */
+    for (let i = 0; i < 6; i++) { const x = R() * w, y = R() * h, a = -0.7 + (R() - 0.5) * 0.6, cw = 1.2 + R() * 0.6, ca = 0.36 + R() * 0.14; for (const dx of [-w, 0, w]) for (const dy of [-h, 0, h]) { vein(gh, x + dx, y + dy, a, 1600, 16, 0.08); vein(gc, x + dx, y + dy, a, 1600, cw, ca); } }
+    for (let i = 0; i < 18; i++) { const x = R() * w, y = R() * h, a = -0.6 + (R() - 0.5) * 1.2; vein(gc, x, y, a, 500, 0.8, 0.2); }
+    g.save(); g.filter = 'blur(12px)'; g.drawImage(halo, 0, 0); g.filter = 'blur(0.8px)'; g.drawImage(core, 0, 0); g.restore();
   }, { repeat: [1 / 2.2, 1 / 2.2] });
   // r3: polished Calacatta quartz: clearcoat for crisp probe reflections (p09 counters read glossy)
   const quartz = new THREE.MeshPhysicalMaterial({ map: quartzMap, roughness: 0.22, clearcoat: 0.9, clearcoatRoughness: 0.06, color: 0xffffff });
@@ -99,16 +100,30 @@ export async function build(ctx) {
   const chairWood = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1 / 0.5, 1 / 0.5] }), roughness: 0.5 }); chairWood.color.setRGB(1.18, 0.86, 0.58);
   // unlacquered brushed brass (LOOKDEV recipe)
   const brass = new THREE.MeshPhysicalMaterial({ color: 0xd4a84b, roughness: 0.3, metalness: 1.0, anisotropy: 0.4 });
-  // brushed stainless: fine horizontal streaks in colour + roughness (p09 range)
+  // brushed stainless: fine horizontal streaks in colour + roughness (p09 range). Linear data (roughness),
+  // mid-grey so roughness 0.30 is modulated ~0.2..0.4 along the grain.
   const brushed = kit.canvasTex(512, 512, (g, w, h) => {
-    g.fillStyle = '#bdbdbd'; g.fillRect(0, 0, w, h); const r = kit.rng(4242);
-    for (let i = 0; i < 1400; i++) { const v = 150 + r() * 90; g.fillStyle = `rgba(${v},${v},${v},0.35)`; g.fillRect(r() * w - 60, r() * h, 80 + r() * 300, 1); }
+    g.fillStyle = '#9a9a9a'; g.fillRect(0, 0, w, h); const r = kit.rng(4242);
+    for (let i = 0; i < 2600; i++) { const v = 100 + r() * 150; g.fillStyle = `rgba(${v},${v},${v},0.45)`; g.fillRect(r() * w - 60, r() * h, 60 + r() * 380, 1); }
+  }, { srgb: false, repeat: [1 / 0.5, 1 / 0.5] });
+  const brushedCol = kit.canvasTex(512, 512, (g, w, h) => {
+    g.fillStyle = '#d2d2d2'; g.fillRect(0, 0, w, h); const r = kit.rng(4343);
+    for (let i = 0; i < 1800; i++) { const v = 170 + r() * 85; g.fillStyle = `rgba(${v},${v},${v},0.30)`; g.fillRect(r() * w - 60, r() * h, 60 + r() * 380, 1); }
   }, { repeat: [1 / 0.5, 1 / 0.5] });
-  // brushed stainless (LOOKDEV recipe): anisotropic streaks run along u (horizontal on the boxUV fronts)
-  const steel = new THREE.MeshPhysicalMaterial({ color: 0xbfc3c7, roughness: 0.34, roughnessMap: brushed, metalness: 1.0, anisotropy: 0.4, envMapIntensity: 1.1 });
+  // brushed stainless (LOOKDEV recipe): colour 0xc8cacc, metalness 1, rough 0.32, anisotropy 0.7; the streaks run
+  // along u (horizontal on the boxUV fronts). Slightly lower env gain so it reads as steel, not white plastic,
+  // against the white room in the box-projected probe.
+  const steel = new THREE.MeshPhysicalMaterial({ color: 0xc8cacc, map: brushedCol, roughness: 0.28, roughnessMap: brushed, metalness: 1.0, anisotropy: 0.7, envMapIntensity: 1.0, specularIntensity: 1 });
+  // polished stainless (knob bezels, rolled lips, handles catch a crisp highlight)
+  const steelPol = std({ color: 0xd2d4d6, roughness: 0.14, metalness: 1.0, envMapIntensity: 0.95 });
   const darkSteel = std({ color: 0x2c2c2c, roughness: 0.38, metalness: 0.85 });
   const castIron = std({ color: 0x151515, roughness: 0.6, metalness: 0.4 });
-  const blackGlass = std({ color: 0x08090a, roughness: 0.06, metalness: 0.3 });
+  // matte black porcelain-enamel / cast-iron grate finish (LOOKDEV matte black hardware)
+  const grateIron = std({ color: 0x121212, metalness: 0.6, roughness: 0.55 });
+  const knobBlack = std({ color: 0x18181a, metalness: 0.2, roughness: 0.3 });
+  // dark smoked oven glass: near-black, glossy, clear-coated so the room reflects in it (p07 wall ovens)
+  const blackGlass = std({ color: 0x0a0b0c, roughness: 0.05, metalness: 0.3, envMapIntensity: 1.3 });
+  const hwBlack = std({ color: 0x151515, metalness: 0.8, roughness: 0.45 });
   const wall = M.paintWhite;
   // weathered grey-white reclaimed planks (p10 trestle table): silver-grey oak scan + distressed relief
   const ashImg = await loadImg('assets/ph/silver_oak_veneer_01/silver_oak_veneer_01_diff_1k.jpg');
@@ -230,11 +245,14 @@ export async function build(ctx) {
     bx(rw, steel, x0 + 0.03, 0.47, D - 0.022, w - 0.06, 0.29, 0.02); bx(rw, blackGlass, x0 + 0.06, 0.50, D - 0.001, w - 0.12, 0.17, 0.004);
     pull(rw, x0 + w / 2, 0.71, D, 0.5, false, steel, 0.008);
     // speed oven + main oven
+    // r4 (p07): stainless frame + control strip on top (dark display window), a large dark smoked-glass door
+    // running nearly edge to edge, polished stainless bar handle across the top of the glass, thin steel kick strip
     for (const [y, h] of [[0.78, 0.46], [1.25, 0.60]]) {
       bx(rw, steel, x0 + 0.02, y, D - 0.022, w - 0.04, h - 0.01, 0.022);
-      bx(rw, blackGlass, x0 + 0.05, y + 0.04, D, w - 0.10, h - 0.16, 0.006);
-      bx(rw, darkSteel, x0 + 0.06, y + h - 0.09, D, w - 0.12, 0.05, 0.006);
-      pull(rw, x0 + w / 2, y + h - 0.13, D + 0.004, w - 0.14, false, steel, 0.008);
+      bx(rw, blackGlass, x0 + 0.035, y + 0.025, D, w - 0.07, h - 0.135, 0.008);
+      bx(rw, blackGlass, x0 + w / 2 - 0.07, y + h - 0.075, D, 0.14, 0.035, 0.003);
+      bx(rw, darkSteel, x0 + 0.04, y + h - 0.105, D + 0.001, w - 0.08, 0.004, 0.003);
+      pull(rw, x0 + w / 2, y + h - 0.15, D + 0.008, w - 0.12, false, steelPol, 0.009);
     }
     front(rw, x0, 1.86, w, TOP - 1.86, D - 0.022, lacquer);
     pull(rw, x0 + w / 2, 1.93, D, 0.22);
@@ -269,30 +287,54 @@ export async function build(ctx) {
       const h = new THREE.CylinderGeometry(0.012, 0.012, ow - 0.12, 14); h.rotateZ(PI / 2); kit.add(g, h, steel, [x0 + ox + (ow - 0.02) / 2, 0.66, fz + 0.07]);
       for (const s of [-1, 1]) { const p = new THREE.CylinderGeometry(0.008, 0.008, 0.06, 8); p.rotateX(PI / 2); kit.add(g, p, steel, [x0 + ox + (ow - 0.02) / 2 + s * (ow / 2 - 0.08), 0.66, fz + 0.045]); }
     }
-    // control rail: black knob panel in a stainless surround (p09), brushed knobs
+    // control rail: stainless (p09), dark knobs each seated in a polished stainless bezel ring
     bx(g, steel, x0, 0.72, fz - 0.02, w, 0.16, 0.05);
-    bx(g, castIron, x0 + 0.05, 0.74, fz + 0.031, w - 0.10, 0.12, 0.004);
-    const knobG = kit.lathe([[0.001, 0], [0.024, 0], [0.025, 0.018], [0.021, 0.034], [0.001, 0.036]], 20); knobG.rotateX(PI / 2);
-    for (let i = 0; i < 9; i++) kit.add(g, knobG, i === 4 ? castIron : steel, [x0 + 0.12 + i * 0.16, 0.80, fz + 0.033]);
-    // cooktop deck: dark enamel spill tray under 4 burners + grates (left), french top + griddle (right)
+    const knobG = kit.lathe([[0.001, 0], [0.022, 0], [0.023, 0.016], [0.020, 0.030], [0.001, 0.032]], 20); knobG.rotateX(PI / 2);
+    const bezelG = kit.torus(0.029, 0.0045, 8, 28);
+    const knobParts = [], bezelParts = [];
+    for (let i = 0; i < 9; i++) { const kx = x0 + 0.12 + i * 0.16;
+      knobParts.push(knobG.clone().translate(kx, 0.80, fz + 0.034));
+      bezelParts.push(bezelG.clone().translate(kx, 0.80, fz + 0.032)); }
+    kit.add(g, kit.mergeGeometries(knobParts), knobBlack);
+    kit.add(g, kit.mergeGeometries(bezelParts), steelPol);
+    // knob pointer flats (thin steel line on each knob face)
+    for (let i = 0; i < 9; i++) kit.add(g, new THREE.BoxGeometry(0.004, 0.018, 0.002), steelPol, [x0 + 0.12 + i * 0.16, 0.808, fz + 0.067]);
+    // cooktop deck: black enamel spill tray; six sealed burners under continuous cast-iron grates (left ~1.0 m),
+    // a dark cast-iron french top (right) — no exposed rings/spirals
     bx(g, steel, x0, 0.90, 0.02, w, 0.03, D + 0.02);
     bx(g, castIron, x0 + 0.03, 0.9305, 0.05, w - 0.06, 0.002, D - 0.04);
-    const gr = new THREE.Group(); g.add(gr);
-    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
-      const cx = x0 + 0.20 + i * 0.32, cz = 0.18 + j * 0.30;
-      bx(gr, castIron, cx - 0.15, 0.935, cz - 0.14, 0.30, 0.009, 0.009); bx(gr, castIron, cx - 0.15, 0.935, cz + 0.13, 0.30, 0.009, 0.009);
-      bx(gr, castIron, cx - 0.15, 0.935, cz - 0.14, 0.009, 0.009, 0.28); bx(gr, castIron, cx + 0.141, 0.935, cz - 0.14, 0.009, 0.009, 0.28);
-      bx(gr, castIron, cx - 0.15, 0.944, cz - 0.005, 0.30, 0.012, 0.009); bx(gr, castIron, cx - 0.005, 0.944, cz - 0.14, 0.009, 0.012, 0.28);
-      kit.add(gr, kit.cyl(0.045, 0.05, 0.02, 20), castIron, [cx, 0.935, cz]);
+    {
+      const GX0 = x0 + 0.04, GW = 0.96, GZ0 = 0.06, GD = D - 0.08, GY = 0.952, bar = 0.011;
+      const gp = [], burn = [], caps = [];
+      const box = (w2, h2, d2, x, y, z) => gp.push(new THREE.BoxGeometry(w2, h2, d2).translate(x, y, z));
+      for (let s = 0; s < 3; s++) { /* three grate sections, each 2 burners deep */
+        const sx0 = GX0 + s * (GW / 3) + 0.004, sw = GW / 3 - 0.008, scx = sx0 + sw / 2;
+        box(sw, bar, bar, scx, GY, GZ0 + bar / 2); box(sw, bar, bar, scx, GY, GZ0 + GD - bar / 2);           /* front / back rails */
+        box(bar, bar, GD, sx0 + bar / 2, GY, GZ0 + GD / 2); box(bar, bar, GD, sx0 + sw - bar / 2, GY, GZ0 + GD / 2);
+        box(sw, bar, bar, scx, GY, GZ0 + GD / 2);                                                        /* centre rail */
+        for (const cz of [GZ0 + GD * 0.25, GZ0 + GD * 0.75]) {
+          // fingers radiating from each burner: 4 straight + 4 diagonal stubs
+          box(sw - 0.02, bar * 0.9, bar * 0.9, scx, GY + 0.008, cz); box(bar * 0.9, bar * 0.9, GD / 2 - 0.02, scx, GY + 0.008, cz);
+          for (const a of [PI / 4, -PI / 4]) { const f = new THREE.BoxGeometry(0.15, bar * 0.9, bar * 0.9); f.rotateY(a); f.translate(scx, GY + 0.008, cz); gp.push(f); }
+          // sealed burner: black base ring, dark brass-black cap, low flame-port ring
+          burn.push(kit.cyl(0.058, 0.062, 0.016, 24).translate(scx, 0.939, cz));
+          caps.push(kit.cyl(0.040, 0.044, 0.010, 24).translate(scx, 0.951, cz));
+        }
+        // grate feet onto the deck
+        for (const fx of [sx0 + 0.02, sx0 + sw - 0.02]) for (const fzz of [GZ0 + 0.02, GZ0 + GD - 0.02]) box(0.014, 0.02, 0.014, fx, 0.94, fzz);
+      }
+      kit.add(g, kit.mergeGeometries(gp), grateIron);
+      kit.add(g, kit.mergeGeometries(burn), grateIron);
+      kit.add(g, kit.mergeGeometries(caps), knobBlack);
+      // french top: one dark cast-iron plate with a slightly glossier centre disc (no bright rings)
+      bx(g, grateIron, x0 + 1.04, 0.931, 0.07, 0.44, 0.014, D - 0.10);
+      kit.add(g, kit.cyl(0.09, 0.09, 0.003, 40), knobBlack, [x0 + 1.26, 0.946, 0.07 + (D - 0.10) / 2]);
     }
-    // french top (concentric rings) + plancha
-    const ft = kit.cyl(0.26, 0.26, 0.012, 48); kit.add(g, ft, castIron, [x0 + 0.98, 0.935, 0.33]);
-    for (const r of [0.06, 0.13, 0.20]) kit.add(g, kit.torus(r, 0.004, 6, 48), steel, [x0 + 0.98, 0.942, 0.33], [PI / 2, 0, 0]);
-    bx(g, castIron, x0 + 1.27, 0.93, 0.08, 0.23, 0.012, 0.50);
-    // perforated backguard / riser
+    // perforated backguard / riser (polished rolled lip catches a highlight, as in p09)
     bx(g, steel, x0, 0.93, 0.0, w, 0.16, 0.05);
-    bx(g, steel, x0, 1.07, 0.0, w, 0.012, 0.075); // rolled top lip
-    for (let i = 0; i < 24; i++) kit.add(g, kit.cyl(0.0125, 0.0125, 0.01, 14), castIron, [x0 + 0.07 + i * 0.0597, 1.02, 0.051], [PI / 2, 0, 0]);
+    bx(g, steelPol, x0, 1.07, 0.0, w, 0.012, 0.075); /* rolled top lip */
+    { const holes = []; for (let i = 0; i < 24; i++) holes.push(kit.cyl(0.0125, 0.0125, 0.01, 14).rotateX(PI / 2).translate(x0 + 0.07 + i * 0.0597, 1.02, 0.051));
+      kit.add(g, kit.mergeGeometries(holes), castIron); }
   }
   // hood: quartz-clad box with stainless liner and baffle filters underneath
   {
@@ -303,7 +345,20 @@ export async function build(ctx) {
     bx(rw, quartz, x0, 1.99, hd - 0.035, w, 0.09, 0.035); bx(rw, quartz, x0, 1.99, 0, 0.035, 0.09, hd); bx(rw, quartz, x0 + w - 0.035, 1.99, 0, 0.035, 0.09, hd);
     bx(rw, steel, x0 + 0.035, 2.06, 0.0, w - 0.07, 0.02, hd - 0.035);
     bx(rw, castIron, x0 + 0.07, 2.052, 0.07, w - 0.14, 0.004, hd - 0.16);
-    for (let i = 0; i < 14; i++) bx(rw, steel, x0 + 0.08 + i * 0.118, 2.04, 0.08, 0.104, 0.012, hd - 0.18);
+    // r4 (p09): four stainless baffle filters in a polished frame, tilted up toward the wall; each is a row of
+    // V-folded baffles (ribs running front-to-back) so the underside reads as ribbed steel, not white slats
+    { const bw_ = (w - 0.16) / 4, fd = hd - 0.17, fy = 2.035, frameP = [], ribs = [];
+      for (let k = 0; k < 4; k++) {
+        const fx0 = x0 + 0.08 + k * bw_, cx = fx0 + bw_ / 2, cz = 0.075 + fd / 2;
+        for (const [ww, dd, xx, zz] of [[bw_ - 0.006, 0.018, cx, 0.075 + 0.009], [bw_ - 0.006, 0.018, cx, 0.075 + fd - 0.009], [0.018, fd, fx0 + 0.012, cz], [0.018, fd, fx0 + bw_ - 0.012, cz]])
+          frameP.push(new THREE.BoxGeometry(ww, 0.014, dd).translate(xx, fy, zz));
+        const n = Math.floor((bw_ - 0.04) / 0.026);
+        for (let i = 0; i < n; i++) { const rx = fx0 + 0.026 + i * ((bw_ - 0.052) / (n - 1));
+          for (const s of [-1, 1]) { const r = new THREE.BoxGeometry(0.017, 0.0016, fd - 0.03); r.rotateZ(s * 0.62); r.translate(rx + s * 0.0065, fy + 0.006, cz); ribs.push(r); } }
+      }
+      kit.add(rw, kit.mergeGeometries(frameP), steelPol);
+      kit.add(rw, kit.mergeGeometries(ribs), steel);
+    }
   }
   // E: Miele coffee column 18.76–19.51
   {
@@ -353,12 +408,13 @@ export async function build(ctx) {
     const [wx, ww] = mods[1];
     carcass(fw, wx, ww, 2.30, TOPF, d, oak, 0); bx(fw, toeMat, wx, 0, 0, ww, 0.10, d - 0.07);
     const panel = (x, w, y0, y1) => front(fw, x, y0, w, y1 - y0, d - 0.022, oak, false);
-    panel(mods[0][0], 0.80, 0.10, 2.30); pull(fw, mods[0][0] + 0.73, 1.20, d, 0.75, true, brass, 0.009);
+    panel(mods[0][0], 0.80, 0.10, 2.30); pull(fw, mods[0][0] + 0.73, 1.20, d, 0.75, true, hwBlack, 0.009);
     wineCase(fw, wx, 0.10, ww, 2.20, d, 9);
-    pull(fw, wx + 0.05, 1.20, d, 0.6, true, brass, 0.009);
+    pull(fw, wx + 0.05, 1.20, d, 0.6, true, hwBlack, 0.009);
     panel(mods[2][0], 0.80, 0.10, 2.30); panel(mods[3][0], 0.80, 0.10, 2.30);
-    pull(fw, mods[2][0] + 0.73, 1.20, d, 0.75, true, brass, 0.009); pull(fw, mods[3][0] + 0.07, 1.20, d, 0.75, true, brass, 0.009);
-    for (const [x, w] of mods) front(fw, x, 2.30, w, TOPF - 2.30, d - 0.022, oak);
+    pull(fw, mods[2][0] + 0.73, 1.20, d, 0.75, true, hwBlack, 0.009); pull(fw, mods[3][0] + 0.07, 1.20, d, 0.75, true, hwBlack, 0.009);
+    /* r4 (p07): long matte-black bar handles on the oak fridge panels, short black pulls on the uppers above */
+    for (const [x, w] of mods) { front(fw, x, 2.30, w, TOPF - 2.30, d - 0.022, oak); pull(fw, x + w / 2, 2.37, d, Math.min(0.16, w * 0.4), false, hwBlack, 0.006); }
     bx(fw, oakH, FX0, TOPF, 0, FX1 - FX0, CEIL - TOPF - 0.002, d);
     // finished oak end panels
     bx(fw, oak, FX0 - 0.02, 0, 0, 0.02, CEIL - 0.002, d); bx(fw, oak, FX1, 0, 0, 0.02, CEIL - 0.002, d);

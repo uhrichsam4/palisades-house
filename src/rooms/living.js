@@ -3,6 +3,7 @@
 // Room rect x 0.65..8.15, z 7.37..13.30. The photo looks from the foyer end (x≈8) toward the fireplace (−x);
 // +z (family-room wall) is on the left of frame, −z (street wall) on the right.
 
+import { vintageRug } from './living/vintageRug.js';
 export const piece = { rooms: ["living"], photos: ["p03"] };
 export const ownCeiling = [];
 // The foyer wall (x=8.15) stops the camera backing up further, so the seating group sits ~0.7 m nearer
@@ -307,67 +308,13 @@ export async function build(ctx) {
     kit.add(g, kit.sphere(0.06, 16, 10), std({ color: 0xffffff, emissive: 0xffe2b8, emissiveIntensity: 1.2 }), [0, -0.76, 0], [0, 0, 0], { shadow: false });
   }
 
-  // ------------------------------------------------------------------ rug (faded vintage, under the seating)
+  // ------------------------------------------------------------------ rug (faded vintage Oushak, under the seating)
   {
-    // faded vintage oushak: muted taupe / grey with a hint of rose, low-contrast distressed pattern, soft fringe
-    const RW = 3.9, RL = 5.5, RX = 4.85; // canvas long axis = world x
-    // vintage-washed rug: greige field, faded rust + slate-blue motifs, crisp fine pattern then heavy wear
-    const rugTex = kit.canvasTex(1536, 2160, (g, w, h) => {
-      const r = kit.rng(44);
-      g.fillStyle = '#9a8b7e'; g.fillRect(0, 0, w, h);
-      g.filter = 'blur(1.2px)';
-      const band = (inset, wid, col) => { g.strokeStyle = col; g.lineWidth = wid; g.strokeRect(inset, inset, w - 2 * inset, h - 2 * inset); };
-      band(20, 30, '#8e7f74'); band(70, 64, '#978a80'); band(112, 10, '#917a70'); band(132, 30, '#9b8e82'); band(160, 6, '#8c8582');
-      // guard-border vine: small alternating rust/slate rosettes
-      for (let k = 0; k < 40; k++) {
-        const along = 110 + k * (h - 220) / 39, ax = 110 + k * (w - 220) / 39;
-        for (const [x, y] of [[85, along], [w - 85, along], [ax, 85], [ax, h - 85]]) {
-          g.fillStyle = k % 2 ? 'rgba(140,96,76,0.30)' : 'rgba(100,104,110,0.26)';
-          g.beginPath(); for (let i = 0; i <= 8; i++) { const a = i / 8 * 6.283; const rr = i % 2 ? 9 : 22; g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } g.fill();
-        }
-      }
-      // field: fine all-over lattice of small medallions + leaf sprigs
-      for (let y = 230; y < h - 220; y += 72) for (let x = 230 + ((y / 72) % 2) * 36; x < w - 220; x += 72) {
-        const v = r(); g.fillStyle = v < 0.45 ? 'rgba(122,86,72,0.42)' : v < 0.75 ? 'rgba(92,94,100,0.38)' : 'rgba(186,170,152,0.4)';
-        g.beginPath(); g.moveTo(x, y - 18); g.lineTo(x + 11, y); g.lineTo(x, y + 18); g.lineTo(x - 11, y); g.fill();
-        g.strokeStyle = 'rgba(100,80,66,0.5)'; g.lineWidth = 3; g.beginPath(); g.moveTo(x + 18, y + 20); g.quadraticCurveTo(x + 30, y + 30, x + 22, y + 44); g.stroke();
-      }
-      g.save(); g.translate(w / 2, h / 2);
-      const lob = (rx, ry, col, n = 8) => { g.fillStyle = col; g.beginPath(); for (let i = 0; i <= 96; i++) { const a = i / 96 * 6.283; const k = 1 + 0.12 * Math.cos(a * n); g.lineTo(Math.cos(a) * rx * k, Math.sin(a) * ry * k); } g.fill(); };
-      lob(340, 520, 'rgba(160,145,128,0.22)'); lob(300, 470, 'rgba(120,90,74,0.16)', 12); lob(230, 360, 'rgba(170,158,142,0.24)');
-      lob(150, 240, 'rgba(98,100,108,0.2)', 6); lob(90, 140, 'rgba(150,108,86,0.24)'); lob(36, 56, 'rgba(90,72,60,0.3)');
-      g.restore();
-      g.filter = 'none';
-      // distressed mottle: big soft blush / grey-blue / taupe clouds (vintage overdye)
-      g.filter = 'blur(40px)'; for (let i = 0; i < 90; i++) { const c = [[176, 140, 132], [130, 132, 138], [150, 132, 116], [190, 170, 160]][Math.floor(r() * 4)]; g.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${0.10 + r() * 0.12})`; g.beginPath(); g.ellipse(r() * w, r() * h, 60 + r() * 220, 60 + r() * 260, r() * 3, 0, 6.28); g.fill(); } g.filter = 'none';
-      // wear: pale abrash washes, worn horizontal streaks along the weft, knot-level speckle
-      g.filter = 'blur(18px)'; for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(${188 + r() * 30},${180 + r() * 26},${168 + r() * 24},${0.05 + r() * 0.08})`; g.beginPath(); g.ellipse(r() * w, r() * h, 20 + r() * 90, 60 + r() * 260, (r() - 0.5) * 0.3, 0, 6.28); g.fill(); } g.filter = 'none';
-      for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(${190 + r() * 30},${184 + r() * 28},${174 + r() * 25},${0.06 + r() * 0.14})`; g.fillRect(r() * w, r() * h, 4 + r() * 50, 1 + r() * 1.5); }
-      for (let i = 0; i < 60000; i++) { const v = 110 + r() * 100; g.fillStyle = `rgba(${v + 8},${v},${v - 8},0.16)`; g.fillRect(r() * w, r() * h, 2, 2); }
-    });
-    rugTex.anisotropy = 16;
-    // tiling wool pile (ambientCG Carpet016): normal + AO for the knotted texture, roughness ~1, a little sheen
-    const rugRep = [RL / 0.45, RW / 0.45];
-    const rugMat = new THREE.MeshPhysicalMaterial({ map: rugTex, roughness: 1,
-      normalMap: kit.tex('assets/acg/Carpet016/Carpet016_NormalGL.jpg', { repeat: rugRep }), normalScale: new THREE.Vector2(0.7, 0.7),
-      aoMap: kit.tex('assets/acg/Carpet016/Carpet016_AmbientOcclusion.jpg', { repeat: rugRep }), aoMapIntensity: 0.7,
-      sheen: 0.3, sheenRoughness: 0.8, sheenColor: new THREE.Color(0xb8aa98) });
-    const rg = new THREE.PlaneGeometry(RL, RW); rg.rotateX(-Math.PI / 2);
-    const uv = rg.attributes.uv, p = rg.attributes.position;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, (p.getZ(i) / RW) + 0.5, (p.getX(i) / RL) + 0.5);
-    kit.add(root, rg, rugMat, [RX, 0.012, ZC], [0, 0, 0], { shadow: false });
-    // rug body: thin rounded slab so the edge reads as a real 10 mm pile, not a decal
-    kit.add(root, kit.rbox(RL, 0.011, RW, 0.004), std({ color: 0x8c7d6e, roughness: 1 }), [RX, 0.0055, ZC], [0, 0, 0], { shadow: false });
-    // soft cream fringe on the two short ends
-    const fr = kit.canvasTex(512, 32, (g, w, h) => {
-      const r = kit.rng(4); g.clearRect(0, 0, w, h);
-      for (let x = 0; x < w; x += 3) { g.strokeStyle = `rgba(${205 + r() * 30},${198 + r() * 28},${186 + r() * 25},${0.7 + r() * 0.3})`; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (r() - 0.5) * 6, h * (0.6 + r() * 0.4)); g.stroke(); }
-    });
-    const frM = std({ map: fr, transparent: true, alphaTest: 0.3, roughness: 1, side: THREE.DoubleSide });
-    for (const s of [-1, 1]) {
-      const fg = new THREE.PlaneGeometry(RW, 0.07); fg.rotateX(-Math.PI / 2); fg.rotateY(s * Math.PI / 2);
-      kit.add(root, fg, frM, [RX + s * (RL / 2 + 0.035), 0.008, ZC], [0, 0, 0], { shadow: false });
-    }
+    /* p03: faded vintage Oushak, warm greige field with rose/rust + slate motifs, heavily abraded, knotted fringe */
+    const RW = 3.9, RL = 5.5, RX = 4.85;
+    vintageRug(ctx, root, { L: RL, W: RW, pos: [RX, 0, ZC], ry: 0, seed: 44, pal: {
+      field: [150, 128, 114], fieldDark: [100, 84, 76], border: [128, 108, 98], borderDark: [88, 74, 68],
+      motifA: [152, 104, 92], motifB: [108, 110, 116], motifC: [186, 172, 156], warp: [194, 182, 168], fringe: [222, 212, 196] } });
   }
 
   // ------------------------------------------------------------------ curved olive velvet sofas

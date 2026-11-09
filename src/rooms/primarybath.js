@@ -468,13 +468,15 @@ export async function build(ctx) {
   {
     const L = 1.70, W = 0.80, dL = (L - W) / 2, NS = 112, n = 2.1; // near-elliptic boat plan
     // slipper/boat profile: curved outer belly, thin (~2 cm) rolled rim
-    const prof = [[0, 0.0], [0.25, 0.0], [0.28, 0.012], [0.315, 0.05], [0.352, 0.16], [0.381, 0.30], [0.396, 0.43], [0.4, 0.52], [0.398, 0.57], [0.393, 0.595], [0.386, 0.603], [0.379, 0.6], [0.376, 0.588], [0.371, 0.53], [0.356, 0.40], [0.328, 0.25], [0.282, 0.13], [0.21, 0.092], [0, 0.085]];
+    /* p19: modern freestanding oval soaker: oval footprint inset ~7 cm, straight walls flaring out to the rim,
+       thin (~2 cm) flat rim, deep basin with a soft floor fillet (was egg-shaped: round base, belly bulge) */
+    const prof = [[0, 0.0], [0.29, 0.0], [0.312, 0.005], [0.326, 0.022], [0.333, 0.055], [0.348, 0.20], [0.367, 0.35], [0.386, 0.48], [0.397, 0.55], [0.401, 0.572], [0.399, 0.582], [0.393, 0.587], [0.385, 0.586], [0.381, 0.578], [0.378, 0.56], [0.368, 0.48], [0.347, 0.34], [0.318, 0.20], [0.29, 0.115], [0.262, 0.082], [0.22, 0.07], [0, 0.068]];
     const pos = [], idx = [];
     for (const [rr, y] of prof) {
-      const k = Math.min(1, rr / 0.4), a = rr, b = rr + dL * Math.sqrt(k);
+      const k = Math.min(1, rr / 0.2), a = rr, b = rr + dL * k;
       for (let i = 0; i < NS; i++) {
         const t = i / NS * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-        const yy = y + 0.065 * Math.pow(Math.abs(s), 2.2) * Math.pow(Math.min(1, y / 0.6), 3); // raised ends
+        const yy = y + 0.045 * Math.pow(Math.max(0, s), 2.5) * Math.pow(Math.min(1, y / 0.58), 4); /* rim rises gently at the back (head) end */
         pos.push(a * Math.sign(c) * Math.pow(Math.abs(c), 2 / n), yy, b * Math.sign(s) * Math.pow(Math.abs(s), 2 / n));
       }
     }
@@ -487,7 +489,7 @@ export async function build(ctx) {
     const tub = kit.add(bath, geo, tubWhite, [18.90, Y0, 17.15]); tub.name = 'tub';
     tub.updateMatrixWorld(true);
     const wgeo = geo.clone().applyMatrix4(tub.matrixWorld); phys.trimesh(wgeo); // you can climb in
-    kit.add(bath, kit.cyl(0.022, 0.022, 0.006, 16), nickel, [18.90, Y0 + 0.088, 16.72]);
+    kit.add(bath, kit.cyl(0.022, 0.022, 0.006, 16), nickel, [18.90, Y0 + 0.072, 16.72]);
     // soft contact shadow on the mosaic
     const shTex = kit.canvasTex(256, 512, (g, w, h) => {
       g.save(); g.translate(w / 2, h / 2); g.scale(1, h / w);

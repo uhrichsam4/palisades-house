@@ -145,6 +145,8 @@ export function createBeams({ scene, sun }) {
     const vis = on && sun.visible !== false && sun.intensity > 0.05;
     mesh.visible = vis; dust.visible = vis && dustOn;
     if (!vis) { active = 0; return; }
+    /* camera outdoors: the shafts behind the glass read as glowing blobs in the windows from the street -> off */
+    const cp0 = camera.position; if (!inPoly(P.EXT[0], cp0.x, cp0.z) || cp0.y > 9.2) { mesh.visible = dust.visible = false; active = 0; return; }
     _d.subVectors(sun.target.position, sun.position).normalize(); // light travel direction
     if (_d.y > -0.05) { mesh.visible = dust.visible = false; active = 0; return; } // sun at/below horizon
     // brightness: sun light, stronger when low (long shafts read best), weaker in haze/indoors-lit night

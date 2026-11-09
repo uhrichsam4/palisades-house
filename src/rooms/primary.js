@@ -4,6 +4,7 @@
 // Layout (from p17/p18 + plan openings): the vault ridge runs along z (gable on the rear wall z=16.70,
 // which holds the bay window, the black dresser and the balcony door in the corner by the fireplace).
 // Bed wall = x 15.39 (dark grasscloth), fireplace + framed TV = x 8.57 (grasscloth, black marble box).
+import { vintageRug } from './living/vintageRug.js';
 export const piece = { rooms: ["primaryBed", "balcony"], photos: ["p17", "p18", "p22"] };
 export const ownCeiling = ['primaryBed'];
 export const views = {
@@ -90,7 +91,7 @@ export async function build(ctx) {
   const ebony = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [1.6, 1.6] }), color: 0x2c2826, roughness: 0.5, normalScale: new THREE.Vector2(0.5, 0.5) });
   ebony.map.rotation = Math.PI / 2;
   const ebonyMatte = std({ color: 0x151413, roughness: 0.75 });
-  const oakBeam = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [3, 0.6] }), color: 0xe8b47a, roughness: 0.62, normalScale: new THREE.Vector2(0.6, 0.6) });
+  const oakBeam = std({ ...kit.pbrMaps('white_oak_veneer', '1k', { repeat: [3, 0.6] }), color: 0xffd9a8, roughness: 0.62, normalScale: new THREE.Vector2(0.6, 0.6) }); /* p17: light honey oak, not dark walnut */
   const fineNoise = kit.noiseNormal(256, 1.2, 32, 9); fineNoise.repeat.set(6, 6);
   const hess = (rep) => kit.tex('assets/ph/hessian_380/hessian_380_nor_gl_1k.jpg', { repeat: rep });
   const fab = kit.fabric;
@@ -432,43 +433,12 @@ export async function build(ctx) {
   lamp(X1 - 0.26, 13.30, false);
   lamp(X1 - 0.26, 16.10, true);
 
-  // ------------------------------------------------------------------ rug (faded vintage Persian, grey-mauve / taupe, set at an angle)
+  // ------------------------------------------------------------------ rug (distressed vintage Persian, grey-taupe, set at an angle)
   {
-    const RW = 4.0, RD = 3.0;
-    const rugTex = kit.canvasTex(1024, 768, (g, w, h) => {
-      const r = kit.rng(31);
-      g.fillStyle = '#857772'; g.fillRect(0, 0, w, h);
-      // borders
-      const band = (inset, width, col) => { g.strokeStyle = col; g.lineWidth = width; g.strokeRect(inset, inset, w - 2 * inset, h - 2 * inset); };
-      band(18, 12, '#6f625f'); band(42, 30, '#7b6d6b'); band(62, 4, '#a39591'); band(28, 3, '#a39591');
-      // border motif: small rosettes along the main band
-      for (let x = 60; x < w - 40; x += 26) for (const y of [42, h - 42]) { g.fillStyle = r() < 0.5 ? 'rgba(160,140,138,0.55)' : 'rgba(95,80,82,0.6)'; g.beginPath(); g.ellipse(x, y, 8, 6, 0, 0, 6.3); g.fill(); }
-      for (let y = 60; y < h - 40; y += 26) for (const x of [42, w - 42]) { g.fillStyle = r() < 0.5 ? 'rgba(160,140,138,0.55)' : 'rgba(95,80,82,0.6)'; g.beginPath(); g.ellipse(x, y, 6, 8, 0, 0, 6.3); g.fill(); }
-      // field: all-over lattice of small palmettes (fine pattern)
-      g.save(); g.beginPath(); g.rect(70, 70, w - 140, h - 140); g.clip();
-      for (let y = 70; y < h; y += 34) for (let x = 70 + ((y / 34) % 2) * 22; x < w; x += 44) {
-        g.strokeStyle = 'rgba(105,90,94,0.55)'; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 16, y); g.lineTo(x, y - 12); g.lineTo(x + 16, y); g.lineTo(x, y + 12); g.closePath(); g.stroke();
-        g.fillStyle = r() < 0.3 ? 'rgba(150,128,128,0.5)' : r() < 0.6 ? 'rgba(120,108,100,0.45)' : 'rgba(176,166,156,0.35)'; g.beginPath(); g.arc(x, y, 4 + r() * 2, 0, 6.3); g.fill();
-      }
-      // central medallion (very faded)
-      g.translate(w / 2, h / 2);
-      for (let k = 0; k < 4; k++) { g.strokeStyle = `rgba(${k % 2 ? '150,134,132' : '96,82,86'},0.35)`; g.lineWidth = 6; g.beginPath(); for (let a = 0; a <= 6.3; a += 0.05) { const rr = (190 - k * 38) * (1 + 0.14 * Math.sin(a * 8) + 0.05 * Math.sin(a * 24)); g.lineTo(Math.cos(a) * rr * 1.25, Math.sin(a) * rr); } g.closePath(); g.stroke(); }
-      g.restore();
-      // distress: abrash streaks, worn patches, speckle
-      for (let i = 0; i < 70; i++) { const y = r() * h; g.fillStyle = `rgba(${r() < 0.5 ? '200,190,184' : '70,60,60'},${0.04 + r() * 0.06})`; g.fillRect(0, y, w, 2 + r() * 10); }
-      for (let i = 0; i < 40; i++) { const x = r() * w, y = r() * h, rad = 30 + r() * 120; const gr = g.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, 'rgba(190,180,174,0.22)'); gr.addColorStop(1, 'rgba(190,180,174,0)'); g.fillStyle = gr; g.fillRect(x - rad, y - rad, rad * 2, rad * 2); }
-      const img = g.getImageData(0, 0, w, h); for (let i = 0; i < img.data.length; i += 4) { const n = (r() - 0.5) * 34; img.data[i] += n; img.data[i + 1] += n * 0.95; img.data[i + 2] += n * 0.95; } g.putImageData(img, 0, 0);
-    });
-    const rep = [RW * 1.2, RD * 1.2];
-    const rugMat = new THREE.MeshPhysicalMaterial({ map: rugTex, roughness: 1, sheen: 0.3, sheenColor: new THREE.Color(0xb8aaa4), sheenRoughness: 0.8,
-      normalMap: kit.tex('assets/acg/Carpet016/Carpet016_NormalGL.jpg', { repeat: rep }), normalScale: new THREE.Vector2(0.45, 0.45),
-      aoMap: kit.tex('assets/acg/Carpet016/Carpet016_AmbientOcclusion.jpg', { repeat: rep }), aoMapIntensity: 0.5 });
-    const rug = kit.group(root, [12.35, F, BZ - 0.05], 0.10);
-    const top = kit.rbox(RW, 0.012, RD, 0.005); add(rug, top, rugMat, [0, 0.006, 0], [0, 0, 0], { shadow: false });
-    // fringe at the short ends
-    const fringe = kit.canvasTex(512, 32, (c, w, h) => { c.clearRect(0, 0, w, h); const r = kit.rng(8); c.strokeStyle = '#cfc6bc'; c.lineWidth = 2; for (let x = 2; x < w; x += 4) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (r() - 0.5) * 4, h * (0.6 + r() * 0.4)); c.stroke(); } });
-    const fm = std({ map: fringe, alphaTest: 0.4, roughness: 1, side: THREE.DoubleSide });
-    for (const s of [-1, 1]) add(rug, new THREE.PlaneGeometry(RD, 0.07), fm, [s * (RW / 2 + 0.035), 0.004, 0], [-Math.PI / 2, 0, Math.PI / 2], { shadow: false });
+    /* p17: grey-brown distressed vintage rug, darker border band, fine all-over pattern worn to the warp */
+    vintageRug(ctx, root, { L: 4.0, W: 3.0, pos: [12.35, F, BZ - 0.05], ry: 0.10, seed: 31, lifts: [[-1, -1, 0.010], [1, 1, 0.006]], pal: {
+      field: [124, 110, 100], fieldDark: [76, 64, 60], border: [90, 78, 72], borderDark: [58, 50, 46],
+      motifA: [124, 94, 84], motifB: [92, 90, 92], motifC: [154, 142, 130], warp: [160, 148, 136], fringe: [206, 198, 186] } });
   }
 
   // ------------------------------------------------------------------ boucle chairs + side table in front of the bay

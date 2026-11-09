@@ -112,6 +112,26 @@ export function createBlowIn(scene) {
   };
 }
 
+// polish5: snow drift look — RGBA map with a feathered, noisy edge (max alpha 0.88, so the floor reads through the thin
+// rim), faint blue-grey drifts, and an emissive speck map so it glints like snow instead of a flat white rug
+let SNOW = null;
+function snowMaps() {
+  if (SNOW) return SNOW; const n = 256; let sd = 9; const r = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'); const im = g.createImageData(n, n), d = im.data;
+  const ph = Array.from({ length: 6 }, () => [r() * 6.28, 2 + r() * 5, r() * 6.28, 2 + r() * 5]);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const u = x / n * 2 - 1, v = y / n * 2 - 1, a = Math.atan2(v, u); let nz = 0; for (const [p0, f0, p1, f1] of ph) nz += Math.sin(a * f0 + p0) * 0.5 + Math.sin((u + v) * f1 + p1) * 0.5; nz /= ph.length;
+    const rr = Math.hypot(u, v) / (0.86 + 0.1 * nz); const t = Math.min(1, Math.max(0, (1 - rr) / 0.4)); const al = t * t * (3 - 2 * t) * (0.9 + 0.1 * nz) * 0.88;
+    const sh = 0.93 + 0.07 * (Math.sin(u * 9 + v * 4) * 0.5 + 0.5) * (0.5 + nz * 0.5), i = (y * n + x) * 4;
+    d[i] = 236 * sh; d[i + 1] = 241 * sh; d[i + 2] = 248 * sh; d[i + 3] = 255 * Math.max(0, Math.min(1, al));
+  }
+  g.putImageData(im, 0, 0);
+  const sc = document.createElement('canvas'); sc.width = sc.height = n; const sg = sc.getContext('2d'); sg.fillStyle = '#000'; sg.fillRect(0, 0, n, n);
+  for (let i = 0; i < 520; i++) { const v = 150 + r() * 105; sg.fillStyle = `rgb(${v},${v},${v})`; sg.fillRect(r() * n | 0, r() * n | 0, 1, 1); }
+  const map = new THREE.CanvasTexture(c); map.colorSpace = THREE.SRGBColorSpace; const spark = new THREE.CanvasTexture(sc); spark.colorSpace = THREE.SRGBColorSpace;
+  return (SNOW = { map, spark });
+}
+
 // ------------------------------------------------------------------ floor patches (wet / snow drift)
 export function createPatches(scene) {
   const map = new Map(); const geo = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2); const alpha = [blob(11), blob(23), blob(37)];
@@ -121,17 +141,23 @@ export function createPatches(scene) {
       let p = map.get(e.id);
       if (!p) { const m = new THREE.MeshStandardMaterial({ color: 0x1b232b, roughness: 0.06, metalness: 0, transparent: true, opacity: 0, depthWrite: false, alphaMap: alpha[map.size % 3], polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
         const mesh = new THREE.Mesh(geo, m); mesh.renderOrder = 2; mesh.userData.keep = true; mesh.receiveShadow = true; scene.add(mesh);
-        mesh.position.set(e.pos[0] - e.nx * 1.1, e.floorY + 0.012, e.pos[2] - e.nz * 1.1); mesh.rotation.y = Math.atan2(e.nx, e.nz); p = { mesh, amt: 0, kind }; map.set(e.id, p); }
-      if (p.kind !== kind && (p.amt < 0.05 || kind === 'wet')) p.kind = kind; // rain turns a drift into slush/wet
+        mesh.position.set(e.pos[0] - e.nx * 1.1, e.floorY + 0.012, e.pos[2] - e.nz * 1.1); mesh.rotation.y = Math.atan2(e.nx, e.nz); p = { mesh, amt: 0, kind, alpha: m.alphaMap, look: 'wet' }; map.set(e.id, p); }
+      if (p.kind !== kind && (p.amt < 0.05 || kind === 'wet')) p.kind = kind; /* rain turns a drift into slush/wet */
       p.amt = Math.min(1, p.amt + grow); p.fresh = true; p.w = e.w; p.e = e;
     },
+    /* a drift in a room that has warmed above freezing melts into a wet patch (cold/index.js, 3 Hz) */
+    melt(id) { const p = map.get(id); if (p && p.kind === 'snow') p.kind = 'wet'; },
+    /* and snow still blowing in once the room is below freezing covers / freezes the wet patch again */
+    freeze(id) { const p = map.get(id); if (p && p.kind === 'wet') p.kind = 'snow'; },
     update(dt) {
       for (const [id, p] of map) {
         p.amt -= dt / (p.kind === 'snow' ? 240 : 150) * (p.fresh ? 0 : 1); p.fresh = false;
         if (p.amt <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); map.delete(id); continue; }
         const m = p.mesh.material, k = Math.min(1, p.amt * 1.6), s = 0.35 + p.amt * 1.25;
         /* polish5: snow lies as a drift strip along the opening (its width, 0.5..1.6 m deep), visible from the first flakes */
-        if (p.kind === 'snow') { m.color.setHex(0xeef3f8); m.roughness = 0.9; m.opacity = Math.min(1, 0.25 + p.amt * 3); const sz = 0.5 + p.amt * 1.1; p.mesh.scale.set(Math.min(3.2, Math.max(0.8, (p.w || 1.6) * 0.55)) * (0.55 + 0.45 * Math.min(1, p.amt * 2)), 1, sz); if (p.e) p.mesh.position.set(p.e.pos[0] - p.e.nx * (0.2 + sz), p.mesh.position.y, p.e.pos[2] - p.e.nz * (0.2 + sz)); }
+        if (p.look !== p.kind) { p.look = p.kind; const S = p.kind === 'snow' ? snowMaps() : null;
+          m.map = S ? S.map : null; m.alphaMap = S ? null : p.alpha; m.emissiveMap = S ? S.spark : null; m.emissive.setHex(S ? 0xffffff : 0x000000); m.emissiveIntensity = S ? 0.45 : 0; m.needsUpdate = true; }
+        if (p.kind === 'snow') { m.color.setHex(0xffffff); m.roughness = 0.75; m.opacity = Math.min(1, 0.45 + p.amt * 3); const sz = 0.5 + p.amt * 1.1; p.mesh.scale.set(Math.min(3.2, Math.max(0.8, (p.w || 1.6) * 0.55)) * (0.55 + 0.45 * Math.min(1, p.amt * 2)), 1, sz); if (p.e) p.mesh.position.set(p.e.pos[0] - p.e.nx * (0.2 + sz), p.mesh.position.y, p.e.pos[2] - p.e.nz * (0.2 + sz)); }
         else { m.color.setHex(0x1b232b); m.roughness = 0.05; m.opacity = 0.55 * k; p.mesh.scale.set(s * 0.9, 1, s * 1.3); }
       }
     },

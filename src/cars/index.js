@@ -400,12 +400,14 @@ export function startCars(ctx, api) {
   function headRange(car, dt) {
     headAcc += dt;
     if (headAcc >= 0.1) {
-      headAcc = 0; let far = 0;
-      for (const h of [0.75, 1.3]) for (const a of [-0.5, -0.25, 0, 0.25, 0.5]) {
+      /* contain2: the range is the NEAREST hit of the central rays (centre + ±0.2 rad, two heights), not the max of the
+         whole fan — one edge ray slipping past a wall corner used to set a 9.8 m reach while the centre hit the wall at 2.6 m */
+      headAcc = 0; let far = 45;
+      for (const h of [0.75, 1.3]) for (const a of [-0.2, 0, 0.2]) {
         _v.set(0, h, -car.size.z / 2 + 0.05).applyQuaternion(car.quat).add(car.pos); _v2.set(Math.sin(a), 0, -Math.cos(a)).applyQuaternion(car.quat); _v2.y = 0; _v2.normalize();
         headRay.origin.x = _v.x; headRay.origin.y = _v.y; headRay.origin.z = _v.z; headRay.dir.x = _v2.x; headRay.dir.y = 0; headRay.dir.z = _v2.z;
         let hit = null; try { hit = world.castRay(headRay, 45, true, HEAD_FLAGS, undefined, undefined, car.body); } catch {}
-        far = Math.max(far, hit ? (hit.timeOfImpact ?? hit.toi) : 45); if (far >= 45) break;
+        far = Math.min(far, hit ? (hit.timeOfImpact ?? hit.toi) : 45);
       }
       headWant = Math.min(30, far + 0.35);
     }

@@ -102,14 +102,14 @@ export async function build(ctx) {
   const sloped = (zA, zB) => {
     const yA = nose(zA) + RAIL_STAIR, yB = nose(zB) + RAIL_STAIR;
     const L = Math.hypot(zB - zA, yB - yA), ang = Math.atan2(yB - yA, zB - zA);
-    const rail = kit.add(stair, kit.rbox(0.055, 0.068, L, 0.012), oakRail, [railX, (yA + yB) / 2, (zA + zB) / 2], [-ang, 0, 0]);
+    const rail = kit.add(stair, kit.rbox(0.046, 0.058, L, 0.012), oakRail, [railX, (yA + yB) / 2, (zA + zB) / 2], [-ang, 0, 0]);
     const helper = new THREE.Object3D(); helper.position.copy(rail.position); helper.rotation.copy(rail.rotation); root.add(helper);
     phys.boxLocal(helper, 0, -0.45, 0, 0.03, 0.5, L / 2);
   };
   sloped(newelZ + 0.05, nLA - 0.05);
   sloped(nLB + 0.05, ST.z1 - 0.02);
   // level rail across the landing
-  kit.add(stair, kit.rbox(0.055, 0.068, nLB - nLA, 0.012), oakRail, [railX, yL + RAIL_LAND, (nLA + nLB) / 2]);
+  kit.add(stair, kit.rbox(0.046, 0.058, nLB - nLA, 0.012), oakRail, [railX, yL + RAIL_LAND, (nLA + nLB) / 2]);
   phys.boxAABB([railX - 0.03, yL, nLA], [railX + 0.03, yL + RAIL_LAND, nLB]);
   for (let k = 1; k < ST.n; k++) {
     const za = zr(k), zb = zr(k + 1);
@@ -149,7 +149,8 @@ export async function build(ctx) {
   kit.boxAt(root, oak, VOID[0] - 0.02, UP - 0.03, VOID[3] - 0.02, ST.x0 - VOID[0] + 0.02, 0.035, 0.035);
   // balusters: one instanced mesh
   {
-    const g = new THREE.BoxGeometry(0.015, 1, 0.015); g.translate(0, 0.5, 0);
+    /* p02: straight 16 mm square black steel */
+    const g = new THREE.BoxGeometry(0.016, 1, 0.016); g.translate(0, 0.5, 0);
     const im = new THREE.InstancedMesh(g, ironBlack, balusters.length); const m4 = new THREE.Matrix4();
     balusters.forEach(([x, y, z, h], i) => im.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(1, h, 1))));
     im.castShadow = true; im.receiveShadow = true; im.name = 'balusters'; root.add(im);

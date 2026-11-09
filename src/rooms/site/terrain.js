@@ -61,7 +61,7 @@ export function macro(x, z) {
   // Santa Monica Mountains spur behind the street (-z): the big ridge in the aerial (p45)
   const zb = -z - 48 - 25 * Math.sin((x - 18) / 160);
   // (scaled so its crest stays ~19° above the horizon seen from the house: v01/v09 porch and v05 court videos)
-  if (zb > 0) h += MTN * (600 * Math.pow(ss(0, 750, zb), 0.65) + 300 * ss(0, 350, zb) * (1 - 0.75 * ss(200, 500, zb)) * (ridged(x / 110, z / 150, 5, 23) - 0.3)) * (0.85 + 0.15 * Math.sin(x / 400));
+  if (zb > 0) h += MTN * (600 * Math.pow(ss(0, 750, zb), 0.65) + 300 * ss(0, 350, zb) * (1 - 0.75 * ss(200, 500, zb)) * (0.6 * ridged(x / 125, z / 165, 4, 23) + 0.4 * (0.35 + 0.35 * fbm(x / 170, z / 210, 3, 25)) - 0.3)) * (0.85 + 0.15 * Math.sin(x / 400));
   // drainage gullies running down the mountain face (p45: spurs + deep ravines)
   if (zb > 0) h -= MTN * (85 * ss(20, 260, zb) * gully(x, z) + 22 * ss(10, 120, zb) * Math.pow(1 - Math.abs(Math.sin(x / 17 + 0.6 * vnoise(x / 40, z / 40, 77))), 4));
   // lots fall away to the south-west

@@ -191,7 +191,23 @@ body.shot #topbar,body.menu-open #topbar,body.watching #topbar .tb-chips{display
 .icon-btn:hover svg{transform:translateY(-1px)} .icon-btn svg{transition:transform .3s var(--ease-out-expo)}
 .icon-btn:active{transform:scale(.97)}
 .icon-btn:focus-visible{outline:none;box-shadow:0 0 0 1px var(--ui-accent)}
-body.locked .tb-btns{opacity:.35;transition:opacity .3s var(--ease-soft)}
+/* calm HUD (hud.js): one status chip, People button = online badge + lobby popover, auto-fade while walking */
+.tb-status .sep{color:var(--ui-text-3)}
+.tb-status [hidden]{display:none}
+.icon-btn{position:relative}
+.icon-btn.on{background:var(--ui-surface-hover);color:var(--ui-text)}
+.tb-badge{position:absolute;top:5px;right:5px;min-width:14px;height:14px;box-sizing:border-box;padding:0 3px;border-radius:var(--ui-r-chip);background:var(--ui-surface-2);border:var(--ui-line);color:var(--ui-text);font:600 9px/12px var(--ui-mono);letter-spacing:-.4px;text-align:center;pointer-events:none;animation:badge-in .4s var(--ease-out-expo) both}
+.tb-badge[hidden]{display:none}
+.tb-badge::before{content:"";position:absolute;left:-3px;top:-3px;width:5px;height:5px;border-radius:50%;background:var(--ui-live)}
+#mp-card{display:none}
+#mp-card.open{display:flex;animation:gm-in .35s var(--ease-out-expo) both;transform-origin:top right}
+.tb-chips,.tb-btns,#help.keys{transition:opacity .35s var(--ease-soft)}
+body.hud-calm .tb-chips,body.hud-calm .tb-btns{opacity:.2}
+body.hud-calm .tb-btns:hover,body.hud-calm .tb-chips:hover{opacity:1}
+body.hud-calm #help.keys:not(.intro):not(.all){opacity:.2}
+#room-toast{position:fixed;top:52px;left:16px;z-index:8;background:var(--ui-surface);border:var(--ui-line);box-shadow:var(--ui-shadow);opacity:0;transform:translateY(-6px);pointer-events:none;transition:opacity .25s var(--ease-soft),transform .45s var(--ease-out-expo)}
+#room-toast.on{opacity:1;transform:none}
+body.shot #room-toast,body.menu-open #room-toast,body.watching #room-toast,body.paused #room-toast{display:none!important}
 .theme-seg{display:inline-flex;gap:2px;padding:4px;background:var(--ui-surface);border:var(--ui-line);border-radius:var(--ui-r);box-shadow:var(--ui-shadow)}
 .theme-seg button{width:32px;height:30px;display:grid;place-items:center;padding:0;background:transparent;border:0;border-radius:var(--ui-r-inner);color:var(--ui-text-3);cursor:pointer;transition:color .25s var(--ease-soft)}
 .theme-seg button[aria-pressed=true],.theme-seg button:hover{color:var(--ui-text)}
@@ -203,14 +219,12 @@ body.locked .tb-btns{opacity:.35;transition:opacity .3s var(--ease-soft)}
 /* ---- bottom key hints */
 #help.keys{display:flex;gap:4px;flex-wrap:wrap;text-shadow:none;opacity:1;transition:opacity .4s var(--ease-soft)}
 #help.keys .chip{background:var(--ui-surface);border:var(--ui-line)}
-body.locked #help.keys{opacity:.22}
 body.driving #help.keys{opacity:0;pointer-events:none}
-/* polish: 5 core chips; `/` or the KEYS chip shows the rest (hud.js); fades after 10 s idle */
-#help.keys .chip.more{display:none}
-#help.keys.all .chip.more{display:inline-flex}
+/* calm HUD: 5 core chips for ~8 s after you first walk (.intro), then only the "/::KEYS" chip; `/` shows all (hud.js) */
+#help.keys .chip.more,#help.keys .chip.core{display:none}
+#help.keys.intro .chip.core,#help.keys.all .chip.core,#help.keys.all .chip.more{display:inline-flex}
 #help.keys .keys-toggle{pointer-events:auto;cursor:pointer}
 #help.keys .keys-toggle b{color:var(--ui-accent)}
-#help.keys.idle:not(.all){opacity:0;transition:opacity 1.2s var(--ease-soft)}
 /* polish: one prompt slot (hud.js arbitrate): interact > watch > re-create > speaker */
 body.pr-hide-vs #vs.near:not(.on),body.pr-hide-rc #rc{display:none!important}
 body.pr-hide-sp #spk-pill{visibility:hidden!important}
@@ -232,6 +246,27 @@ body.menu-open #presence{display:none}
 .rc-count.roll,.rc-count{font-size:120px;line-height:1}
 .rc-count .roll-c{line-height:1}
 #vs.on .vs-card{min-width:260px}
+/* calm HUD: the Watch prompt sits in the interact-prompt slot under the crosshair and uses its chip language */
+#vs.near:not(.on){top:calc(50% + 34px);bottom:auto}
+#vs button.vs-pill{display:flex;align-items:center;gap:0;padding:5px 8px;border-radius:var(--ui-r-chip);background:var(--ui-surface);border:var(--ui-line);box-shadow:var(--ui-shadow);font:600 11px/1.2 var(--ui-mono);letter-spacing:-.4px;text-transform:uppercase;color:var(--ui-text);animation:vs-pill-in .35s var(--ease-out-expo) both}
+#vs button.vs-pill:hover{background:var(--ui-surface-hover)}
+#vs .vs-pill .ix-k{color:#1e1e1e;background:#f2c84b;border-radius:2px;padding:1px 5px;margin-right:2px}
+#vs .vs-pill .ix-sep{color:var(--ui-text-3)}
+#vs .vs-pill .ix-v{color:var(--ui-text);opacity:.86;max-width:min(60vw,420px);overflow:hidden;text-overflow:ellipsis}
+@keyframes vs-pill-in{from{opacity:0;transform:translateY(6px) scale(.96)}to{opacity:1;transform:none}}
+/* narrow / touch screens: smaller buttons, nothing wider than the screen */
+@media (max-width:600px){
+  #topbar{left:10px;right:10px;top:10px;gap:6px}
+  .tb-btns{gap:5px}
+  .icon-btn{width:38px;height:38px}
+  .tb-chips{padding-top:10px}
+  .tb-marquee{max-width:120px}
+  #mp{right:10px!important;top:58px!important;max-width:calc(100vw - 20px)}
+  #mp-chat{width:min(320px,calc(100vw - 20px))}
+  #room-toast{top:44px;left:10px}
+  #hud{left:10px;right:10px}
+}
+@media (prefers-reduced-motion:reduce){#room-toast,.tb-chips,.tb-btns{transition:opacity .2s}#mp-card.open,#vs button.vs-pill,.tb-badge{animation:none}}
 .vs-title{font-weight:500;letter-spacing:-.04em}
 .mp-line b{font:600 11px var(--ui-mono);letter-spacing:-.4px}
 @media (prefers-reduced-motion:reduce){#presence{transition:opacity .2s}#loading.done{filter:none}}

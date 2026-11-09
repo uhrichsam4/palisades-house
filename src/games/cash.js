@@ -62,7 +62,7 @@ export default {
   },
   hud(S, c) {
     const b = this.board(S, c); const lead = b[0];
-    return [['YOU', c.money(S.scores[c.me()] || 0)], ['LEAD', lead && lead.v > 0 ? lead.name : '—', 'role'], ['CASH', String(S.data?.items?.length || 0), 'alt']];
+    return [['YOU', c.money(S.scores[c.me()] || 0)], ['LEAD', lead && lead.v > 0 ? lead.name + ' ' + lead.text : '—', 'role']];
   },
   board(S, c) { return S.players.map(id => ({ id, name: c.nameOf(id), v: S.scores[id] || 0, text: c.money(S.scores[id] || 0) })).sort((a, b) => b.v - a.v || (a.id < b.id ? -1 : 1)); },
   results(S, c) {

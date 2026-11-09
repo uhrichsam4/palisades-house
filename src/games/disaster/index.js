@@ -392,7 +392,7 @@ function tick(dt, t, S, c) {
   u.hp.classList.toggle('on', inR && I.ph !== 'wait'); u.hp.classList.toggle('low', L.hp < 30); u.hp.classList.toggle('ko', L.ko);
   u.hv.textContent = String(Math.ceil(L.hp)); u.sv.textContent = L.ko ? 'KNOCKED OUT · SPECTATING' : I.ph === 'ann' ? 'GET READY' : I.ph === 'inter' ? 'SURVIVED' : 'ALIVE';
   u.fill.style.width = Math.max(0, L.hp) + '%';
-  u.vig.style.opacity = String(Math.min(0.7, vig)); // smoke vignette: dark, but you can still see the way out u.hurt.style.opacity = String(Math.max(0, 1 - (tm - L.lastHurt) / 500) * 0.8);
+  u.vig.style.opacity = String(Math.min(0.7, vig)); /* smoke vignette: dark, but you can still see the way out */ u.hurt.style.opacity = String(Math.max(0, 1 - (tm - L.lastHurt) / 500) * 0.8);
   if (inR && (I.ph === 'live' || I.ph === 'inter')) {
     const v = Math.ceil(L.hp); const changed = v !== L.sentHp;
     if (changed && (v <= 0 || tm - L.sentAt > 500)) { L.sentHp = v; L.sentAt = tm; c.claim({ k: 'hp', v, r: d.round }); }

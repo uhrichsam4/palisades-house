@@ -52,6 +52,15 @@ export const LIBRARY = [
   e('woman', 'Athlete', 1.68, 19994, 'Grab3D, woman-base (CC0 1.0)'),
 ];
 const BY_ID = new Map(LIBRARY.map(x => [x.id, x]));
+// Default look for anyone without a saved avatar choice: a realistic, lightweight human picked deterministically from
+// a key (local identity, peer id, bot name), so a lobby looks varied. Rocketbox rb1-rb6 (6-10k tris, 2-3 draw calls,
+// clean skin/cloth textures). The mannequin (src/avatar.js) is only the placeholder while the file loads.
+export const DEFAULT_IDS = ['rb1', 'rb2', 'rb3', 'rb4', 'rb5', 'rb6'];
+export function defaultDesc(key) {
+  let h = 2166136261; for (const ch of String(key ?? '')) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  const ent = BY_ID.get(DEFAULT_IDS[h % DEFAULT_IDS.length]);
+  return { k: 'b', id: ent.id, ht: ent.height, fl: false };
+}
 export const libraryEntry = (id) => BY_ID.get(id) || null;
 export const libraryUrl = (path) => new URL('../../' + path, import.meta.url).href;
 

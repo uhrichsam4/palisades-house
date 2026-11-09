@@ -165,11 +165,26 @@ try {
     await sleep(1500);
     const h = C.headlight; const front = car.pos.z + car.size.z / 2; // door outer face z ≈ 0.35 + 0.3
     const r = { headlight: h, carFrontZ: +front.toFixed(2), toDoor: +(0.35 - front).toFixed(2) };
+    /* angled placements: the light's reach must stop at the first wall the centre of the beam meets (an edge ray slipping
+       past the wall used to set the range for the whole cone) */
+    const R = window.__phys.RAPIER, world = window.__phys.world, V = window.__dbg.camera.position.constructor;
+    r.angled = [];
+    for (const [x, z, dyaw] of [[15.3, -3.8, 0.45], [15.3, -3.8, -0.45], [12.0, -3.5, 0.6]]) {
+      const yaw = Math.PI + dyaw, g = C.groundAt(x, z, 6, car.body) ?? 0;
+      car.body.setTranslation({ x, y: g + 0.7, z }, true); car.body.setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, true);
+      car.body.setLinvel({ x: 0, y: 0, z: 0 }, true); car.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      await sleep(1400);
+      const fwd = new V(0, 0, -1).applyQuaternion(car.quat); fwd.y = 0; fwd.normalize();
+      const o = new V(0, 0.75, -car.size.z / 2 + 0.05).applyQuaternion(car.quat).add(car.pos);
+      const hit = world.castRay(new R.Ray({ x: o.x, y: o.y, z: o.z }, { x: fwd.x, y: 0, z: fwd.z }), 45, true, R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS, undefined, undefined, car.body);
+      r.angled.push({ x, z, dyaw, center: hit ? +(hit.timeOfImpact ?? hit.toi).toFixed(2) : 45, distance: +(C.headlight?.distance ?? -1).toFixed(2) });
+    }
     return r;
   });
   await sleep(300); await shot('headlight_garage');
   P({ phase: 'headlight', ...rd });
-  checks.headlight = !rd.err && !!rd.headlight && rd.headlight.intensity > 0 && rd.headlight.distance < rd.toDoor + 1.2;
+  checks.headlight = !rd.err && !!rd.headlight && rd.headlight.intensity > 0 && rd.headlight.distance < rd.toDoor + 1.2
+    && rd.angled.length === 3 && rd.angled.every(a => a.center < 45 && a.distance > 0 && a.distance <= a.center + 0.6);
   await ev(() => { window.__cars?.exit(); return true; }); await sleep(800);
 
   // ---------------------------------------------------------------- (e) shower spray in its enclosure

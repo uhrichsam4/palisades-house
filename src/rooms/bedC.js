@@ -66,7 +66,10 @@ function comforter(hw, z0, z1, r, drop, pitch = 0.11) {
   const fold = (s) => { if (s <= 0) return [s, 0]; if (s < arc) { const a = s / r; return [r * Math.sin(a), r * (1 - Math.cos(a))]; } return [r + (s - arc) * 0.10, r + (s - arc)]; };
   const puff = (a, b) => { let m = 9; const j0 = Math.round(b / pitch); // distance to nearest pinch of the staggered lattice
     for (let j = j0 - 1; j <= j0 + 1; j++) { const sh = (((j % 2) + 2) % 2) * pitch / 2, k0 = Math.round((a - sh) / pitch); for (let k = k0 - 1; k <= k0 + 1; k++) m = Math.min(m, Math.hypot(a - (k * pitch + sh), b - j * pitch)); }
-    return 1 - Math.exp(-((m / (0.4 * pitch)) ** 2)); };
+    /* pintuck, not bubbles: small sharp pinches + raised tuck ridges running diagonally between neighbouring pinches */
+    const f1 = (a - b / 2) / pitch, f2 = (a + b / 2) / pitch; const d1 = Math.abs(f1 - Math.round(f1)) * pitch * 0.894, d2 = Math.abs(f2 - Math.round(f2)) * pitch * 0.894;
+    const w = 0.14 * pitch, ridge = Math.max(Math.exp(-((d1 / w) ** 2)), Math.exp(-((d2 / w) ** 2)));
+    return 0.45 * (1 - Math.exp(-((m / (0.18 * pitch)) ** 2))) + 0.55 * ridge * (1 - Math.exp(-((m / (0.3 * pitch)) ** 2))); };
   for (let i = 0; i < p.count; i++) {
     const u = p.getX(i), v = z0 + (p.getZ(i) + (Vf - z0) / 2);
     const sx = Math.abs(u) - hw, sz = v - z1;
@@ -389,8 +392,9 @@ export async function build(ctx) {
     facePanel(bed, 'x', X1, c, e2, Y + dd.head + 0.07, Y + WALLH, -1, wallInfill);
     facePanel(bed, 'z', Z1, X0, X1, Y, Y + WALLH, -1, wallInfill);
     // cool daylight through the front window, raking onto the bed wall (1 of 2 lights, no shadows)
-    const sun = new THREE.SpotLight(0xeef3ff, 55, 11, 0.62, 1.0, 2); sun.castShadow = false;
-    sun.position.set(wf.at[0] + 0.3, Y + 2.35, Z0 - 0.6); sun.target.position.set(1.2, Y + 0.6, 10.6); bed.add(sun, sun.target);
+    /* source just inside the glass, past the roman shade (from outside it lit the shade into a glowing blob); same footprint */
+    const sun = new THREE.SpotLight(0xeef3ff, 38, 11, 0.71, 1.0, 2); sun.castShadow = false;
+    sun.position.set(wf.at[0] + 0.3, Y + 2.35, Z0 + 0.35); sun.target.position.set(1.2, Y + 0.6, 10.6); bed.add(sun, sun.target);
   }
   {
     const d = ctx.plan.OPENINGS.find(o => o.id === 'bC-d');

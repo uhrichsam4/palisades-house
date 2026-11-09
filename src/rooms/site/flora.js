@@ -37,7 +37,7 @@ export function blobGeo(kit, seed, lobes = 4, detail = 1, flat = 1) {
 export function foliageMaterial(kit) {
   // No UV texture (it stretched on the blobs): leaf clumps come from world-space 3D noise (constant leaf
   // size whatever the bush scale), darkening gaps and jittering the normal so each bush reads as foliage.
-  const mat = kit.outdoor(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.9, specularIntensity: 0.25 }));
+  const mat = kit.outdoor(new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.95, specularIntensity: 0.08 }));
   mat.onBeforeCompile = (sh) => {
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vLeafP;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -53,11 +53,14 @@ float ln(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(lh(i), lh(i + vec3(1, 0, 0)), f.x), mix(lh(i + vec3(0, 1, 0)), lh(i + vec3(1, 1, 0)), f.x), f.y),
              mix(mix(lh(i + vec3(0, 0, 1)), lh(i + vec3(1, 0, 1)), f.x), mix(lh(i + vec3(0, 1, 1)), lh(i + vec3(1, 1, 1)), f.x), f.y), f.z); }`)
       .replace('#include <map_fragment>', `float lf = ln(vLeafP * 3.5) * 0.45 + ln(vLeafP * 8.0) * 0.35 + ln(vLeafP * 17.0) * 0.2; float clump = ln(vLeafP * 1.1);
-  diffuseColor.rgb *= (0.18 + 1.25 * lf * lf * 1.6) * (0.65 + 0.7 * clump);`)
+  diffuseColor.rgb *= (0.45 + 0.85 * lf * lf) * (0.8 + 0.35 * clump);
+  { float big = ln(vLeafP * 0.0061 + 3.7) * 0.65 + ln(vLeafP * 0.019) * 0.35; float lum = dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15));
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.18, 1.0, 0.68) * lum, smoothstep(0.58, 0.78, big) * 0.55);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.82, 1.02, 0.86) * lum, smoothstep(0.42, 0.22, big) * 0.4); }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   { vec3 q = vLeafP * 6.0; normal = normalize(normal + 1.7 * vec3(ln(q) - 0.5, ln(q + 17.3) - 0.5, ln(q + 31.7) - 0.5)); }`);
   };
-  mat.customProgramCacheKey = () => 'site-foliage';
+  mat.customProgramCacheKey = () => 'site-foliage-v2';
   return mat;
 }
 
@@ -117,4 +120,43 @@ export function palm(kit, parent, mats, pos, h = 8, seed = 1) {
     kit.add(g, geo, mats.palmFrond);
   }
   return g;
+}
+
+// CC0 garden plants (Poly Haven shrub_02 = 4 sapling-bush variants, grass_medium_02 = 5 grass clumps): geometries
+// normalised to 1 m tall, base at y=0, centred; one alpha-tested material per model, desaturated toward the silvery
+// sage of the listing's olives / westringia (tint = instance colour). Loaded once, shared by the site + pool pieces.
+let PLANTS = null;
+export function cc0Plants(kit) {
+  if (PLANTS) return PLANTS;
+  const one = async (id, sat) => {
+    const obj = await kit.loadModel(`assets/ph/${id}/${id}_1k.gltf`);
+    const geos = []; let src = null; const m4 = new THREE.Matrix4();
+    obj.traverse((o) => { if (!o.isMesh) return;
+      const g = o.geometry.clone(); m4.compose(new THREE.Vector3(), o.quaternion, o.scale); g.applyMatrix4(m4);
+      g.computeBoundingBox(); const b = g.boundingBox, h = b.max.y - b.min.y;
+      g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); g.scale(1 / h, 1 / h, 1 / h); g.computeBoundingSphere();
+      geos.push(g); src = src || o.material; });
+    const mat = src.clone(); mat.transparent = false; mat.alphaTest = 0.5; mat.depthWrite = true; mat.side = THREE.DoubleSide; mat.color.set(0xffffff);
+    mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>', `{ vec3 tcol = vec3( 1.0 );
+#if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+  tcol = vColor.rgb;
+#endif
+  float l = dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ); diffuseColor.rgb = mix( vec3( l ), diffuseColor.rgb, ${sat.toFixed(2)} ) * tcol * 2.7; }`);
+    };
+    mat.customProgramCacheKey = () => 'cc0plant-' + id;
+    return { geos, mat: kit.outdoor(mat) };
+  };
+  PLANTS = Promise.all([one('shrub_02', 0.35), one('grass_medium_02', 0.5)]).then(([shrub, grass]) => ({ shrub, grass }));
+  return PLANTS;
+}
+// list of {x,y,z,h,w,ry,color,v (variant)} -> one InstancedMesh per variant under `parent`
+export function plantInstances(parent, model, list, { shadow = true } = {}) {
+  const by = model.geos.map(() => []); for (const it of list) by[it.v % model.geos.length].push(it);
+  const o = new THREE.Object3D(), c = new THREE.Color(), out = [];
+  by.forEach((items, v) => { if (!items.length) return;
+    const m = new THREE.InstancedMesh(model.geos[v], model.mat, items.length);
+    items.forEach((it, i) => { o.position.set(it.x, it.y, it.z); o.rotation.set(0, it.ry, 0); o.scale.set(it.w, it.h, it.w); o.updateMatrix(); m.setMatrixAt(i, o.matrix); m.setColorAt(i, c.setHex(it.color)); });
+    m.castShadow = shadow; m.receiveShadow = true; m.computeBoundingSphere(); m.userData.keep = true; m.name = 'cc0plants'; parent.add(m); out.push(m); });
+  return out;
 }

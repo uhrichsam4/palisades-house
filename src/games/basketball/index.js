@@ -17,6 +17,8 @@ import { nextEmote } from '../../avatars/anim.js';
 const ICON = '<circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3v14M5 5c3 3 3 7 0 10M15 5c-3 3-3 7 0 10"/>';
 const AREA = { pos: [BB.rack[0] + 1.6, C2.y - 0.035, BB.rack[1] - 0.6], yaw: Math.PI / 2 };
 const FL = C2.y, VIS = 0.035, GRAV = 9.81, R = BB.ballR, LET = 'HORSE';
+/* HUD chips: cut long names on a word boundary ("DRIZZLY WAVE" -> "DRIZZLY", never "DRIZZLY WA") */
+const shortName = (n, max = 12) => { n = String(n || '').toUpperCase(); if (n.length <= max) return n; const w = n.slice(0, max + 1).lastIndexOf(' '); return w > 2 ? n.slice(0, w) : n.slice(0, max - 1) + '…'; };
 // bot / auto shooting spots around the west hoop (dx toward court, dz)
 const SPOTS = [[1.5, 0], [3.2, -1.6], [3.2, 1.6], [4.6, 0], [2, -3.5], [2, 3.5], [6.6, 0], [5.2, -3.6], [5.2, 3.6], [1.0, -5.0]];
 
@@ -27,7 +29,7 @@ export function createBasketball(ctx, mp, hub) {
   let M = null; let built = false; const balls = new Map(); // id -> { mesh, body?, held, tp, tv, tAt, shot }
   const opts = { auto: false, botAcc: 0.012 };
   const stats = { shots: 0, makes: 0, swishes: 0, log: [] };
-  const local = { on: false, charging: false, chargeAt: 0, power: 0, lastSend: 0, botCr: null, botEm: 0, botAt: 0, nets: [], aimLock: false };
+  const local = { on: false, charging: false, chargeAt: 0, power: 0, lastSend: 0, botCr: null, botEm: 0, botAt: 0, nets: [], aimLock: false, camP: new THREE.Vector3(), camQ: new THREE.Quaternion(), camInit: false };
   const meter = V.el('<div class="cv-meter pg-stage"><div class="mono" id="bk-m-t"></div><div class="cv-bar"><span class="zone"></span><i style="width:0"></i></div></div>', true);
   const isPlayer = () => !!M && M.players.includes(me());
   const turnId = () => (M && M.mode !== 'free' ? M.players[M.turn] : null);
@@ -113,7 +115,7 @@ export function createBasketball(ctx, mp, hub) {
     }
     setTimeout(() => { if (M && M.mid === n.mid) { send({ k: 'state', M: n }); setState(n); } }, 1200);
   }
-  function resultFx(id, made, pts, swish) { if (made) { V.banner(swish ? 'Swish' : '+' + pts, chip(nameOf(id).toUpperCase().slice(0, 12), pts + ' PT', 'role'), 1100); if (swish) sfx('net', 1); } }
+  function resultFx(id, made, pts, swish) { if (made) { V.banner(swish ? 'Swish' : '+' + pts, chip(shortName(nameOf(id)), pts + ' PT', 'role'), 1100); if (swish) sfx('net', 1); } }
 
   // ---------------------------------------------------------------- network
   V.ch.onMessage = (m, from) => {
@@ -151,6 +153,8 @@ export function createBasketball(ctx, mp, hub) {
 
   // ---------------------------------------------------------------- per frame
   const _v = new THREE.Vector3(), _w = new THREE.Vector3();
+  const _cA = new THREE.Vector3(), _cB = new THREE.Vector3(), _cD = new THREE.Vector3(), _cL = new THREE.Vector3(), _cU = new THREE.Vector3(0, 1, 0), _cM = new THREE.Matrix4(), _cQ = new THREE.Quaternion();
+  const CAM_FLAGS = RA.QueryFilterFlags.EXCLUDE_KINEMATIC | RA.QueryFilterFlags.EXCLUDE_DYNAMIC | RA.QueryFilterFlags.EXCLUDE_SENSORS;
   ctx.onUpdate((dt, t) => {
     if (!M && !balls.size) return;
     const now = performance.now();
@@ -197,6 +201,20 @@ export function createBasketball(ctx, mp, hub) {
     for (const N of local.nets) { if (N.amp < 0.01) continue; N.t += dt; N.amp *= Math.exp(-dt * 2.5); const pa = N.net.geometry.attributes.position; const a = pa.array;
       for (let i = 0; i < pa.count; i++) { const y = N.base[i * 3 + 1]; const k = -y / 0.42; a[i * 3] = N.base[i * 3] * (1 - 0.25 * k * N.amp * Math.sin(N.t * 18)); a[i * 3 + 2] = N.base[i * 3 + 2] * (1 - 0.25 * k * N.amp * Math.sin(N.t * 18)); a[i * 3 + 1] = y * (1 + 0.25 * N.amp * Math.sin(N.t * 12)); }
       pa.needsUpdate = true; if (N.amp < 0.01) { a.set(N.base); pa.needsUpdate = true; } }
+    // polish5: framing camera — higher and 1 m to the right of the player, aimed down-court toward the rim (the default
+    // over-the-shoulder arm put your back between you and the hoop / the bot). Yaw + pitch still come from the mouse.
+    if (local.on && st.thirdPerson && !st.seat) {
+      const yaw = st.yaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw), p = st.pos;
+      _cA.set(p.x, p.y + 1.55, p.z); _cB.set(p.x - fx * 3.0 + rx * 1.0, p.y + 2.7, p.z - fz * 3.0 + rz * 1.0);
+      _cD.subVectors(_cB, _cA); const len = _cD.length(); _cD.divideScalar(len);
+      let hit = null; try { hit = world.castRay(new RA.Ray({ x: _cA.x, y: _cA.y, z: _cA.z }, { x: _cD.x, y: _cD.y, z: _cD.z }), len, true, CAM_FLAGS); } catch {}
+      if (hit) _cB.copy(_cA).addScaledVector(_cD, Math.max(0.3, (hit.timeOfImpact ?? hit.toi) - 0.2));
+      const rim = rimFor(p.x), dr = THREE.MathUtils.clamp(Math.hypot(rim[0] - p.x, rim[1] - p.z), 3, 9);
+      _cL.set(p.x + fx * dr * 0.55, FL + 1.3 + (BB.rimY - FL - 1.3) * 0.55 + THREE.MathUtils.clamp(st.pitch, -0.6, 0.8) * dr * 0.6, p.z + fz * dr * 0.55);
+      _cM.lookAt(_cB, _cL, _cU); _cQ.setFromRotationMatrix(_cM);
+      if (!local.camInit) { local.camP.copy(_cB); local.camQ.copy(_cQ); local.camInit = true; }
+      const k = 1 - Math.exp(-dt * 9); local.camP.lerp(_cB, k); local.camQ.slerp(_cQ, k); camera.position.copy(local.camP); camera.quaternion.copy(local.camQ);
+    } else local.camInit = false;
     // meter
     ui.show(meter, local.charging); if (local.charging) { const el = meter.querySelector('i'); el.style.width = (local.power * 100).toFixed(0) + '%'; const z = meter.querySelector('.zone'); const ip = idealPower(); z.style.left = ((ip - 0.07) * 100) + '%'; z.style.width = '14%';
       const f = st.pos; const rim = rimFor(f.x); ui.setHtml(meter.querySelector('#bk-m-t'), chip('POWER', (local.power * 100).toFixed(0)) + ' ' + chip('SHOT', Math.hypot(rim[0] - f.x, rim[1] - f.z) > BB.three ? '3 PT' : '2 PT', 'role')); }
@@ -216,7 +234,7 @@ export function createBasketball(ctx, mp, hub) {
     const on = !!M && (local.on || Math.abs(st.pos.x - BB.mid) < 13 && Math.abs(st.pos.z - BB.z) < 10); ui.show(V.SCORE, on && M.mode !== 'free'); ui.show(V.KEYS, local.on);
     if (!M) return;
     if (M.mode !== 'free') { const val = (i) => (M.mode === 'duel' ? M.score[i] : LET.slice(0, M.letters[i]) || '–');
-      V.score(V.side(nameOf(M.players[0]) + (M.players[0] === me() ? ' (you)' : ''), val(0), '', M.turn === 0), chip(M.mode === 'duel' ? 'TO' : 'GAME', M.mode === 'duel' ? '11' : 'HORSE', 'alt') + chip('SHOOTS', nameOf(turnId()).toUpperCase().slice(0, 10), 'role'), V.side(nameOf(M.players[1]) + (M.players[1] === me() ? ' (you)' : ''), val(1), '', M.turn === 1)); }
+      V.score(V.side(nameOf(M.players[0]) + (M.players[0] === me() ? ' (you)' : ''), val(0), '', M.turn === 0), chip(M.mode === 'duel' ? 'TO' : 'GAME', M.mode === 'duel' ? '11' : 'HORSE', 'alt') + chip('SHOOTS', shortName(nameOf(turnId())), 'role'), V.side(nameOf(M.players[1]) + (M.players[1] === me() ? ' (you)' : ''), val(1), '', M.turn === 1)); }
     V.keys([['WASD', 'DRIBBLE'], ['HOLD CLICK', 'CHARGE'], ['RELEASE', 'SHOOT'], ['LOOK UP', 'ARC'], ['E', 'LEAVE']]);
   }
   setInterval(() => { if (M) render(); }, 300);

@@ -357,7 +357,7 @@ export function startGames(ctx, mp) {
       if (!el) {
         el = document.createElement('div'); el.className = 'pg-lc' + (id === me() ? ' me' : ''); el.dataset.id = id;
         const nm = nameOf(id); el.style.setProperty('--h', Math.round(((S.hues?.[id] ?? hueOf(id)) % 1) * 360));
-        el.innerHTML = `<div class="pg-lc-top"><span class="pg-av">${esc(nm.slice(0, 1).toUpperCase())}</span><div class="who"><div class="pg-lc-name">${esc(nm)}${id === me() ? ' <span class="k">(YOU)</span>' : ''}</div><div class="mono"><span class="k">CHAR::</span><span class="v">${esc(charOf(id))}</span></div></div>${id === S.host ? '<span class="pg-chip role"><span class="v">HOST</span></span>' : ''}</div>
+        el.innerHTML = `<div class="pg-lc-top"><span class="pg-av">${esc(nm.slice(0, 1).toUpperCase())}</span><div class="who"><div class="pg-lc-name">${esc(nm)}${id === me() ? ' <span class="k">(YOU)</span>' : ''}</div><div class="mono"><span class="k">CHAR::</span><span class="v">${esc(charOf(id))}</span>${id === S.host ? ' <span class="k">·</span> <span class="v pg-host">HOST</span>' : ''}</div></div></div>
           <div class="pg-seg"><span class="pg-pill"></span><span class="o w">WAITING</span><span class="o r">READY ${CHECK}</span></div>`;
         E.lbCards.appendChild(el); lobbyCards.set(id, el);
       }
@@ -370,7 +370,7 @@ export function startGames(ctx, mp) {
   }
 
   // ---------------------------------------------------------------- UI: per-frame render (HUD only rebuilt on change)
-  let lastCount = '';
+  let lastCount = '', tabHeld = false;
   function render() {
     const now = performance.now(); const g = G();
     const ph = S?.phase;
@@ -391,14 +391,18 @@ export function startGames(ctx, mp) {
     // HUD
     const hudOn = ph === 'play' || ph === 'count'; ui.show(E.hud, hudOn);
     if (hudOn) {
-      const rows = [['GAME', g.title.toUpperCase()]];
-      if (ph === 'play') rows.push(['TIME', g.timeText ? g.timeText(S, core) : clockTxt(S.endAt - now)]);
+      /* calm HUD: ONE compact top-centre strip ("CASH GRAB  0:10 · YOU $8,000 · LEAD …"); the scoreboard only shows
+         while Tab is held and in the last 10 s of a round (the end screen has the full results) */
+      const time = ph === 'play' ? (g.timeText ? g.timeText(S, core) : clockTxt(S.endAt - now)) : '';
       let extra = []; try { extra = g.hud?.(S, core) || []; } catch {}
       if (!amIn()) extra.push(['YOU', 'SPECTATING', 'alt']);
-      const html = [...rows, ...extra].map(([k, v, c]) => chip(k, v, c || '')).join('');
+      const html = `<span class="pg-chip pg-strip"><span class="acc">${esc(g.title.toUpperCase())}</span>` + (time ? `<span class="v pg-time">${esc(time)}</span>` : '')
+        + extra.map(([k, v, c]) => `<span class="k pg-sep">·</span><span class="k">${esc(k)}</span><span class="${c === 'role' ? 'acc' : 'v'}">${esc(v)}</span>`).join('') + '</span>';
       ui.setHtml(E.chips, html);
       let b = []; try { b = g.board?.(S, core) || []; } catch {}
       ui.setHtml(E.board, b.slice(0, 5).map((x, i) => `<div class="pg-brow ${x.id === me() ? 'me' : ''}"><span class="r">${i + 1}</span><span class="n">${esc(x.name)}</span><span class="s">${esc(x.text)}</span></div>`).join(''));
+      const boardOn = tabHeld || (ph === 'play' && S.endAt - now < 10000);
+      if (E.board.classList.contains('show') !== boardOn) E.board.classList.toggle('show', boardOn);
     }
     // seeker blackout etc.
     let dark = null; try { dark = ph === 'play' ? g.dark?.(S, core) : null; } catch {}
@@ -425,6 +429,10 @@ export function startGames(ctx, mp) {
   });
 
   // ---------------------------------------------------------------- input
+  /* Tab (held) shows the scoreboard during a round (tabHeld is declared next to render) */
+  addEventListener('keydown', (e) => { if (e.code !== 'Tab' || typing(e) || document.body.classList.contains('photo')) return; if (S && (S.phase === 'play' || S.phase === 'count')) { e.preventDefault(); tabHeld = true; } });
+  addEventListener('keyup', (e) => { if (e.code === 'Tab') tabHeld = false; });
+  addEventListener('blur', () => { tabHeld = false; });
   const typing = (e) => { const tg = e.target; return tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable); };
   addEventListener('keydown', (e) => {
     if (typing(e) || e.repeat) return;

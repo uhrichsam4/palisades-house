@@ -145,7 +145,12 @@ export function createSky(ctx) {
     // the site piece's atmosphere: far-terrain haze follows our fog colour (unchanged at reference daylight),
     // far ridgelines (unlit vertex colours) are lit like the HDRI land and vanish in fog
     SITE_HAZE.r = HAZE0.r * S.fogC.r / FOG0.r; SITE_HAZE.g = HAZE0.g * S.fogC.g / FOG0.g; SITE_HAZE.b = HAZE0.b * S.fogC.b / FOG0.b;
-    if (ridges) { ridges.material.color.copy(S.land).lerp(S.fogC, S.haze * 0.5); ridges.visible = S.fogAmt < 0.5; }
+    /* keep ~half of that tint, the rest follows brightness only: the per-channel ratio painted the far canyon a flat salmon at sunset */
+    { const l0 = 0.2126 * HAZE0.r + 0.7152 * HAZE0.g + 0.0722 * HAZE0.b, l1 = 0.2126 * SITE_HAZE.r + 0.7152 * SITE_HAZE.g + 0.0722 * SITE_HAZE.b;
+      SITE_HAZE.lerp(_c.copy(HAZE0).multiplyScalar(l1 / l0), 0.45); }
+    /* the dome's horizon haze band is that same colour (fog/weather pull it to the fog colour), so terrain, ridges and sky meet without a seam */
+    U.hazeC.value.copy(SITE_HAZE).lerp(S.fogC, Math.min(1, S.fogAmt * 1.5));
+    if (ridges) { ridges.material.color.copy(S.land); ridges.visible = S.fogAmt < 0.5; }
   }
   const HAZE0 = SITE_HAZE.clone(); let FOG0 = null, ridges = null;
   // reference states for the probe bakes (clear sky, sun high / deep night)
@@ -155,7 +160,7 @@ export function createSky(ctx) {
 
   // ---------------------------------------------------------------- environment (main.js loadEnvironment)
   function attachEnv(hdr, rotY) {
-    U.tHdr.value = hdr; U.rotY.value = rotY; U.refSun.value.copy(LIGHT.sunDir);
+    dome.setHdr(hdr); U.rotY.value = rotY; U.refSun.value.copy(LIGHT.sunDir);
     step(0, true); return dome.captureEnv();
   }
   // wet look for outdoor materials (kit.outdoor): darker + glossier, mostly on up-facing surfaces
@@ -235,7 +240,12 @@ export function createSky(ctx) {
       for (const m of [].concat(o.material)) {
         if (!m || seen.has(m) || !m.emissive || m.emissiveMap || m.map?.isVideoTexture) continue;
         if (m.emissiveIntensity <= 0 || m.emissive.r + m.emissive.g + m.emissive.b < 0.05) continue;
-        seen.add(m); o.getWorldPosition(wp); emis.push({ m, base: m.emissiveIntensity, out: !insideHouse(wp) });
+        /* position = the geometry's world centre, not the object origin: kit.mergeStatic meshes sit at (0,0,0), which
+           classed every merged interior fixture (cans, sconces) as an exterior lantern -> x7 at night, blooming blobs
+           in the upstairs windows seen from the street */
+        seen.add(m); const g = o.geometry; if (g && !g.boundingBox) g.computeBoundingBox();
+        if (g?.boundingBox && !g.boundingBox.isEmpty()) g.boundingBox.getCenter(wp).applyMatrix4(o.matrixWorld); else o.getWorldPosition(wp);
+        emis.push({ m, base: m.emissiveIntensity, out: !insideHouse(wp) });
       }
     });
     if (bound?.list) for (const m of bound.list) if (!m.userData.dualEnv) plainProbe.push(m);

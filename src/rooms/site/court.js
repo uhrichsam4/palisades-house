@@ -48,9 +48,10 @@ export function courtMaterials(kit) {
     g.putImageData(img, 0, 0);
   }, { srgb: false });
   return {
-    green: o(new THREE.MeshStandardMaterial({ map: acrylic(1), color: 0x2f3c0f, roughness: 0.9, normalMap: kit.noiseNormal(256, 1.2, 64, 21), normalScale: new THREE.Vector2(0.08, 0.08) })),
-    blue: o(new THREE.MeshStandardMaterial({ map: acrylic(2), color: 0x2d353c, roughness: 0.82, normalMap: kit.noiseNormal(256, 1.2, 64, 22), normalScale: new THREE.Vector2(0.08, 0.08) })),
-    line: o(new THREE.MeshStandardMaterial({ color: 0xd6d6d2, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })),
+    green: o(new THREE.MeshStandardMaterial({ map: acrylic(1), color: 0x33421a, roughness: 0.9, normalMap: kit.noiseNormal(256, 1.2, 64, 21), normalScale: new THREE.Vector2(0.08, 0.08) })),
+    blue: o(new THREE.MeshStandardMaterial({ map: acrylic(2), color: 0x3a4645, roughness: 0.86, normalMap: kit.noiseNormal(256, 1.2, 64, 22), normalScale: new THREE.Vector2(0.08, 0.08) })),
+    /* crisp white acrylic line paint: albedo kept below the bloom threshold in full sun, matte (no specular glint) */
+    line: o(new THREE.MeshStandardMaterial({ color: 0xbdbdb9, roughness: 0.92, emissive: 0x000000, emissiveIntensity: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })),
     post: o(new THREE.MeshStandardMaterial({ color: 0x151617, roughness: 0.5, metalness: 0.4 })),
     chain: o(new THREE.MeshStandardMaterial({ map: chain, color: 0xffffff, transparent: true, alphaTest: 0.02, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.2, depthWrite: false })),
     screen: o(new THREE.MeshStandardMaterial({ map: screen, normalMap: screenN, normalScale: new THREE.Vector2(0.6, 0.6), color: 0xd0d2d4, roughness: 0.36, metalness: 0.1, side: THREE.DoubleSide })),

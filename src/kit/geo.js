@@ -138,7 +138,7 @@ export function mergeStatic(root, { dedupe = null, skip = null } = {}) {
     let p = o.parent; while (p && p !== root) { if (p.userData.keep || p.userData.dynamic || !p.visible) return; p = p.parent; }
     const g = o.geometry; if (!g?.attributes?.position || Object.values(g.attributes).some(a => a.isInterleavedBufferAttribute)) return;
     const mats = [].concat(o.material);
-    if (mats.some(m => !m || (m.transparent && !mergeableTransparent(m)) || (hasCustomShader(m) && !m.userData.probe))) return;
+    if (mats.some(m => !m || (m.transparent && !mergeableTransparent(m)) || (hasCustomShader(m) && !m.userData.probe && !m.userData.mergeSafe))) return; /* mergeSafe: the material's own shader hook only reads view-space / lighting terms (no per-object data), so baking transforms into one mesh draws the same */
     if (o.onBeforeRender !== THREE.Object3D.prototype.onBeforeRender || o.onAfterRender !== THREE.Object3D.prototype.onAfterRender) return;
     candidates.push(o);
   });

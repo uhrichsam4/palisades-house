@@ -36,10 +36,15 @@ export function makeMaterials(kit) {
       g.fillStyle = 'rgba(30,25,20,0.35)'; g.fillRect(x, y, 1, 1);
     }
   }, { repeat: [5, 5] }); };
-  const grassMap = (() => { const rr = rng(5); return canvasTex(256, 256, (g, w, h) => {
-    g.fillStyle = '#41662a'; g.fillRect(0, 0, w, h);
-    for (let k = 0; k < 9000; k++) { const v = (rr() - 0.5) * 50; g.fillStyle = `rgba(${70 + v},${105 + v},${45 + v * 0.5},0.5)`; g.fillRect(rr() * w, rr() * h, 1, 3); }
-  }, { repeat: [12, 1] }); })();
+  // lawn: desaturated ~#6d8a3e (rendered with color 0xb4b4b4 below so it lands near the photo's muted green),
+  // blade specks + two subtle mowing stripes per tile (tile = 1.5 m along x, the strip's length)
+  const grassMap = (() => { const rr = rng(5); return canvasTex(512, 512, (g, w, h) => {
+    g.fillStyle = '#6d8a3e'; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(40,52,20,0.10)'; g.fillRect(0, 0, w / 2, h);
+    g.fillStyle = 'rgba(214,220,170,0.07)'; g.fillRect(w / 2, 0, w / 2, h);
+    for (let k = 0; k < 42000; k++) { const v = (rr() - 0.5) * 60; g.fillStyle = `rgba(${96 + v},${122 + v},${62 + v * 0.6},0.45)`; g.fillRect(rr() * w, rr() * h, 1, 2 + rr() * 3); }
+    for (let k = 0; k < 160; k++) { g.fillStyle = `rgba(${120 + rr() * 30},${118 + rr() * 20},${70},0.12)`; g.beginPath(); g.arc(rr() * w, rr() * h, 3 + rr() * 9, 0, 7); g.fill(); }
+  }, { repeat: [10.7, 1.7] }); })();
   const plaster = std({ color: 0xe4e9e8, roughness: 0.82, normalMap: noiseNormal(256, 0.8, 20, 4), normalScale: new THREE.Vector2(0.25, 0.25), side: THREE.DoubleSide });
   const M = {
     pavers: std({ map: paverMap, roughness: 0.8, normalMap: stoneN, normalScale: new THREE.Vector2(0.25, 0.25) }),
@@ -58,7 +63,7 @@ export function makeMaterials(kit) {
     fireGlass: std({ color: 0x3a1f17, roughness: 0.35, metalness: 0.3 }),
     glass: kit.M.glass,
     metal: std({ color: 0x151515, roughness: 0.5, metalness: 0.5 }),
-    grass: std({ map: grassMap, roughness: 1 }),
+    grass: std({ map: grassMap, color: 0xb4b4b4, roughness: 0.95, normalMap: noiseNormal(256, 2.2, 48, 21), normalScale: new THREE.Vector2(0.45, 0.45) }),
     leaf: std({ color: 0x55703a, roughness: 0.9 }),
     leafLight: std({ color: 0x7d9a4a, roughness: 0.9 }),
     planter: std({ color: 0x3c3b39, roughness: 0.8 }),
@@ -256,10 +261,19 @@ export function pingPong(kit, parent, M, pos, ry) {
   return g;
 }
 
-export function planter(kit, parent, M, pos, s = 1, seed = 1) {
+// plants: optional array; when given, the planter gets a CC0 silvery shrub (site/flora.js plantInstances list item)
+// instead of the old leaf-ball blobs, plus a dark soil disc
+export function planter(kit, parent, M, pos, s = 1, seed = 1, plants = null) {
   const g = kit.group(parent, pos);
   kit.add(g, kit.cyl(0.32 * s, 0.26 * s, 0.62 * s, 24), M.planter, [0, 0.31 * s, 0]);
   const r = kit.rng(seed);
+  if (plants) {
+    if (!M.soil) M.soil = kit.outdoor(new THREE.MeshStandardMaterial({ color: 0x2e261e, roughness: 1 }));
+    kit.add(g, kit.cyl(0.29 * s, 0.29 * s, 0.02, 20), M.soil, [0, 0.6 * s, 0], [0, 0, 0], { shadow: false });
+    const h = (1.05 + r() * 0.3) * s;
+    plants.push({ x: pos[0], y: pos[1] + 0.58 * s, z: pos[2], h, w: h * (0.85 + r() * 0.2), ry: r() * 6.3, v: 1 + 2 * (seed % 2), color: [0xa6ad94, 0x9ba68a, 0xb0b39c][seed % 3] });
+    return g;
+  }
   for (let i = 0; i < 9; i++) {
     const a = r() * Math.PI * 2, rr = r() * 0.28 * s;
     kit.add(g, new THREE.IcosahedronGeometry((0.20 + r() * 0.14) * s, 1), i % 2 ? M.leaf : M.leafLight, [Math.cos(a) * rr, (0.75 + r() * 0.55) * s, Math.sin(a) * rr]);

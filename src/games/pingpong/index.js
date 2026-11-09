@@ -18,6 +18,7 @@ import { TX, TZ, TY, HL, HW, BR, planeX, sgn, makeBall, copyBall, step, aimShot,
 import { chip, esc } from '../ui.js';
 import { sfx } from '../sfx.js';
 import { aimArm } from '../arms.js';
+import { botAvatar } from '../court.js';
 
 const ICON = '<circle cx="8" cy="8" r="5"/><path d="M11.5 11.5l4.5 4.5"/><circle cx="15.5" cy="5" r="1.4"/>';
 const AREA = { pos: [TX - HL - 1.15, -0.1, TZ + 0.9], yaw: -Math.PI / 2 - 0.35 };
@@ -38,7 +39,7 @@ const CSS = `
   background: rgba(30,30,30,.86); border: var(--hair); border-radius: 6px; box-shadow: 0 24px 60px rgba(0,0,0,.4); }
 #pq-ban .big { font: 500 54px/1 "Geist", -apple-system, Inter, sans-serif; letter-spacing: -0.06em; }
 #pq-ban .big .roll-c { line-height: 1; }
-#pq-keys { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 9; display: flex; gap: 6px; pointer-events: none; }
+#pq-keys { position: fixed; left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: min(92vw, 820px); bottom: 18px; z-index: 9; display: flex; gap: 6px; pointer-events: none; flex-wrap: wrap; justify-content: center; }
 `;
 
 export function createPingPong(ctx, mp, hub) {
@@ -55,7 +56,7 @@ export function createPingPong(ctx, mp, hub) {
   const pad = [{ y: TY + 0.3, z: TZ, vy: 0, vz: 0, ty: TY + 0.3, tz: TZ, py: 0, pz: 0 }, { y: TY + 0.3, z: TZ, vy: 0, vz: 0, ty: TY + 0.3, tz: TZ, py: 0, pz: 0 }];
   const bot = [{ target: null, err: [0, 0], swing: 4, hitN: -1 }, { target: null, err: [0, 0], swing: 4, hitN: -1 }];
   const opts = { speed: 1, auto: false, botMiss: 0.1 };
-  let local = { at: false, side: -1, iFroze: false, lastPad: 0, padSig: '', camP: new THREE.Vector3(), camQ: new THREE.Quaternion(), camInit: false, stand: '', prevThird: true };
+  let local = { at: false, side: -1, iFroze: false, lastPad: 0, padSig: '', camP: new THREE.Vector3(), camQ: new THREE.Quaternion(), camInit: false, stand: '', prevThird: true, botCr: null, botLoading: false, botP: new THREE.Vector3(), botInit: false };
   const stats = { hits: 0, points: 0, rallies: [] };
 
   // ---------------------------------------------------------------- meshes (built once, hidden until a match)
@@ -100,8 +101,11 @@ export function createPingPong(ctx, mp, hub) {
   // ---------------------------------------------------------------- match lifecycle
   function setState(n) {
     const prev = M; M = n;
-    if (!M) { live = false; g.visible = false; exitTable(); hide(); return; }
+    if (!M) { live = false; g.visible = false; exitTable(); hide(); if (local.botCr) local.botCr.root.visible = false; return; }
     g.visible = true;
+    /* polish5: the bot gets a body (same lazily-built avatar as tennis / boxing / basketball) holding its paddle */
+    if (M.players.includes('bot')) { if (!local.botCr && !local.botLoading) { local.botLoading = true; botAvatar(ctx, 0.33, 'Bot').then(c => { local.botCr = c; local.botInit = false; c.root.visible = !!M && M.players.includes('bot'); }); } else if (local.botCr) local.botCr.root.visible = true; }
+    else if (local.botCr) local.botCr.root.visible = false;
     if (!prev || prev.mid !== M.mid || prev.point !== M.point) newPoint();
     if (isPlayer() && M.mode !== 'wait' && M.phase !== 'over' && !local.at) enterTable();
     if (M.phase === 'over' && (!prev || prev.phase !== 'over')) showWin();
@@ -124,7 +128,10 @@ export function createPingPong(ctx, mp, hub) {
     const n = { ...snap(), score: sc, point: M.point + 1, server: serverOf(sc, M.first), phase: over ? 'over' : 'serve', winner: over ? winner : -1, rev: M.rev + 1, reason };
     send({ k: 'point', M: n, winner, why: reason, hits: R.n }); pointFx(winner, reason); setState(n);
   }
-  function pointFx(winner, reason) { sfx('net', 0.4); banner(nameOf(M.players[winner]), chip('POINT', String(reason || '').toUpperCase(), 'role'), 1300); }
+  /* polish5: name who lost the point and why ("POINT::BOT MISSED"), not the bare reason next to the winner's name */
+  const WHY = { missed: 'MISSED', out: 'HIT OUT', fault: 'FAULT', 'two bounces': 'LET IT BOUNCE TWICE' };
+  function pointFx(winner, reason) { sfx('net', 0.4); const loser = String(nameOf(M.players[1 - winner]) || '').toUpperCase(); const w = WHY[reason] || String(reason || '').toUpperCase();
+    banner(nameOf(M.players[winner]), chip('POINT', (loser ? loser + ' ' : '') + w, 'role'), 1300); }
   function leave() {
     if (M && isPlayer()) {
       if (M.mode === '1v1' && M.phase !== 'over') { const n = { ...snap(), phase: 'over', winner: 1 - M.players.indexOf(me()), reason: 'forfeit', rev: M.rev + 1 }; send({ k: 'state', M: n }); }
@@ -229,8 +236,7 @@ export function createPingPong(ctx, mp, hub) {
     try { if (st.seat) player.setSeat(null); } catch {}
     if (!nearTable()) { ui.veil(true); setTimeout(() => ui.veil(false), 320); }
     if (ctx.interact) ctx.interact.modal = { pong: true, label: () => '', use: () => { leave(); return true; } };
-    document.body.classList.add('pg-venue'); local.stand = '';
-    ui.toast('Click to take the mouse · move = paddle · swing to hit · click serves · E leaves', 3000);
+    document.body.classList.add('pg-venue'); local.stand = ''; /* polish5: no entry toast — the key chips under the table already say this */
   }
   function exitTable() {
     if (!local.at) return; local.at = false; local.side = -1;
@@ -242,7 +248,7 @@ export function createPingPong(ctx, mp, hub) {
   function hide() { for (const n of [SCORE, KEYS]) ui.show(n, false); }
 
   // ---------------------------------------------------------------- per frame
-  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), tgtP = new THREE.Vector3(), tgtQ = new THREE.Quaternion();
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _w = new THREE.Vector3(), _m = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), tgtP = new THREE.Vector3(), tgtQ = new THREE.Quaternion();
   ctx.onUpdate((dt) => {
     if (!M) return;                                     // idle: nothing
     const now = performance.now(); const sdt = Math.min(dt, 0.05) * opts.speed;
@@ -280,7 +286,16 @@ export function createPingPong(ctx, mp, hub) {
     // share my paddle (15 Hz)
     if (local.at && local.side >= 0 && now - local.lastPad > 66) { const P = pad[local.side]; const sig = P.ty.toFixed(3) + P.tz.toFixed(3); if (sig !== local.padSig) { local.padSig = sig; local.lastPad = now; send({ k: 'pad', mid: M.mid, side: local.side, y: P.ty, z: P.tz }); } }
     // avatars hold their paddles (arm points at the blade)
-    for (const side of [0, 1]) { const id = M.players[side]; if (!id || id === 'bot') continue; const cr = id === me() ? player.creature : peers().get(id)?.creature; if (cr) { _a.copy(paddles[side].position); _a.y -= 0.06; aimArm(cr, 'R', _a); } }
+    for (const side of [0, 1]) { const id = M.players[side]; if (!id) continue;
+      if (id === 'bot') { const cr = local.botCr; if (!cr) continue; const s = sgn(side);
+        /* stands behind its paddle like a player does (0.5 m behind the hitting plane, body offset so the right hand meets the blade) */
+        _b.set(planeX(side) - s * 0.5, -0.1, Math.max(TZ - 1.2, Math.min(TZ + 1.2, pad[side].z - s * 0.32)));
+        if (!local.botInit) { local.botP.copy(_b); local.botInit = true; }
+        const k = 1 - Math.exp(-dt * 8), ox = local.botP.x, oz = local.botP.z; local.botP.lerp(_b, k);
+        const iv = 1 / Math.max(1e-3, dt); _w.set((local.botP.x - ox) * iv, 0, (local.botP.z - oz) * iv);
+        cr.root.visible = true; cr.update(dt, { pos: local.botP, vel: _w, yaw: s > 0 ? -Math.PI / 2 : Math.PI / 2, grounded: true, swimming: false, pose: 'stand', emote: 0 });
+        _a.copy(paddles[side].position); _a.y -= 0.06; aimArm(cr, 'R', _a); continue; }
+      const cr = id === me() ? player.creature : peers().get(id)?.creature; if (cr) { _a.copy(paddles[side].position); _a.y -= 0.06; aimArm(cr, 'R', _a); } }
     if (local.at && local.side >= 0) {
       const s = sgn(local.side); const P = pad[local.side];
       // stand behind the paddle

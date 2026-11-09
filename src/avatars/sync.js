@@ -6,7 +6,7 @@
 // re-hashes the bytes and rejects anything that doesn't match the id. Until a model arrives (or if it fails,
 // or the "show custom avatars" setting is off) the peer is shown as the default mannequin.
 import { store, parseAvatar, createCustomAvatar, openAvatarPanel, LIMITS } from './index.js';
-import { LIBRARY, libraryEntry, loadLibraryAsset } from './library.js';
+import { LIBRARY, libraryEntry, loadLibraryAsset, defaultDesc } from './library.js';
 import { createAvatar } from '../avatar.js';
 import { identity, setHue } from '../net/identity.js';
 
@@ -43,7 +43,9 @@ export function startAvatarSync(ctx, mp) {
   }
 
   // ---------------------------------------------------------------- local player
-  let mine = cleanDesc(store.mine()) || { k: 'm', h: identity().hue };
+  /* no saved choice -> a realistic library character keyed on the persistent identity (peers get it via wire()) */
+  const myDefault = () => { const me = identity(); return defaultDesc(me.name + ':' + me.hue); };
+  let mine = cleanDesc(store.mine()) || myDefault();
   let localKey = 'm';
   async function applyLocal(asset) {
     const me = identity(); const d = mine; const k = keyOf(d); localKey = k;
@@ -139,7 +141,9 @@ export function startAvatarSync(ctx, mp) {
     for (const [id, r] of mp.peers) {
       if (loading.has(id) || !r.creature) continue;
       // library characters are vetted site files, so they show even with "show custom avatars" off
-      const d = descOf.get(id); const want = (allow && d?.k === 'c') || d?.k === 'b' ? d : null;
+      /* a custom model hidden by the setting falls back to that peer's default library character, not the mannequin;
+         no descriptor yet = mannequin placeholder; an explicit {k:'m'} keeps the mannequin */
+      const d = descOf.get(id); const want = (allow && d?.k === 'c') || d?.k === 'b' ? d : d?.k === 'c' ? defaultDesc(id) : null;
       const k = keyOf(want); if ((r._avKey || 'm') === k) continue;
       if (want) { r._custom = true; applyRemote(id, r, want); } else toMannequin(id, r);
     }

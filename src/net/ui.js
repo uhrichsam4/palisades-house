@@ -1,4 +1,5 @@
-// In-game lobby HUD inside #mp: lobby name + code, players list, copy-invite, Leave; chat (T) and toasts.
+// In-game lobby HUD inside #mp: lobby name + code, players list, copy-invite, Avatar, Leave (a popover: hidden until the
+// People button in the top bar adds .open, src/net/hud.js); chat (T) and toasts.
 import { rollText } from './motion.js';
 // The name field lives in the main menu now (src/net/menu.js). All peer-supplied text goes in via textContent.
 export function createUI({ onChat, onLeave }) {
@@ -18,6 +19,7 @@ export function createUI({ onChat, onLeave }) {
       <div class="mp-players" id="mp-players"></div>
       <div class="mp-row">
         <button id="mp-copy" type="button">Copy invite link</button>
+        <button id="mp-avatar" type="button" class="ghost">Avatar…</button>
         <button id="mp-leave" type="button" class="ghost">Leave</button>
       </div>
       <div class="mp-status" id="mp-status"></div>
@@ -37,7 +39,8 @@ export function createUI({ onChat, onLeave }) {
     }
     const b = $('mp-copy'); b.textContent = ok ? 'Link copied!' : 'Copy failed — use the URL bar'; setTimeout(() => (b.textContent = 'Copy invite link'), 1800);
   });
-  $('mp-leave').addEventListener('click', (e) => { e.stopPropagation(); onLeave?.(); });
+  $('mp-leave').addEventListener('click', (e) => { e.stopPropagation(); $('mp-card').classList.remove('open'); onLeave?.(); });
+  $('mp-avatar').addEventListener('click', (e) => { e.stopPropagation(); $('mp-card').classList.remove('open'); window.__menu?.hooks?.openAvatarPanel?.(); });
   for (const el of [$('mp-card')]) el.addEventListener('pointerdown', (e) => e.stopPropagation());
   function inviteUrl() { const u = new URL(location.origin + location.pathname); if (roomInfo) u.searchParams.set('room', roomInfo.code); return u.toString(); }
   const chatBox = $('mp-chat');

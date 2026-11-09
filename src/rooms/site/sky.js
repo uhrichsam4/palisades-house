@@ -6,11 +6,12 @@ import { fbm, ss, CENTER } from './terrain.js';
 
 // linear-light colours (the composer tone-maps afterwards)
 export const HAZE = new THREE.Color(0.66, 0.74, 0.82);
-const ZENITH = new THREE.Color(0.15, 0.30, 0.58);
+const ZENITH = new THREE.Color(0.2, 0.34, 0.58);   /* a touch hazier than deep blue (p38 / p41 skies) */
 
 // Distance haze: mixes the lit colour towards the horizon sky with view distance.
 export function addHaze(mat, L = 4200, max = 0.8) {
   const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : () => '';
+  if (prev === THREE.Material.prototype.onBeforeCompile && mat.customProgramCacheKey === THREE.Material.prototype.customProgramCacheKey) mat.userData.mergeSafe = true; /* haze reads vViewPosition only: merging (kit mergeStatic) keeps the look */
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev.call(mat, sh, r);
     sh.uniforms.hazeCol = { value: HAZE };
@@ -33,7 +34,9 @@ float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h1(i), h1(i + vec2(1, 0)), f.x), mix(h1(i + vec2(0, 1)), h1(i + vec2(1, 1)), f.x), f.y); }
 void main() {
   vec3 d = normalize( vDir ); float e = max( d.y, 0.0 );
-  vec3 c = mix( hor, zen, pow( smoothstep( 0.0, 1.0, e ), 0.55 ) );
+  /* p38: a wide pale band low down, near-white at the horizon (sun-lit haze), blue only well up */
+  vec3 c = mix( hor, zen, pow( smoothstep( 0.0, 1.0, e ), 0.75 ) );
+  c = mix( c, vec3( 0.9, 0.9, 0.87 ), exp( -e * 6.0 ) * 0.45 );
   // faint high cirrus streaks (thin, stretched along one direction)
   vec2 q = d.xz / ( 0.25 + e ) * 3.0; q = vec2( q.x * 0.35 + q.y * 0.9, q.y * 0.35 - q.x * 0.9 );
   float ci = n2( q * vec2( 1.0, 9.0 ) ) * 0.6 + n2( q * vec2( 2.0, 18.0 ) ) * 0.4; ci = smoothstep( 0.62, 0.95, ci ) * n2( q * 0.4 ) * smoothstep( 0.03, 0.25, e );
@@ -49,12 +52,16 @@ void main() {
   return m;
 }
 
-// Layered far ridgelines (beyond the 3.2 km terrain mesh): flat hazy silhouettes, sage fading to blue-grey.
+// Layered far ridgelines (beyond the 3.2 km terrain mesh): flat sage silhouettes fading to blue-grey.
+// Their haze is applied in the shader with the SAME law and colour as the terrain's addHaze (distance, HAZE), so the
+// farther ridges are always at least as hazy as the far canyon wall in front of them (they used to be pre-hazed
+// darker than that wall: the wall read as a pale flat 'lake' band under them), and walk mode's live HAZE colour
+// (src/sky, day/sunset/night/weather) recolours both together. Vertex colours = unhazed rock/scrub colour.
 export function farRidges(root) {
   const layers = [
-    { R: 3350, base: 70, amp: 85, f: 1.9, seed: 3, col: [0.30, 0.36, 0.33], haze: 0.62 },
-    { R: 3600, base: 120, amp: 110, f: 1.3, seed: 7, col: [0.33, 0.39, 0.42], haze: 0.72 },
-    { R: 3850, base: 175, amp: 140, f: 0.9, seed: 11, col: [0.40, 0.46, 0.52], haze: 0.8 },
+    { R: 3350, base: 70, amp: 85, f: 1.9, seed: 3, col: [0.11, 0.15, 0.11] },
+    { R: 3600, base: 120, amp: 110, f: 1.3, seed: 7, col: [0.13, 0.17, 0.16] },
+    { R: 3850, base: 175, amp: 140, f: 0.9, seed: 11, col: [0.16, 0.21, 0.23] },
   ];
   const pos = [], col = [], idx = []; const c = new THREE.Color();
   for (const Ly of layers) {
@@ -64,9 +71,9 @@ export function farRidges(root) {
       // +z (canyon side) gets the ridges; the -z side already has the mountain
       const side = ss(-0.3, 0.4, Math.sin(a));
       const h = (Ly.base + Ly.amp * (0.55 + 0.6 * fbm(a * Ly.f * 6, Ly.seed, 4, Ly.seed))) * (0.35 + 0.65 * side);
-      c.setRGB(...Ly.col).lerp(HAZE, Ly.haze);
+      c.setRGB(...Ly.col);
       pos.push(x, -260, z, x, h, z);
-      const top = c.clone().multiplyScalar(1.0), bot = c.clone().lerp(HAZE, 0.25);
+      const top = c.clone(), bot = c.clone().lerp(HAZE, 0.3);   /* valley mist at the foot */
       col.push(bot.r, bot.g, bot.b, top.r, top.g, top.b);
       if (i < N) { const k = b0 + i * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); }
     }
@@ -74,7 +81,17 @@ export function farRidges(root) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx);
-  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: false }));
+  /* fog: true — walk mode's FogExp2 (src/sky) also fogs the terrain in front of them; photo views have no scene fog */
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true });
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.hazeCol = { value: HAZE };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vHd;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vHd = length( mvPosition.xyz );');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 hazeCol; varying float vHd;')
+      .replace('#include <opaque_fragment>', '#include <opaque_fragment>\n  gl_FragColor.rgb = mix( gl_FragColor.rgb, hazeCol, min( 0.8, 1.0 - exp( -vHd / 4200.0 ) ) );');
+  };
+  mat.customProgramCacheKey = () => 'site-far-ridges-haze';
+  const m = new THREE.Mesh(g, mat);
   m.name = 'site-far-ridges'; m.frustumCulled = false; m.userData.keep = true; root.add(m);
   return m;
 }

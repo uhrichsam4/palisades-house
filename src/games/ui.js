@@ -23,6 +23,9 @@ const CSS = `
   box-shadow: 0 2px 6px -2px rgba(0,0,0,.2); white-space: nowrap; }
 .pg-chip.alt { background: var(--chip); box-shadow: none; }
 .pg-chip.role .v { color: var(--acc); }
+/* polish5: the games panel covers the lobby card (its Leave button) and the bottom-left key hints at 1280x800: fade them while it is open */
+#mp-card, #help.keys { transition: opacity .25s var(--es, ease-out); }
+body:has(#pg-panel.on) #mp-card, body:has(#pg-panel.on) #help.keys { opacity: 0 !important; pointer-events: none !important; }
 /* stage rise / sink */
 .pg-stage { opacity: 0; transform: translateY(6%) scale(.96); pointer-events: none; visibility: hidden;
   transition: opacity .3s var(--es), transform .5s var(--eo), visibility 0s linear .5s; }
@@ -64,13 +67,19 @@ const CSS = `
 #pg-count .roll-c { line-height: 1; }
 #pg-count .cap { display: block; margin-top: 10px; font: 600 11px/1 var(--mono); letter-spacing: -0.4px; color: var(--tx2); text-transform: uppercase; text-shadow: none; }
 /* HUD chips (below the top bar) */
-#pg-hud { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+#pg-hud { position: fixed; left: 50%; top: 22px; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
 #pg-hud.pg-stage { transform: translate(-50%, -6px); } #pg-hud.pg-stage.on { transform: translate(-50%, 0); }
 .pg-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .pg-chips .pg-chip { animation: pg-badge .4s var(--eo) both; }
 @keyframes pg-badge { from { opacity: 0; transform: translate(-8px, 12px) } to { opacity: 1; transform: none } }
 .pg-board { display: flex; flex-direction: column; gap: 2px; min-width: 210px; background: rgba(30,30,30,.82); border: var(--hair); border-radius: 6px; padding: 6px 8px; }
-.pg-board:empty { display: none; }
+.pg-board:empty, .pg-board:not(.show) { display: none; }
+/* calm HUD: one strip (title · time · game keys); scoreboard only on Tab / last 10 s (src/games/index.js render) */
+.pg-strip { gap: 6px; padding: 5px 9px; } .pg-chips .pg-strip { animation: none; } /* text updates every second: don't replay the pop-in */
+.pg-strip .pg-time { color: var(--tx); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.pg-strip .pg-sep { margin: 0 2px; }
+#pg-hud .pg-board.show { animation: pg-badge .35s var(--eo) both; }
+@media (max-width: 600px) { #pg-hud { top: 60px; max-width: calc(100vw - 20px); } .pg-strip { white-space: normal; flex-wrap: wrap; justify-content: center; } }
 .pg-brow { display: flex; gap: 8px; align-items: baseline; }
 .pg-brow .r { width: 14px; color: var(--tx3); } .pg-brow .n { flex: 1; color: var(--tx2); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pg-brow.me .n { color: var(--acc); } .pg-brow .s { color: var(--tx); text-align: right; }
@@ -120,7 +129,8 @@ const CSS = `
 .pg-lb-title { font-size: 26px; font-weight: 500; letter-spacing: -0.055em; line-height: 1; }
 .pg-lb-title .roll-c { line-height: 1; }
 .pg-lb-chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.pg-lb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.pg-lb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; } /* polish5: wider cards, HOST moved under the name: full names fit */
+.pg-lc .pg-host { color: var(--acc); }
 .pg-lc { background: var(--surf); border: var(--hair); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 9px; box-shadow: 0 2px 6px -2px rgba(0,0,0,.2);
   animation: pg-lc-in .5s var(--eo) both; transition: border-color .25s var(--es); }
 @keyframes pg-lc-in { from { opacity: 0; transform: translateY(6%) scale(.96) } to { opacity: 1; transform: none } }

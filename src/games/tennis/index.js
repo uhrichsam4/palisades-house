@@ -251,7 +251,9 @@ export function createTennis(ctx, mp, hub) {
       // aim ring on the far court
       G.aim.visible = M.phase !== 'over'; G.aim.position.set(CX + local.aimX * SW * 0.8, Y0 + 0.004, CZ + s * (3 + local.aimD * 7.6));
       if (!st.thirdPerson) st.thirdPerson = true;
-      tgtP.set(Q.x * 0.7 + CX * 0.3, Y0 + 4.4, Math.max(C2.ez0 + 1.8, Math.min(C2.ez1 - 1.8, Q.z - s * 3.6))); /* stay well inside the fence + windscreen */ _b.set(CX, Y0 + 0.4, CZ + s * 5); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
+      /* polish5: 0.8 m further back + 1 m higher, aimed 5.5 m in front of your player (was the far court) so your whole body and
+         the near baseline stay in frame above the key chips; still clamped 1.2 m inside the fence + windscreen */
+      tgtP.set(Q.x * 0.7 + CX * 0.3, Y0 + 5.4, Math.max(C2.ez0 + 1.2, Math.min(C2.ez1 - 1.2, Q.z - s * 4.4))); _b.set(Q.x * 0.4 + CX * 0.6, Y0 + 0.2, Q.z + s * 5.5); _m.lookAt(tgtP, _b, _up); tgtQ.setFromRotationMatrix(_m);
       if (!local.camInit) { local.camP.copy(tgtP); local.camQ.copy(tgtQ); local.camInit = true; }
       const k = 1 - Math.exp(-dt * 6); local.camP.lerp(tgtP, k); local.camQ.slerp(tgtQ, k); camera.position.copy(local.camP); camera.quaternion.copy(local.camQ);
     } else if (G) G.aim.visible = false;
