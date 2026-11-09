@@ -275,7 +275,7 @@ export function createSky(ctx) {
     const vk = wind * 60; // km/h-ish
     feelsC = tempC <= 10 && vk > 4.8 ? 13.12 + 0.6215 * tempC - 11.37 * Math.pow(vk, 0.16) + 0.3965 * tempC * Math.pow(vk, 0.16) : tempC - wind * 3;
     // snow cover builds while it snows (faster in a blizzard), melts above freezing
-    snowCover = snap ? (W.snow > 0.05 ? Math.min(1, W.snow * 1.4) : snowCover) : Math.min(1, Math.max(0, snowCover + (W.snow > 0.15 ? dt * W.snow / 70 : tempC > 0 ? -dt / 200 : 0)));
+    snowCover = snap ? (W.snow > 0.05 ? Math.min(1, W.snow * 1.4) : tempC > 1 ? 0 : snowCover) : Math.min(1, Math.max(0, snowCover + (W.snow > 0.15 ? dt * W.snow / 70 : tempC > 0 ? -dt * (W.rain > 0.05 ? 1 / 35 : 1 / 200) : 0))); // rain above freezing washes snow away in ~35 s; an instant switch to warm weather clears it
     const flash = W.bolt > 0.05 ? lightning(now, W) : 0;
     // wind: weather strength + gusts, direction from the clock
     const gust = 0.8 + 0.2 * Math.sin(t * 0.9) * Math.sin(t * 0.37 + 2);

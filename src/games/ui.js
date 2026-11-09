@@ -31,7 +31,7 @@ const CSS = `
 /* hub panel */
 #pg-panel { position: fixed; left: 50%; top: 50%; width: min(760px, calc(100vw - 32px)); margin-left: calc(min(760px, calc(100vw - 32px)) / -2);
   translate: 0 -50%; z-index: 60; background: var(--bg); border: var(--hair); border-radius: 6px; padding: 18px;
-  box-shadow: 0 2px 6px -2px rgba(0,0,0,.2), 0 30px 80px rgba(0,0,0,.45); box-sizing: border-box; overflow: hidden; }
+  box-shadow: 0 2px 6px -2px rgba(0,0,0,.2), 0 30px 80px rgba(0,0,0,.45); box-sizing: border-box; max-height: calc(100vh - 32px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; } /* 10+ games: scroll instead of clipping */
 #pg-panel::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .06; background-image: var(--pg-grain); }
 .pg-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
 .pg-h1 { font-size: 34px; font-weight: 500; letter-spacing: -0.055em; line-height: 1; }
