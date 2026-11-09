@@ -90,7 +90,7 @@ try {
     const A = await open('A', 'menu=0');
     const inv = await ev(A, () => window.__smash.stats()); P({ phase: 'loaded', ...inv }); checks.registered = inv.items > 300;
     const ids = await ev(A, () => { const T = window.__T; const f = (re, g) => T.find(re, g).map(i => i.id);
-      return { stones: T.find(/garden stone/).sort((a, b) => b.mass - a.mass).map(i => [i.id, i.mass]), glassTable: f(/glass table/)[0], decanter: T.find(/./, i => i.material === 'glass' && i.mode === 'dynamic' && i.mass >= 0.4).sort((a, b) => T.freeAngle && 0)[0]?.id,
+      return { stones: T.find(/garden stone/).sort((a, b) => b.mass - a.mass).map(i => [i.id, i.mass]), glassTable: f(/glass table/)[0], decanter: (T.find(/./, i => /^f:furnish:.*decanter/.test(i.id))[0] || T.find(/decanter/)[0])?.id, /* the furnish decanter by id ('decanter + glasses' on the dining sideboard; a framed photo also reads as dynamic glass) */
         island: f(/kitchen island/, i => i.piece === 'kitchen')[0], planter: f(/concrete planter/)[0], chairs: f(/dining chair/).slice(0, 8), plate: f(/place setting|table settings|plate/)[0], vase: f(/^decor$|vase/, i => i.material === 'ceramic' && i.mode === 'dynamic')[0] }; });
     P({ phase: 'ids', ...ids });
     const stone = ids.stones.find(s => s[1] > 3 && s[1] < 6)?.[0] || ids.stones[0][0]; const big = ids.stones[0][0];

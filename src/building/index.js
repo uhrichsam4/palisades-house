@@ -160,10 +160,13 @@ export function startBuilding(ctx, api) {
       if (init > 0) showModel(op, true);
       Object.defineProperty(rec, 'open', { get: () => +op.open.toFixed(3), enumerable: true });
       const label = kind === 'garage' ? 'GARAGE' : kind === 'slider' ? 'SLIDING DOOR' : 'WINDOW';
-      // wide sliding doors (the 7 m dining wall): look anywhere along them, from either end
-      const big = kind === 'slider';
-      interact?.add({ id: 'bldg:' + o.id, pos: mid, radius: big ? Math.min(3.2, w * 0.46) : Math.min(0.75, Math.max(0.35, w * 0.4)), range: kind === 'garage' ? 3.6 : big ? w / 2 + 2.2 : 2.6,
-        label: () => (op.target > 0.5 ? 'CLOSE ' : 'OPEN ') + label, use: () => setTarget(op, op.target > 0.5 ? 0 : 1) });
+      // wide sliding doors (the 7 m dining wall): three small targets along the slider (left / mid / right), all toggling
+      // the same door, instead of one 3 m look radius that stole the prompt from the dining table in front of it
+      const ixLabel = () => (op.target > 0.5 ? 'CLOSE ' : 'OPEN ') + label, ixUse = () => setTarget(op, op.target > 0.5 ? 0 : 1);
+      if (kind === 'slider') {
+        const zMid = meta.interior ? meta.depth / 2 : 0.15;
+        for (const [k, f] of [['l', 1 / 6], ['m', 0.5], ['r', 5 / 6]]) interact?.add({ id: 'bldg:' + o.id + ':' + k, pos: worldOf(meta, w * f, h / 2, zMid), radius: Math.min(0.9, Math.max(0.4, w / 6)), range: 2.8, label: ixLabel, use: ixUse });
+      } else interact?.add({ id: 'bldg:' + o.id, pos: mid, radius: Math.min(0.75, Math.max(0.35, w * 0.4)), range: kind === 'garage' ? 3.6 : 2.6, label: ixLabel, use: ixUse });
       if (kind === 'garage') { // metal door: a car at speed can tear it out
         const eid = 'garage:' + o.id; op.eid = eid;
         damage.add({ id: eid, colliders: meta.colliders.slice(), material: 'metal', area: w * h * 0.25,
@@ -311,6 +314,19 @@ export function startBuilding(ctx, api) {
     if (!p.collider) { p.collider = p.makeCollider(); if (p.collider) damage.attach(p.id, p.collider); }
     const i = holes.findIndex(h => h.id === p.id); if (i >= 0) holes.splice(i, 1); poke();
   }
+  // full repair (window.__building.repair(), auto-repair): drop pending breaks + toppling chunks (no landing shatter),
+  // clear the rubble (its fragments would re-break the fresh walls), then restore every panel / pane / garage door,
+  // including ones whose damage entry already reads full hp (collapse cascades set state outside damage.hit)
+  function repairEverything() {
+    queue.length = 0; checkAt = 0;
+    for (const f of falling.splice(0)) { root.remove(f.mesh); f.mesh.geometry.dispose(); }
+    try { fx()?.clearDebris?.(); } catch (err) { console.warn('[building] clearDebris', err); }
+    damage.repairAll();
+    for (const p of panels) if (p.broken) { if (damage.get(p.id)) damage.repair(p.id); else repairPanel(p); }
+    for (const gs of glassOf.values()) if (gs.broken) damage.repair(gs.eid);
+    for (const op of ops.values()) if (op.broken && op.eid) damage.repair(op.eid);
+    holes.length = 0; lastBreak = 0; poke();
+  }
   for (const p of panels) {
     const area = p.L * (p.y1 - p.y0); const m = damage.MATERIALS[p.kind];
     damage.add({ id: p.id, colliders: p.collider ? [p.collider] : [], material: p.kind, area, hp: p.kind === 'drywall' ? m.hp * Math.min(area, 1.5) : undefined,
@@ -422,7 +438,7 @@ export function startBuilding(ctx, api) {
     for (const meta of shell.openings) { const d = meta.door; if (!d) continue;
       const gs = glassOf.get(meta.o.id); if (gs && !gs.broken && d.collider && d.collider !== gs.attached) { gs.attached = d.collider; damage.attach(gs.eid, d.collider); }
       if (d.noAuto && pp && Math.hypot(d.world.x - pp.x, d.world.z - pp.z) > 2.5) d.noAuto = false; }
-    if (lastBreak && now() - lastBreak > AUTO_REPAIR_MS && damage.isHost()) { lastBreak = 0; damage.repairAll(); }
+    if (lastBreak && now() - lastBreak > AUTO_REPAIR_MS && damage.isHost()) { lastBreak = 0; repairEverything(); }
   };
   update.__src = 'building'; ctx.onUpdate?.(update);
 
@@ -431,7 +447,7 @@ export function startBuilding(ctx, api) {
     isOpen: (id) => { const r = openings.get(id); if (!r) return false; return r.type === 'doorway' || r.broken || r.open > 0.05; },
     setOpen: (id, t) => { const op = ops.get(id); if (op) { setTarget(op, t); return true; } const d = shell.openings.find(m => m.o.id === id)?.door; if (d) { d.target = t > 0.5 ? 1 : 0; if (d.target && d.collider) { phys.remove(d.collider); d.collider = null; } if (!d.target) { d.pendingClose = true; d.noAuto = true; } return true; } return false; },
     toggle: (id) => { const r = openings.get(id); return r ? B.setOpen(id, r.open > 0.5 ? 0 : 1) : false; },
-    repair: () => { damage.repairAll(); return true; },
+    repair: () => { repairEverything(); return true; },
     breakPanel: (id, info) => { const p = byId.get(id); return p ? damage.hit(id, 1e9, { by: 'local', point: p.center, ...info }) : null; },
     dent: (carId, lp, ld, a) => { if (applyDent(carId, lp, ld, a)) ch.send({ k: 'dent', car: carId, p: lp, d: ld, a }); },
     supported, panelMatrix,

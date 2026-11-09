@@ -154,6 +154,21 @@ export function createIce(ctx, { send, sound, onFall }) {
     return list;
   }
 
+  // polish5: the hole opened under the player (they had walked off the crack's centre, or the controller kept them up on the
+  // water surface): break their own cell too, drop them in at swimming depth (above the pool floor) with a splash
+  const dunkRay = { r: null };
+  function dunk(s) {
+    const px = st.pos.x, pz = st.pos.z; breakAt(s, px, pz, false);
+    const j = playerCell(s); if (j >= 0 && !s.cells[j].hole) { s.cells[j].hole = performance.now() / 1000; placeCell(s, j); }
+    const wy = s.w.surfaceY; let floorY = wy - 3;
+    try { const R = phys.RAPIER; const r = dunkRay.r || (dunkRay.r = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })); r.origin = { x: px, y: wy - 0.05, z: pz };
+      const h = phys.world.castRay(r, 4, true, R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_SENSORS, undefined, player.collider); if (h) floorY = wy - 0.05 - (h.timeOfImpact ?? h.toi); } catch {}
+    const y = Math.max(floorY + 0.05, wy - 1.05);
+    try { player.teleport(px, y, pz); } catch {}
+    st.inWater = true; if (wy - y > 0.95) st.swimming = true; st.vy = -0.8;
+    spawnShards(px, wy, pz, 16); try { s.w.splash(px, wy, pz, 2.4); s.w.disturb(px, pz, 1.1, 1.8); } catch {} sound?.('break', { x: px, y: s.top, z: pz });
+  }
+
   // ---------------------------------------------------------------- per frame / slow step
   let onIce = null; const heavyBall = { t: 0 };
   function step(tempC, dt) { // slow (3 Hz)
@@ -176,7 +191,7 @@ export function createIce(ctx, { send, sound, onFall }) {
       const pc = playerCell(s);
       if (pc >= 0 && !s.cells[pc].hole && !st.swimming && Math.abs(st.pos.y - s.top) < 0.25) { onIce = s; if (s.h < THICK && !s.crackS) startCrack(s, st.pos.x, st.pos.z); }
       if (s.crackS) { const c = s.crackS; c.t += dt; s.crack.scale.setScalar(0.4 + 2.2 * Math.min(1, c.t / CRACK_S)); if (Math.random() < dt * 6) sound?.('creak', { x: c.x, y: s.top, z: c.z });
-        if (c.t >= CRACK_S) { s.crackS = null; s.crack.visible = false; if (s.h < THICK) { const brokeUnder = pc >= 0 && Math.abs(st.pos.y - s.top) < 0.4; breakAt(s, c.x, c.z, false); if (brokeUnder) onFall?.(s); } } }
+        if (c.t >= CRACK_S) { s.crackS = null; s.crack.visible = false; if (s.h < THICK) { const brokeUnder = pc >= 0 && Math.abs(st.pos.y - s.top) < 0.4; breakAt(s, c.x, c.z, false); if (brokeUnder) { dunk(s); onFall?.(s); } } } }
     }
     // heavy dynamic props on thin ice (2 Hz)
     heavyBall.t += dt; if (heavyBall.t > 0.5) { heavyBall.t = 0; for (const s of sheets) { if (!s.shown || s.h >= THICK || s.crackS) continue;

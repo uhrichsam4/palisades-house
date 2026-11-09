@@ -20,7 +20,7 @@ import * as THREE from 'three';
 
 export const MATERIALS = {
   // name        min (N·s)  hp per m²   notes
-  glass:     { min: 4,    hp: 6,     label: 'glass' },        // windows, glass doors, mirrors, shower glass
+  glass:     { min: 3,    hp: 4,     label: 'glass' },        // windows, glass doors, mirrors, shower glass
   ceramic:   { min: 2,    hp: 3,     label: 'ceramic' },      // plates, mugs, vases, toilets/sinks use 'porcelain'
   porcelain: { min: 30,   hp: 120,   label: 'porcelain' },
   plastic:   { min: 15,   hp: 60,    label: 'plastic' },
@@ -112,7 +112,12 @@ export function createDamage(ctx) {
     const va = velOf(ev.a), vb = velOf(ev.b);
     const dx = (va?.x || 0) - (vb?.x || 0), dy = (va?.y || 0) - (vb?.y || 0), dz = (va?.z || 0) - (vb?.z || 0);
     if (dx * dx + dy * dy + dz * dz < MIN_SPEED * MIN_SPEED) return;
-    if (queue.length < 256) queue.push({ ea, eb, impulse: ev.force * world.timestep, dir: ev.dir, ownerA: ev.ownerA, ownerB: ev.ownerB });
+    // impulse: contact force x step underestimates fast hits once CCD stops a body in one step, so also take the
+    // momentum the closing speed carries (reduced mass for two moving bodies, the moving body's mass vs a fixed one)
+    const mOf = (h) => { const c = world.getCollider(h); const bd = c && c.parent(); return bd && bd.isDynamic() ? bd.mass() : Infinity; };
+    const ma = mOf(ev.a), mb = mOf(ev.b); const mred = isFinite(ma) && isFinite(mb) ? ma * mb / (ma + mb) : isFinite(ma) ? ma : isFinite(mb) ? mb : 0;
+    const vImp = mred * Math.sqrt(dx * dx + dy * dy + dz * dz) * 0.9;
+    if (queue.length < 256) queue.push({ ea, eb, impulse: Math.max(ev.force * world.timestep, vImp), dir: ev.dir, ownerA: ev.ownerA, ownerB: ev.ownerB });
   });
   const flush = () => {
     if (!queue.length) return; const q = queue.splice(0);

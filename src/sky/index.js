@@ -53,7 +53,10 @@ export function createSky(ctx) {
   const net = { mode: forced || 'auto', seq: 0 };
   const wall = () => Date.now() + clk.skew;
   const todNow = () => (clk.frozen ? clk.frozenTod : (((todAt(wall()) + clk.offset) % 1) + 1) % 1);
-  const targetName = () => (net.mode === 'auto' ? autoWeather(wall()) : net.mode);
+  /* polish5: a local weather override (disaster storm / blizzard rounds force their look on every client, whatever the
+     lobby's weather sync says; force(null) hands it back) — eases in ~3x faster than a normal weather change */
+  let localW = null;
+  const targetName = () => (localW || (net.mode === 'auto' ? autoWeather(wall()) : net.mode));
   const W = { ...PARAMS[targetName()] }; let wet = W.rain > 0.05 ? 1 : 0, snowCover = W.snow > 0.05 ? 1 : 0;
   let tempC = 18, feelsC = 18;
   const windDir = new THREE.Vector2(1, 0); let wind = W.wind;
@@ -89,7 +92,9 @@ export function createSky(ctx) {
     // the outdoors get their night readability from the outdoor-only ambient (NIGHTAMB, patchOutdoor) instead
     // polish4: moon stays 0.1 (2.4% of the 4.2 sun), slightly cooler blue; the 'sun-like' night window patches were the
     // kitchen's painted sun decals, which now follow the real sun (applyFakeSun)
-    else { S.moonLight = true; S.lightI = 0.1 * smooth(-3, -9, E) * smooth(-2, 6, moonEl) * Math.sqrt(w.light); S.lightCol.copy(MOONCOL); }
+    /* polish5: still threw bright window patches onto night floors under cloud (shots/smash/11, 02:20 cloudy). No moonlight
+       at all once the deck closes (cloudy .5 and up: cloudy/overcast/rain/storm/snow), a clear night at most 0.06 (1.4% of sun) */
+    else { S.moonLight = true; S.lightI = Math.min(0.06, 0.03 * LIGHT.sunIntensity) * smooth(-3, -9, E) * smooth(-2, 6, moonEl) * (1 - smooth(0.2, 0.45, w.cover)) * Math.sqrt(w.light); S.lightCol.copy(MOONCOL); }
     // lightning (contain pass): the hemi light is unshadowed and reaches every interior, so its flash only applies while
     // the camera is outdoors; indoors the outdoor materials get it through OUTFLASH, rooms through their probe exposure
     // (dual.envFlash), and the directional flash only where the sun/moon shadow map lets it in (none when shadows are off)
@@ -131,7 +136,7 @@ export function createSky(ctx) {
     scene.environmentIntensity = S.envI;
     scene.fog.color.copy(S.fogC); scene.fog.density = S.fog * (capture ? 1 : fogIndoorK);
     WET.value = S.wet; SNOWC.value = S.snowC || 0; RAINU.value = S.rain || 0;
-    NIGHTAMB.value = capture ? 0 : (1 - S.dayK) * (1 - 0.6 * S.cover * S.dark); // polish: moonlit-sky fill on outdoor materials only (night readability)
+    NIGHTAMB.value = capture ? 0 : 1.5 * (1 - S.dayK) * (1 - 0.6 * S.cover * S.dark); // polish: moonlit-sky fill on outdoor materials only (night readability); polish5: x1.5 (back yard read pitch-black)
     /* polish4: the day probes were baked with full clear-sky sun (sun patches + their bounce): under cloud the
        direct-sun share of that light goes too, so the day blend drops with the weather's sun factor (storm ~0.5x) */
     const dk = S.dayK * (1 - 0.35 * S.cover * S.dark) * (0.68 + 0.32 * Math.min(1, (S.sunF ?? 1) / Math.max(0.05, S.dayK))); dual.envFlash.value = capture ? 0 : S.flash * 0.7; OUTFLASH.value = capture ? 0 : S.flash * 3.5 * indoorK;
@@ -350,7 +355,7 @@ export function createSky(ctx) {
     const E = Math.asin(sunD.y) * D, ME = Math.asin(moonD.y) * D;
     // weather params ease toward the target
     const name = targetName(); if (name !== lastWeather) { lastWeather = name; }
-    const T = PARAMS[name]; const k = snap ? 1 : 1 - Math.exp(-dt / 6);
+    const T = PARAMS[name]; const k = snap ? 1 : 1 - Math.exp(-dt / (localW ? 2 : 6));
     for (const key of KEYS_W) W[key] += (T[key] - W[key]) * k;
     wet = snap ? (W.rain > 0.05 ? 1 : wet) : Math.min(1, Math.max(0, wet + (W.rain > 0.1 ? dt / 45 : -dt / 160)));
     // temperature: time of day (warmest ~15:00) + weather; snow weathers pull toward their own absolute value
@@ -422,6 +427,7 @@ export function createSky(ctx) {
       return { tod: api.clock, weather: api.weather };
     },
     requestWeather,
+    force(name) { localW = name && PARAMS[name] ? name : null; return localW; }, get forced() { return localW; },
     setGlowCap(v) { const n = v > 0 ? v : Infinity; if (n !== glowCap) { glowCap = n; emisK = -1; } }, // polish: cap on exterior emissives (re-applied next frame)
   };
   SKY = { api, net, clk, dual, attachEnv, outdoorPatch, preMerge, setup, bakeProbes, captureWrap, requestWeather, step: (dt) => step(dt), afterPool: () => boostPool(live.lightsK),

@@ -44,6 +44,18 @@ export function buildOutdoor(L) {
   for (const [x, z] of [[8.75, 18.4], [15.0, 18.4], [2.75, 20.32], [7.95, 20.32]]) { const g = prop(DECK, 'outdoor speaker', 'electronics', [x, 2.55, z + 0.14], 0, { mass: 4 }); B.speakerWall(O, g); }
   // ---- side yard: garden hose reel by the living-room wall
   { const g = on('yard', 'hose reel', 'decor', -0.05, 10.0, PI / 2, { mass: 6 }); B.hoseReel(O, g); }
+  // ---- polish5: three warm garden / path lights along the side-yard stone beds (the back yard read pitch-black at night).
+  // Emissive caps + a soft additive ground glow, no real lights: src/sky drives exterior emissives (≈off at noon, full at night)
+  { const T = L.THREE; const c = document.createElement('canvas'); c.width = c.height = 64; const cg = c.getContext('2d'); cg.fillStyle = '#000'; cg.fillRect(0, 0, 64, 64);
+    const gr = cg.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, '#fff'); gr.addColorStop(0.25, '#9a9a9a'); gr.addColorStop(0.6, '#262626'); gr.addColorStop(1, '#000'); cg.fillStyle = gr; cg.fillRect(0, 0, 64, 64);
+    const capM = new T.MeshStandardMaterial({ color: 0x2a2620, emissive: 0xffb466, emissiveIntensity: 0.5, roughness: 0.6 }); capM.name = 'yard:garden-light';
+    const glowM = new T.MeshStandardMaterial({ color: 0x000000, emissive: 0xffa457, emissiveIntensity: 0.05, roughness: 1, transparent: true, depthWrite: false, blending: T.AdditiveBlending, alphaMap: new T.CanvasTexture(c) }); glowM.name = 'yard:garden-glow';
+    const disc = new T.CircleGeometry(1.4, 28); disc.rotateX(-PI / 2);
+    for (const [x, z] of [[-1.95, 6.7], [-1.8, 10.5], [-2.05, 13.3]]) { const g = on('yard', 'garden light', 'decor', x, z, 0, { mass: 3 });
+      put(g, G.cyl(0.03, 0.038, 0.42, 0x1e1d1b, 10), M.metal, [0, 0.21, 0]); put(g, G.cyl(0.055, 0.045, 0.07, 0xffffff, 12), capM, [0, 0.455, 0]); put(g, G.cyl(0.075, 0.075, 0.016, 0x1e1d1b, 12), M.metal, [0, 0.498, 0]);
+      /* the glow disc hangs off the prop's parent, not the prop: in the prop group its 2.8 m bounds became a prop-only smash box that ate pickups and throws */
+      const m = new T.Mesh(disc, glowM); m.name = 'garden-glow'; m.position.set(x, g.position.y + 0.025, z); m.renderOrder = 3; m.castShadow = false; m.receiveShadow = false; g.parent.add(m); }
+  }
   // ---- throwables (tagged kind 'throwable'): garden stones, a football on the pool lawn, a basketball by the court
   { const rr = L.rng(77);
     const rock = (x, z, r, hex) => { const geo = new L.THREE.IcosahedronGeometry(r, 1); const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const k = 0.75 + rr() * 0.4; p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.7, p.getZ(i) * k); } geo.computeVertexNormals(); L.tint(geo, hex);

@@ -58,7 +58,9 @@ body.menu-open #ix-prompt,body.paused #ix-prompt,body.ui-open #ix-prompt,body.ph
       const off = Math.sqrt(Math.max(0, _p.lengthSq() - along * along));
       const r = (t.radius ?? 0.35) + along * 0.06; // ~3.4° extra slack so far targets are not fiddly
       if (off > r) continue;
-      const score = off / r + near * 0.15;
+      /* several qualify (the dining table in front of the sliding doors): the one closest along the camera ray wins;
+         how centred it is only breaks near-ties (0.5 m along the ray ~ fully off-centre) */
+      const score = along + 0.5 * (off / r);
       if (score < bestScore) { bestScore = score; best = t; }
     }
     return best;

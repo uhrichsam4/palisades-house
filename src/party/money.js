@@ -65,11 +65,12 @@ export function createMoney(ctx) {
         float wave = sin(u * 2.6 + uTime * 13.0 + ph) * 0.010 + sin(w * 2.0 + uTime * 8.0 + ph * 1.7) * 0.006;
         float curl = (u * u) * (0.012 * sin(uTime * 5.0 + ph * 2.3));
         transformed.y += fl * (wave + curl) + (1.0 - fl) * (u * u * 0.0035 + w * w * 0.0015);
-        vFade = aBill.z; }`);
+        vFade = aBill.z; }`).replace('#include <project_vertex>', `#include <project_vertex>
+      vFade *= smoothstep(0.45, 1.1, -mvPosition.z); /* polish5: a note tumbling right past the lens filled a quarter of the frame (read as a giant upright bill): dither it out under ~1 m */`);
     sh.fragmentShader = 'varying float vFade;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
       if (fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453) > vFade) discard;`);
   };
-  mat.customProgramCacheKey = () => 'party-bills-v1';
+  mat.customProgramCacheKey = () => 'party-bills-v2';
   const mesh = new THREE.InstancedMesh(geo, mat, CAP); mesh.name = 'party:money'; mesh.frustumCulled = false;
   mesh.castShadow = false; mesh.receiveShadow = true; mesh.userData.keep = true; mesh.userData.noProbe = true;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0;

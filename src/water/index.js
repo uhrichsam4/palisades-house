@@ -458,6 +458,8 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
     },
     heightAt(x, z) { if (!inside(x, z)) return surfaceY; return surfaceY + ambientCPU(x, z, MOD.time) + simAt(x, z); },
     isInside: inside,
+    /* polish5: put every float back where it started (disaster rounds end, meteors/storms blew them onto the deck) */
+    resetFloaters() { for (const f of floaters) homeFloater(f); return floaters.length; },
     addFloater(rec, o = {}) {
       if (!rec || !rec.body) return;
       const col = rec.collider; const sh = col?.shape;
@@ -468,18 +470,26 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
       const vol = o.volume ?? (kind === 'ball' ? 4 / 3 * Math.PI * r ** 3 : 8 * he.x * he.y * he.z * (sh?.halfExtents ? 1 : 0.6));
       if (o.density && col?.setMass) { col.setMass(o.density * vol); }
       rec.obj?.traverse?.(c => { c.userData.waterCapture = true; c.layers.enable(LAYER); });
-      floaters.push({ rec, kind, r, he, vol, area: kind === 'ball' ? Math.PI * r * r : 4 * he.x * he.z, prev: 0, acc: 0 });
+      const t0 = rec.body.translation(), r0 = rec.body.rotation();
+      floaters.push({ rec, kind, r, he, vol, area: kind === 'ball' ? Math.PI * r * r : 4 * he.x * he.z, prev: 0, acc: 0, out: 0, home: { x: t0.x, y: t0.y, z: t0.z }, rot0: { x: r0.x, y: r0.y, z: r0.z, w: r0.w } });
       if (!physHooked && ctx.phys) { physHooked = true; ctx.phys.onStep(floatStep); }
     },
   };
 
   // ---- buoyancy (runs before each 60 Hz physics step)
   const floaters = []; let physHooked = false;
+  function homeFloater(f) {
+    const b = f.rec.body; if (!b || (b.isValid && !b.isValid())) return; f.out = 0; f.prev = 0;
+    try { b.setTranslation(f.home, true); b.setRotation(f.rot0, true); b.setLinvel({ x: 0, y: 0, z: 0 }, true); b.setAngvel({ x: 0, y: 0, z: 0 }, true); } catch {}
+  }
   function floatStep(dt) {
     for (let i = floaters.length - 1; i >= 0; i--) { const f = floaters[i]; if (f.rec.dead || (f.rec.body?.isValid && !f.rec.body.isValid())) floaters.splice(i, 1); }
     for (const f of floaters) {
       const b = f.rec.body; const p = b.translation();
-      if (!inside(p.x, p.z)) { f.prev = 0; continue; }
+      /* polish5: floats belong to the pool. Thrown/blown out (meteor, storm gusts) and not held (held props have gravity 0):
+         after 2.5 s on the deck, or at once if they fell through the world, they go back to their start spot */
+      if (!inside(p.x, p.z)) { f.prev = 0; const held = b.gravityScale?.() === 0; f.out = held ? 0 : f.out + dt; if (f.out > 2.5 || p.y < surfaceY - 6) homeFloater(f); continue; }
+      f.out = 0;
       const wl = api.heightAt(p.x, p.z);
       let hy = f.r;
       if (f.kind !== 'ball') { const q = b.rotation(); const m10 = 2 * (q.x * q.y + q.w * q.z), m11 = 1 - 2 * (q.x * q.x + q.z * q.z), m12 = 2 * (q.y * q.z - q.w * q.x); hy = Math.abs(m10) * f.he.x + Math.abs(m11) * f.he.y + Math.abs(m12) * f.he.z; }
@@ -500,7 +510,12 @@ normal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);`)
       const cH = (1.2 * m + 0.5 * RHO * 0.6 * f.area * hsp) * frac;
       const kH = 1 - 1 / (1 + cH * dt / m);
       b.applyImpulse({ x: -v.x * kH * m, y: F * dt + dvy * m, z: -v.z * kH * m }, true);
-      const w = b.angvel(); const ka = 1 / (1 + 2.5 * frac * dt); b.setAngvel({ x: w.x * ka, y: w.y * ka, z: w.z * ka }, true);
+      const w = b.angvel(); const ka = 1 / (1 + 2.5 * frac * dt);
+      /* polish5: keep rafts / rings / noodles flat on the water (they stood on end through the furniture): a righting spin
+         towards local +y up, plus extra roll/pitch damping while floating; balls roll freely */
+      if (f.kind !== 'ball') { const q = b.rotation(); const ux = 2 * (q.x * q.y - q.w * q.z), uz = 2 * (q.y * q.z + q.w * q.x); const kr = 9 * frac * dt, kd = 1 / (1 + 6 * frac * dt);
+        b.setAngvel({ x: w.x * ka * kd - uz * kr, y: w.y * ka, z: w.z * ka * kd + ux * kr }, true); }
+      else b.setAngvel({ x: w.x * ka, y: w.y * ka, z: w.z * ka }, true);
       // couple back into the water: wakes / bobbing rings / entry splash
       if (f.prev === 0 && v.y < -1.2) api.splash(p.x, wl, p.z, Math.min(1.5, -v.y * 0.12 * Math.cbrt(f.vol / 0.004)));
       f.acc += dt;

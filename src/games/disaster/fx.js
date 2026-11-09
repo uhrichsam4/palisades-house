@@ -5,7 +5,7 @@
 //   meteors: 8 pooled rocks (emissive cracks), craters: 16 pooled decals, lightning: one rebuilt tube
 import * as THREE from 'three';
 
-const FIRE_MAX = 700, SMOKE_MAX = 900;
+const FIRE_MAX = 1000, SMOKE_MAX = 900; /* polish5: 700 -> 1000 (whole-house fires split the pool across ~30 rooms) */
 
 function softTex() {
   const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
@@ -13,6 +13,17 @@ function softTex() {
   r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.35, 'rgba(255,255,255,.55)'); r.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = r; g.fillRect(0, 0, 64, 64);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+
+// polish5: flame sprite (narrow licking tongue, hot core low) instead of the soft round blob for the additive pool
+function flameTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); const img = g.createImageData(64, 64);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const v = y / 63, u = (x - 31.5) / 31.5; const w = 0.12 + 0.5 * Math.pow(v, 0.8) * (1 - Math.pow(Math.max(0, v - 0.75) / 0.25, 2));
+    const lick = Math.max(0, 1 - Math.abs(u + 0.12 * Math.sin(v * 7.5)) / Math.max(0.05, w)); const a = Math.pow(lick, 1.6) * Math.min(1, v * 1.6) * Math.min(1, (1 - v) * 6);
+    const i = (y * 64 + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = 255; img.data[i + 3] = Math.round(255 * Math.min(1, a));
+  }
+  g.putImageData(img, 0, 0); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 
 function makePool(scene, max, additive, name) {
@@ -23,9 +34,12 @@ function makePool(scene, max, additive, name) {
   geo.setAttribute('aSize', new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage));
   geo.setDrawRange(0, 0);
   const mat = new THREE.ShaderMaterial({
-    uniforms: { map: { value: softTex() }, scale: { value: 600 } },
+    uniforms: { map: { value: additive ? flameTex() : softTex() }, scale: { value: 600 } },
+    /* polish5: particles right at the camera fade out (a 512 px blob per flame / smoke puff stacked into a full-screen
+       cream white-out when you stood in the burning room) and flames are capped at 160 px */
     vertexShader: `attribute vec4 aCol; attribute float aSize; uniform float scale; varying vec4 vC;
-      void main(){ vC = aCol; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_PointSize = min(512.0, aSize * scale / max(0.3, -mv.z)); gl_Position = projectionMatrix * mv; }`,
+      void main(){ vC = aCol; vec4 mv = modelViewMatrix * vec4(position,1.0); float d = -mv.z; vC.a *= smoothstep(${additive ? '0.6, 2.2' : '0.3, 1.6'}, d);
+        gl_PointSize = min(${additive ? '160.0' : '384.0'}, aSize * scale / max(0.3, d)); gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `uniform sampler2D map; varying vec4 vC;
       void main(){ vec4 t = texture2D(map, gl_PointCoord); float a = t.a * vC.a; if (a < 0.004) discard; gl_FragColor = vec4(vC.rgb, a); }`,
     transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
@@ -47,7 +61,7 @@ function makePool(scene, max, additive, name) {
       const L = S.life[i] + dt; if (L >= S.max[i]) continue;
       const j = i * 3, o = w * 3; const k = S.k[i];
       let vx = S.v[j], vy = S.v[j + 1], vz = S.v[j + 2];
-      if (additive) { vy += dt * 2.2; vx *= 1 - dt * 1.5; vz *= 1 - dt * 1.5; } // flames: buoyant, damped
+      if (additive) { vy += dt * (k === 2 ? 0.6 : 2.2); vx *= 1 - dt * 1.5; vz *= 1 - dt * 1.5; if (k === 2) { vx += (Math.random() - 0.5) * dt * 6; vz += (Math.random() - 0.5) * dt * 6; } } // flames: buoyant, damped; embers (k 2) drift
       else if (k === 2) { vy -= dt * 6; } // dust/debris puffs fall a bit
       else { vy += dt * 0.25; vx += wind[0] * dt * 0.6; vz += wind[1] * dt * 0.6; vx *= 1 - dt * 0.4; vz *= 1 - dt * 0.4; vy *= 1 - dt * 0.3; }
       let x = S.p[j] + vx * dt, y = S.p[j + 1] + vy * dt, z = S.p[j + 2] + vz * dt;
@@ -63,10 +77,12 @@ function makePool(scene, max, additive, name) {
       pos[o] = x; pos[o + 1] = y; pos[o + 2] = z;
       size[w] = S.s0[i] + (S.s1[i] - S.s0[i]) * f;
       const c = w * 4;
-      if (additive) { // white-yellow core -> orange -> deep red, fades
-        col[c] = 1.0; col[c + 1] = Math.max(0.12, 0.85 - f * 0.9); col[c + 2] = Math.max(0, 0.45 - f * 1.4); col[c + 3] = (k === 1 ? 0.95 : 0.7) * Math.min(1, L * 12) * (1 - f) ** 1.3;
-      } else if (k === 1) { // thick black fire smoke
-        const g = 0.06 + f * 0.1; col[c] = g; col[c + 1] = g; col[c + 2] = g * 1.05; col[c + 3] = 0.55 * Math.min(1, L * 3) * (1 - f);
+      if (k === 2 && additive) { // polish5: embers: small hot orange sparks that flicker as they rise
+        col[c] = 1.0; col[c + 1] = 0.42 - f * 0.25; col[c + 2] = 0.06; col[c + 3] = 0.9 * (1 - f) * (0.6 + 0.4 * Math.random());
+      } else if (additive) { // polish5: saturated yellow core -> orange -> deep red (was a near-white core that stacked to cream)
+        col[c] = 1.0 - f * 0.35; col[c + 1] = Math.max(0.08, 0.62 - f * 0.75); col[c + 2] = Math.max(0, 0.16 - f * 0.5); col[c + 3] = (k === 1 ? 0.85 : 0.55) * Math.min(1, L * 12) * (1 - f) ** 1.3;
+      } else if (k === 1) { // thick black fire smoke (polish5: sootier brown-black, per-puff alpha .38 so stacks stay translucent)
+        const g = 0.045 + f * 0.07; col[c] = g * 1.08; col[c + 1] = g; col[c + 2] = g * 0.9; col[c + 3] = 0.38 * Math.min(1, L * 3) * (1 - f);
       } else if (k === 3) { // snow / blizzard spindrift (white)
         col[c] = 0.92; col[c + 1] = 0.95; col[c + 2] = 1.0; col[c + 3] = 0.35 * Math.min(1, L * 4) * (1 - f);
       } else { // grey smoke / dust

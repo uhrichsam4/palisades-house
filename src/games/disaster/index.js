@@ -239,8 +239,12 @@ function floodBloom(on) {
   FB.on = on; if (on) { FB.s = p.strength; FB.th = p.threshold; p.strength = FB.s * 0.3; p.threshold = Math.max(FB.th, 3); } else { p.strength = FB.s; p.threshold = FB.th; }
   window.__sky?.setGlowCap?.(on ? 2.5 : 0);
 }
+// polish5: storm / blizzard rounds force their sky on every client (the lobby weather request alone left some screens
+// sunny); pool floats blown out by meteors / gusts go back home when a round ends
+function forceSky(w) { if (w === L.forced) return; L.forced = w; try { window.__sky?.force?.(w); } catch {} }
+function resetFloats() { try { for (const w of waterBodies) w.resetFloaters?.(); } catch (e) { console.warn('[disaster] floats', e); } }
 function resetLocal(c) {
-  floodBloom(false);
+  floodBloom(false); forceSky(null); if (L.ph && L.ph !== 'inter') resetFloats(); L.ph = null;
   L.round = -1; L.done.clear(); L.ko = false; L.hp = 100; L.spec = false; L.live = false; L.shake = 0;
   if (c?.player?.state && c.player.state.frozen && L.koFroze) c.player.state.frozen = false; L.koFroze = false;
   L.fx?.reset(); A.stopAll();
@@ -263,6 +267,8 @@ function tick(dt, t, S, c) {
   const sky = window.__sky; if (sky) { const w = sky.windDir; WIND[0] = w.x * sky.wind * 4; WIND[1] = w.y * sky.wind * 4; }
   if (tm - L.indoorAt > 250) { L.indoorAt = tm; L.indoor = roofAbove(phys, p); }
   const live = I.ph === 'live'; const by = S.host;
+  forceSky((I.ph === 'ann' || live) && (d.type === 'storm' || d.type === 'blizzard') ? d.type : null);
+  if (I.ph !== L.ph) { if (I.ph === 'inter' && L.ph) resetFloats(); L.ph = I.ph; }
   const near = (x, y, z) => Math.hypot(p.x - x, p.y + 1 - y, p.z - z);
 
   // ---------------- disasters
@@ -315,11 +321,14 @@ function tick(dt, t, S, c) {
         const rr = mulberry(d.seed ^ rid.length * 977); // fixed flame seats per room
         const nE = Math.max(1, Math.round(per * k));
         for (let j = 0; j < nE; j++) { const s = Math.floor(Math.random() * 5); const r2 = mulberry((d.seed + s * 131 + rid.charCodeAt(0)) | 0); const sx = x0 + 0.3 + r2() * (x1 - x0 - 0.6), sz = z0 + 0.3 + r2() * (z1 - z0 - 0.6);
-          fx.fire.emit(sx + (Math.random() - 0.5) * 0.9, fy + 0.05, sz + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 0.4, 1.2 + Math.random() * 1.6, (Math.random() - 0.5) * 0.4, 0.7 + Math.random() * 0.7 * k, 0.9 + k * 0.6, 0.25, j % 4 === 0 ? 1 : 0, box); }
+          /* polish5: flame tongues (smaller, shorter-lived, k 1 for one in six) + an ember now and then */
+          fx.fire.emit(sx + (Math.random() - 0.5) * 0.9, fy + 0.05, sz + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 0.3, 1.0 + Math.random() * 1.4, (Math.random() - 0.5) * 0.3, 0.5 + Math.random() * 0.5 * k, 0.55 + k * 0.45, 0.15, j % 6 === 0 ? 1 : 0, box);
+          if (j === 0 && Math.random() < 0.35) fx.fire.emit(sx + (Math.random() - 0.5) * 0.6, fy + 0.4 + Math.random() * 0.6, sz + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.8, 0.8 + Math.random() * 1.2, (Math.random() - 0.5) * 0.8, 1.6 + Math.random() * 1.4, 0.05, 0.03, 2, box); }
         if (fx.smoke.free > 30 && Math.random() < 0.6 + k * 0.4) fx.smoke.emit(x0 + Math.random() * (x1 - x0), ceil - 0.6 - Math.random() * 0.5 * k, z0 + Math.random() * (z1 - z0), (Math.random() - 0.5) * 0.6, 0.05, (Math.random() - 0.5) * 0.6, 7 + Math.random() * 4, 2.2, 4.2, 1, box);
         void rr; }
     }
     const here = roomAt(p.x, p.y + 0.5, p.z); const b = burning.find(x => x[0] === here);
+    floodBloom(!!b || (!!here && burning.some(x => adjacency()[here]?.includes(x[0])))); /* polish5: bloom + exterior glow clamped while you're at the fire */
     if (b) { vig = 0.45 + 0.5 * b[1]; if (c.amIn()) hurt(c, S, (4 + 10 * b[1]) * dt); }
     else if (here && burning.some(x => adjacency()[here]?.includes(x[0]))) { vig = 0.3; if (c.amIn() && live) hurt(c, S, 1.2 * dt); }
     bedCrackle = burning.length ? Math.min(0.35, 0.08 + burning.length * 0.03) * (b ? 1.5 : 0.6) : 0;

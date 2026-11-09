@@ -51,13 +51,23 @@ export function createBreath(scene) {
 }
 
 // ------------------------------------------------------------------ weather blowing in
-const MAXP = 1400;
+const MAXP = 3200; /* polish5: room for ~3x snow */
 export function createBlowIn(scene) {
   const P = new Float32Array(MAXP * 3), V = new Float32Array(MAXP * 3), L = new Float32Array(MAXP), D = new Float32Array(MAXP * 2), KIND = new Uint8Array(MAXP); // D: emitter centre-plane depth limit, floor y
   const sPos = new Float32Array(MAXP * 3), rPos = new Float32Array(MAXP * 6);
   const sGeo = new THREE.BufferGeometry(); sGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3).setUsage(THREE.DynamicDrawUsage));
   const rGeo = new THREE.BufferGeometry(); rGeo.setAttribute('position', new THREE.BufferAttribute(rPos, 3).setUsage(THREE.DynamicDrawUsage));
-  const snow = new THREE.Points(sGeo, new THREE.PointsMaterial({ size: 0.065, map: softDot(32, 1), color: 0xffffff, transparent: true, depthWrite: false, sizeAttenuation: true, opacity: 0.95 }));
+  /* polish5: flakes read against white walls: a bit bigger, white core with a cool grey rim (was a pure-white soft dot) */
+  const flake = (() => { const n = 32, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'); const gr = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.38, 'rgba(246,249,252,.95)'); gr.addColorStop(0.62, 'rgba(176,188,204,.55)'); gr.addColorStop(1, 'rgba(150,164,184,0)'); g.fillStyle = gr; g.fillRect(0, 0, n, n);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+  const snow = new THREE.Points(sGeo, new THREE.PointsMaterial({ size: 0.075, map: flake, color: 0xffffff, transparent: true, depthWrite: false, sizeAttenuation: true, opacity: 1 }));
+  /* flakes right at the lens were drawn as huge soft bubbles: cap the on-screen size and fade them out within ~1 m */
+  snow.material.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'varying float vNear;\n' + sh.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n\tgl_PointSize = min(gl_PointSize, 20.0); vNear = -mvPosition.z;');
+    sh.fragmentShader = 'varying float vNear;\n' + sh.fragmentShader.replace('#include <premultiplied_alpha_fragment>', 'gl_FragColor.a *= smoothstep(0.4, 1.1, vNear);\n#include <premultiplied_alpha_fragment>');
+  };
+  snow.material.customProgramCacheKey = () => 'blowin-snow-near';
   const rain = new THREE.LineSegments(rGeo, new THREE.LineBasicMaterial({ color: 0xb8c8d6, transparent: true, opacity: 0.55, depthWrite: false }));
   for (const o of [snow, rain]) { o.frustumCulled = false; o.visible = false; o.userData.keep = true; o.renderOrder = 6; scene.add(o); }
   let free = []; for (let i = MAXP - 1; i >= 0; i--) free.push(i); const used = new Set();
@@ -82,7 +92,7 @@ export function createBlowIn(scene) {
     hits,
     update(dt, emitters) {
       t += dt;
-      for (const e of emitters) { const kind = e.snow ? 1 : 0; const rate = e.rate * (kind ? 1 : 1.4); let a = (acc.get(e.id) || 0) + rate * dt; const n = a | 0; acc.set(e.id, a - n); if (n) spawn(e, kind, n); }
+      for (const e of emitters) { const kind = e.snow ? 1 : 0; const rate = e.rate * (kind ? 3 : 1.4); /* polish5: snow x3 near the opening */ let a = (acc.get(e.id) || 0) + rate * dt; const n = a | 0; acc.set(e.id, a - n); if (n) spawn(e, kind, n); }
       if (!used.size) { snow.visible = rain.visible = false; return; }
       let ns = 0, nr = 0;
       for (const j of used) {
@@ -113,15 +123,16 @@ export function createPatches(scene) {
         const mesh = new THREE.Mesh(geo, m); mesh.renderOrder = 2; mesh.userData.keep = true; mesh.receiveShadow = true; scene.add(mesh);
         mesh.position.set(e.pos[0] - e.nx * 1.1, e.floorY + 0.012, e.pos[2] - e.nz * 1.1); mesh.rotation.y = Math.atan2(e.nx, e.nz); p = { mesh, amt: 0, kind }; map.set(e.id, p); }
       if (p.kind !== kind && (p.amt < 0.05 || kind === 'wet')) p.kind = kind; // rain turns a drift into slush/wet
-      p.amt = Math.min(1, p.amt + grow); p.fresh = true;
+      p.amt = Math.min(1, p.amt + grow); p.fresh = true; p.w = e.w; p.e = e;
     },
     update(dt) {
       for (const [id, p] of map) {
         p.amt -= dt / (p.kind === 'snow' ? 240 : 150) * (p.fresh ? 0 : 1); p.fresh = false;
         if (p.amt <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); map.delete(id); continue; }
         const m = p.mesh.material, k = Math.min(1, p.amt * 1.6), s = 0.35 + p.amt * 1.25;
-        if (p.kind === 'snow') { m.color.setHex(0xf3f7fa); m.roughness = 0.9; m.opacity = Math.min(1, k * 1.2); } else { m.color.setHex(0x1b232b); m.roughness = 0.05; m.opacity = 0.55 * k; }
-        p.mesh.scale.set(s * 0.9, 1, s * 1.3);
+        /* polish5: snow lies as a drift strip along the opening (its width, 0.5..1.6 m deep), visible from the first flakes */
+        if (p.kind === 'snow') { m.color.setHex(0xeef3f8); m.roughness = 0.9; m.opacity = Math.min(1, 0.25 + p.amt * 3); const sz = 0.5 + p.amt * 1.1; p.mesh.scale.set(Math.min(3.2, Math.max(0.8, (p.w || 1.6) * 0.55)) * (0.55 + 0.45 * Math.min(1, p.amt * 2)), 1, sz); if (p.e) p.mesh.position.set(p.e.pos[0] - p.e.nx * (0.2 + sz), p.mesh.position.y, p.e.pos[2] - p.e.nz * (0.2 + sz)); }
+        else { m.color.setHex(0x1b232b); m.roughness = 0.05; m.opacity = 0.55 * k; p.mesh.scale.set(s * 0.9, 1, s * 1.3); }
       }
     },
   };

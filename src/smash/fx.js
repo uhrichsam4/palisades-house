@@ -234,5 +234,7 @@ export function createFx(ctx) {
       shardsAlive = alive; if (!alive) { shards.visible = false; shards.count = 0; }
     }
   }
-  return { fracture, spawn, sparks, glitter, crack, clearCracks, update, get live() { return liveN; }, get sparksAlive() { return shardsAlive; }, batches: [opaque, glassy, shards, glit, cracksMesh] };
+  /* polish5: building repair clears the rubble (fragments left lying would re-break the fresh walls) */
+  function clearDebris() { for (const s of live.splice(0)) freeSlot(s); liveN = 0; opaque.visible = false; glassy.visible = false; }
+  return { fracture, spawn, sparks, glitter, crack, clearCracks, clearDebris, update, get live() { return liveN; }, get sparksAlive() { return shardsAlive; }, batches: [opaque, glassy, shards, glit, cracksMesh] };
 }
