@@ -35,10 +35,12 @@ export function buildWalk(ctx) {
       if (found > 2 || (phys.tags.get(c.handle) || '') !== 'piece:foyer' || c.shape?.type !== R.ShapeType.TriMesh) return;
       const t = c.translation(); const aabb = c.shape.vertices; if (!aabb || aabb.length > 200) return;
       let inside = true; for (let i = 0; i < aabb.length; i += 3) { const x = aabb[i] + t.x, z = aabb[i + 2] + t.z; if (x < ST.x0 - 0.01 || x > ST.x1 + 0.01 || z < ST.z0 - 0.2 || z > ST.z1 + 0.01) { inside = false; break; } }
-      if (inside) { phys.setGroups(c, G.RAMP, G.ALL); phys.tags.set(c.handle, 'smash:ramp foyer-stair'); found++; }
+      // the foyer trimesh's triangles face DOWN (normals y < 0): the controller treated it as a ceiling and could not
+      // walk UP onto it from the bottom (walking down worked). Keep it for props only and give the player our own ramps.
+      if (inside) { phys.setGroups(c, G.PROPONLY, G.ALL); phys.tags.set(c.handle, 'smash:propstair foyer'); found++; }
     });
-    if (!found) { // no trimesh found: our own ramps (nosing line)
-      rampZ(ST.x0, ST.x1, ST.z0 - 0.15, 0, zL0, NL * H, 'foyer-1'); rampZ(ST.x0, ST.x1, zL1, NL * H, ST.z1, UP, 'foyer-2');
+    { // player ramps along the nosing line (both flights + the mid landing between them)
+      rampZ(ST.x0, ST.x1, ST.z0 - 0.15, 0, zL0, NL * H, 'foyer-1'); rampZ(ST.x0, ST.x1, zL0, NL * H, zL1, NL * H, 'foyer-landing'); rampZ(ST.x0, ST.x1, zL1, NL * H, ST.z1, UP, 'foyer-2');
     }
     for (let k = 1; k < ST.n; k++) propOnlyBox([ST.x0, (k - 1) * H, zr(k)], [ST.x1, k * H, zr(k + 1)], 'foyer-' + k);
   }

@@ -325,6 +325,12 @@ export async function build(ctx) {
     const e = 0.06, Yw = Y + WALLH;
     const c = new THREE.Mesh(polyGeo([[X0 - e, ceilY(X0 - e), Z0 - e], [X1 + e, ceilY(X1 + e), Z0 - e], [X1 + e, ceilY(X1 + e), Z1 + e], [X0 - e, ceilY(X0 - e), Z1 + e]], [0, -1, 0]), ceilMat);
     c.name = 'vaultC'; c.receiveShadow = true; c.castShadow = false; bed.add(c);
+    /* polish4: the vault's high edge (9.0 m) pokes through the hip roof, so from the street / pool deck its emissive
+       underside showed as a glowing white roof quad at night. Draw it only for cameras inside the upper floor around
+       this room (player, probe cube cameras); everyone else gets an empty draw range. */
+    c.onBeforeRender = (r, sc, cam) => { const p = cam.matrixWorld.elements; const x = p[12], y = p[13], z = p[14];
+      const inside = y > Y - 0.4 && y < 9.2 && x > X0 - 0.4 && x < X1 + 7.5 && z > Z0 - 0.4 && z < Z1 + 0.4;
+      c.geometry.setDrawRange(0, inside ? Infinity : 0); };
     for (const [z, nz] of [[Z0, 1], [Z1, -1]]) { const m = new THREE.Mesh(polyGeo([[X0, Yw - 0.01, z], [X1 + e, Yw - 0.01, z], [X1 + e, ceilY(X1 + e) + 0.01, z]], [0, 0, nz]), wallInfill); m.receiveShadow = true; m.castShadow = false; bed.add(m); }
     const m = new THREE.Mesh(polyGeo([[X1, Yw - 0.01, Z0 - e], [X1, Yw - 0.01, Z1 + e], [X1, ceilY(X1) + 0.05, Z1 + e], [X1, ceilY(X1) + 0.05, Z0 - e]], [-1, 0, 0]), wallInfill); m.receiveShadow = true; m.castShadow = false; bed.add(m);
   }

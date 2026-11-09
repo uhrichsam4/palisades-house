@@ -41,12 +41,12 @@ await sleep(1500);
 
 // stops: [name, x, y(level floor), z, pace] ; rooms by plan rect centre unless a point is given
 const STOPS = [
-  ['front-walk', 9.0, -0.8, -4.6], ['entry', 9.8, 0, 3.6], ['foyer', 9.4, 0, 6.2],
-  ['stair-up', 9.8, 3.35, 8.6, 'stairs'], ['gallery', 9.6, 3.35, 7.0],
+  ['front-walk', 9.0, -0.8, -4.6], ['entry-landing', 10.2, -0.4, -1.3], ['entry', 9.8, 0, 3.6], ['foyer', 9.4, 0, 6.2],
+  ['stair-foot', 10.56, 0, 5.2], ['stair-up', 10.56, 3.35, 10.8, 'stairs'], ['gallery', 9.6, 3.35, 7.0],
   ['hallEW', 12.0, 3.35, 10.95], ['bedA', 0, 3.35, 0, 'room'], ['bathA', 0, 3.35, 0, 'room'], ['bedB', 0, 3.35, 0, 'room'], ['closetB', 0, 3.35, 0, 'room'], ['bathB', 0, 3.35, 0, 'room'],
   ['theater', 0, 3.35, 0, 'room'], ['hallNS', 0, 3.35, 0, 'room'], ['primaryCloset', 0, 3.35, 0, 'room'], ['vestibule', 0, 3.35, 0, 'room'], ['primaryBath', 0, 3.35, 0, 'room'],
   ['primaryBed', 0, 3.35, 0, 'room'], ['balcony', 0, 3.35, 0, 'room'], ['hallC', 0, 3.35, 0, 'room'], ['guestBath', 0, 3.35, 0, 'room'], ['bedC', 0, 3.35, 0, 'room'], ['bathC', 0, 3.35, 0, 'room'],
-  ['gallery2', 9.6, 3.35, 7.0], ['stair-down', 9.6, 0, 6.0, 'stairs'], ['kitchen', 0, 0, 0, 'room'], ['pool-deck', 12.0, -0.1, 24.2], ['garage', 0, 0, 0, 'room'],
+  ['gallery2', 9.6, 3.35, 7.0], ['stair-top', 10.56, 3.35, 10.8], ['stair-down', 10.56, 0, 5.2, 'stairs'], ['kitchen', 0, 0, 0, 'room'], ['pool-deck', 12.0, -0.1, 24.2], ['garage', 0, 0, 0, 'room'],
 ];
 const legs = opt.legs ? STOPS.slice(0, +opt.legs) : STOPS;
 

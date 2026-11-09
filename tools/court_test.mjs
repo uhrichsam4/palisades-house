@@ -41,7 +41,8 @@ async function open(name, q) {
   await page.evaluate(() => { try { window.__sky?.set?.({ tod: '15:30', frozen: true, weather: 'clear', instant: true }); } catch {} });
   return { name, page, logs };
 }
-const E = (P, fn, arg) => P.page.evaluate(fn, arg);
+// every page call has its own 45 s ceiling, so a hung page names its step instead of stalling the whole run
+const E = (P, fn, arg) => Promise.race([P.page.evaluate(fn, arg), new Promise((_, rj) => setTimeout(() => rj(new Error('page ' + P.name + ' evaluate timeout')), 45000))]);
 const shot = async (P, n) => { const f = path.join(DIR, n); await P.page.screenshot({ path: f }); return f; };
 const res = { test: 'court', shots: {} }; const checks = {}; let bad = false; const pages = [];
 const hubStart = (P, id) => E(P, (id) => { window.__games.start(id); return new Promise(r => setTimeout(() => r(!!document.querySelector('.pp-card.on')), 1200)); }, id);
@@ -84,39 +85,72 @@ try {
     await A.page.close();
   }
   if (ALLM || opt.online) {
-    const A = await open('A', `room=${code}`), B = await open('B', `room=${code}`); pages.push(A, B);
+    // --game=tennis,basketball,boxing (default all); each game has its own timeout (--gameMs, default 150 s) and logs
+    // progress to stderr, so a stall names its step. --late=0 skips the late-joiner page.
+    const GAMES = (opt.game || 'tennis,basketball,boxing').split(',');
+    const GMS = Number(opt.gameMs || 150000); let stepName = '';
+    const step = (m) => { stepName = m; process.stderr.write(`[court ${((Date.now() - T0) / 1000).toFixed(0)}s] ${m}\n`); };
+    const T0 = Date.now();
+    const timed = (p, ms, what) => Promise.race([p, new Promise((_, rj) => setTimeout(() => rj(new Error('timeout: ' + what)), ms))]);
+    step('open A+B');
+    const [A, B] = await Promise.all([open('A', `room=${code}`), open('B', `room=${code}`)]); pages.push(A, B);
+    step('connect');
     res.connected = !!(await until(async () => (await Promise.all([A, B].map(P => E(P, () => window.__mp.members.size)))).every(n => n >= 1), 120000, 1000));
     if (!res.connected) throw new Error('pages did not connect');
     await sleep(2500);
     const idB = await E(B, () => window.__mp.selfId);
-    const challenge = async (g) => { await E(A, ([g, id]) => window[g].challenge(id), [g, idB]); await sleep(1500); return E(B, (g) => window[g].accept(), g); };
-    // tennis
-    await challenge('__tennis'); await Promise.all([A, B].map(P => E(P, () => { window.__tennis.auto = true; window.__tennis.opts.botMiss = 0.05; window.__tennis.opts.games = 1; })));
-    let tOk = null; const t0 = Date.now();
-    while (Date.now() - t0 < 120000) { await sleep(1500); const [la, lb] = await Promise.all([A, B].map(P => E(P, () => window.__tennis.log.slice())));
-      const h = la.find(r => r.hits >= 2 && lb.some(x => x.point === r.point)); if (la.length >= 3 && h) { tOk = { a: h, b: lb.find(x => x.point === h.point), na: la.length, nb: lb.length }; break; } }
-    await sleep(1200); const [ta, tb] = await Promise.all([A, B].map(P => E(P, () => window.__tennis.state)));
-    res.onlineTennis = { rally: tOk, a: ta && [ta.pts, ta.games], b: tb && [tb.pts, tb.games] };
-    checks.onlineTennis = !!tOk && tOk.a.hits === tOk.b.hits && tOk.a.winner === tOk.b.winner && JSON.stringify([ta?.pts, ta?.games]) === JSON.stringify([tb?.pts, tb?.games]);
-    res.shots.onlineTennis = await shot(B, 'online_tennis_B.png');
-    await E(A, () => window.__tennis.leave()); await sleep(1000); await Promise.all([A, B].map(P => closeCards(P)));
-    // basketball (1v1: B starts the duel vs A)
-    await challenge('__basketball'); await Promise.all([A, B].map(P => E(P, () => { window.__basketball.auto = true; })));
-    await until(async () => (await Promise.all([A, B].map(P => E(P, () => window.__basketball.stats.log.length)))).every(n => n >= 6), 120000, 1500);
-    await sleep(2000);
-    const [ba, bb] = await Promise.all([A, B].map(P => E(P, () => ({ M: window.__basketball.state, log: window.__basketball.stats.log.map(l => [l.shooter, l.made, l.pts]) }))));
-    const n = Math.min(ba.log.length, bb.log.length);
-    res.onlineBasketball = { na: ba.log.length, nb: bb.log.length, scoreA: ba.M?.score, scoreB: bb.M?.score };
-    checks.onlineBasketball = n >= 6 && JSON.stringify(ba.log.slice(0, n)) === JSON.stringify(bb.log.slice(0, n)) && JSON.stringify(ba.M?.score) === JSON.stringify(bb.M?.score);
-    await E(A, () => window.__basketball.leave()); await E(B, () => window.__basketball.leave()); await sleep(1000); await Promise.all([A, B].map(P => closeCards(P)));
-    // boxing
-    await Promise.all([A, B].map(P => E(P, () => { const X = window.__boxing; X.opts.roundMs = 20000; X.auto = true; })));
-    await challenge('__boxing'); await sleep(9000);
-    res.shots.onlineBoxing = await shot(A, 'online_boxing_A.png');
-    const [xa, xb] = await Promise.all([A, B].map(P => E(P, () => ({ M: window.__boxing.state, landed: window.__boxing.stats.landed }))));
-    res.onlineBoxing = { hpA: xa.M?.hp, hpB: xb.M?.hp, nhA: xa.M?.nh, nhB: xb.M?.nh, landedA: xa.landed, landedB: xb.landed };
-    checks.onlineBoxing = !!xa.M && xa.M.nh > 0 && xa.M.nh === xb.M?.nh && JSON.stringify(xa.M.hp) === JSON.stringify(xb.M?.hp) && xa.M.nh === xa.landed + xb.landed;
-    await E(A, () => window.__boxing.leave());
+    const challenge = async (g) => { await E(A, ([g, id]) => window[g].challenge(id), [g, idB]);
+      const ok = await until(() => E(B, (g) => window[g].accept(), g), 15000, 300); step(g + ' accepted=' + !!ok); return ok; };
+    let late = null;
+    const lateJoin = async (g) => { if (opt.late === '0') return null; step(g + ' late joiner');
+      if (!late) { late = await open('C', `room=${code}`); pages.push(late); }
+      await until(() => E(late, () => window.__mp.members.size >= 2), 60000, 1000);
+      return until(() => E(late, (g) => { const M = window[g].state; return M && M.phase !== 'over' && M.players ? { players: M.players, phase: M.phase } : null; }, g), 20000, 500); };
+    const games = {
+      tennis: async () => {
+        step('tennis challenge'); checks.onlineTennisStart = !!(await challenge('__tennis'));
+        await Promise.all([A, B].map(P => E(P, () => { window.__tennis.auto = true; window.__tennis.opts.botMiss = 0.05; window.__tennis.opts.games = 1; })));
+        let tOk = null; const t0 = Date.now(); step('tennis rally');
+        while (Date.now() - t0 < 90000) { await sleep(1500); const [la, lb] = await Promise.all([A, B].map(P => E(P, () => window.__tennis.log.slice())));
+          const h = la.find(r => r.hits >= 2 && lb.some(x => x.point === r.point)); if (la.length >= 3 && h) { tOk = { a: h, b: lb.find(x => x.point === h.point), na: la.length, nb: lb.length }; break; } }
+        const lj = await lateJoin('__tennis');
+        await sleep(1200); const [ta, tb] = await Promise.all([A, B].map(P => E(P, () => window.__tennis.state)));
+        res.onlineTennis = { rally: tOk, a: ta && [ta.pts, ta.games], b: tb && [tb.pts, tb.games], late: lj };
+        checks.onlineTennis = !!tOk && tOk.a.hits === tOk.b.hits && tOk.a.winner === tOk.b.winner && JSON.stringify([ta?.pts, ta?.games]) === JSON.stringify([tb?.pts, tb?.games]);
+        if (opt.late !== '0') checks.onlineTennisLate = !!lj && JSON.stringify(lj.players) === JSON.stringify(ta?.players);
+        res.shots.onlineTennis = await shot(B, 'online_tennis_B.png');
+        await E(A, () => window.__tennis.leave()); await sleep(1000); await Promise.all([A, B].map(P => closeCards(P)));
+      },
+      basketball: async () => {
+        step('basketball challenge'); checks.onlineBasketballStart = !!(await challenge('__basketball'));
+        await Promise.all([A, B].map(P => E(P, () => { window.__basketball.auto = true; })));
+        step('basketball shots');
+        await until(async () => (await Promise.all([A, B].map(P => E(P, () => window.__basketball.stats.log.length)))).every(n => n >= 6), 90000, 1500);
+        const lj = await lateJoin('__basketball');
+        await sleep(2000);
+        const [ba, bb] = await Promise.all([A, B].map(P => E(P, () => ({ M: window.__basketball.state, log: window.__basketball.stats.log.map(l => [l.shooter, l.made, l.pts]) }))));
+        const n = Math.min(ba.log.length, bb.log.length);
+        res.onlineBasketball = { na: ba.log.length, nb: bb.log.length, scoreA: ba.M?.score, scoreB: bb.M?.score, late: lj };
+        checks.onlineBasketball = n >= 6 && JSON.stringify(ba.log.slice(0, n)) === JSON.stringify(bb.log.slice(0, n)) && JSON.stringify(ba.M?.score) === JSON.stringify(bb.M?.score);
+        if (opt.late !== '0') checks.onlineBasketballLate = !!lj && JSON.stringify(lj.players) === JSON.stringify(ba.M?.players);
+        await E(A, () => window.__basketball.leave()); await E(B, () => window.__basketball.leave()); await sleep(1000); await Promise.all([A, B].map(P => closeCards(P)));
+      },
+      boxing: async () => {
+        await Promise.all([A, B].map(P => E(P, () => { const X = window.__boxing; X.opts.roundMs = 20000; X.auto = true; })));
+        step('boxing challenge'); checks.onlineBoxingStart = !!(await challenge('__boxing')); await sleep(9000);
+        res.shots.onlineBoxing = await shot(A, 'online_boxing_A.png');
+        const lj = await lateJoin('__boxing'); await sleep(800);
+        const [xa, xb] = await Promise.all([A, B].map(P => E(P, () => ({ M: window.__boxing.state, landed: window.__boxing.stats.landed }))));
+        res.onlineBoxing = { hpA: xa.M?.hp, hpB: xb.M?.hp, nhA: xa.M?.nh, nhB: xb.M?.nh, landedA: xa.landed, landedB: xb.landed, late: lj };
+        checks.onlineBoxing = !!xa.M && xa.M.nh > 0 && xa.M.nh === xb.M?.nh && JSON.stringify(xa.M.hp) === JSON.stringify(xb.M?.hp) && xa.M.nh === xa.landed + xb.landed;
+        if (opt.late !== '0') checks.onlineBoxingLate = !!lj && JSON.stringify(lj.players) === JSON.stringify(xa.M?.players);
+        await E(A, () => window.__boxing.leave());
+      },
+    };
+    for (const g of GAMES) {
+      try { await timed(games[g](), GMS, g); step(g + ' done'); }
+      catch (e) { res['stall_' + g] = stepName + ' | ' + e.message; checks['online_' + g + '_noStall'] = false; step(g + ' FAILED: ' + e.message); }
+    }
   }
   checks.noErrors = !pages.flatMap(P => P.logs).length;
   res.errors = Object.fromEntries(pages.map(P => [P.name, P.logs.slice(0, 6)]));

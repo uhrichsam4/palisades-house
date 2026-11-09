@@ -285,6 +285,7 @@ export function startVideos(ctx, mp) {
     // cards
     const pp = player.position, lv = levelOf(pp.y); let best = null, bs = Infinity;
     const hideAt = W ? W.spot.cam.pos : null;
+    const photoOn = document.body.classList.contains('photo');
     camFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
     for (const c of cards) {
       const sp = c.at; const dx = sp.x - pp.x, dz = sp.z - pp.z; const d = Math.hypot(dx, dz);
@@ -293,6 +294,7 @@ export function startVideos(ctx, mp) {
       let show = same && d < CARD_SHOW && c.ready;
       if (hideAt && Math.hypot(sp.x - hideAt[0], sp.y - hideAt[1], sp.z - hideAt[2]) < 1.0) show = false;
       if (rcPlays.has(c.spot.id)) show = false;
+      if (photoOn) show = false; /* polish4: photo mode shows the world only (no floating video cards) */
       if (!show) { if (c.s.visible) c.s.visible = false; continue; }
       c.s.visible = true;
       c.mat.opacity = Math.min(1, (CARD_SHOW - d) / 2);

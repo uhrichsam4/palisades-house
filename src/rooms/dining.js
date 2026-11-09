@@ -421,12 +421,12 @@ export async function build(ctx) {
     });
     const sunMat = new THREE.MeshBasicMaterial({ map: sunTex, color: 0xffd9a8, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: true });
     const sp = add(root, new THREE.PlaneGeometry(5.6, 2.0), sunMat, [11.6, 0.016, 17.10], [-Math.PI / 2, 0, 0]);
-    sp.castShadow = false; sp.receiveShadow = false; sp.renderOrder = 1; sp.userData.keep = true;
+    sp.castShadow = false; sp.receiveShadow = false; sp.renderOrder = 1; sp.userData.keep = true; sp.userData.fakeSun = true; /* polish4: sky/index.js scales it with the real sun */
   }
 
   // light 2 of 2: soft daylight bounce off the sunlit terrace/floor through the open sliders, aimed up and in so
   // the white ceiling and the chair fronts read high-key (photo p06/p07)
-  { const sky = new THREE.SpotLight(0xfff3e2, 45, 12, 0.85, 1.0, 1.8); sky.position.set(11.8, 0.05, 20.2); sky.castShadow = false;
+  { const sky = new THREE.SpotLight(0xfff3e2, 45, 12, 0.85, 1.0, 1.8); sky.position.set(11.8, 0.05, 20.2); sky.castShadow = false; sky.userData.fakeSun = true;
     sky.target.position.set(11.6, 3.05, 15.2); root.add(sky, sky.target); }
 
   // ================================================================ ceiling: cans, speakers, linear supply slots

@@ -62,9 +62,14 @@ const STREAM_FB = /* glsl */`
   float rim = pow(1. - ndv, 3.0);
   float glint = smoothstep(0.62, 0.95, fl2) * smoothstep(0.2, 0.8, ndv);
   vec3 col = body * mix(0.55, 1.1, smoothstep(0.05, 0.6, ndv)) + totalSpecular * (1.9 + 1.1 * streak) + vec3(0.85, 0.92, 1.0) * (0.22 * rim + 0.45 * glint);
+  // polish4: against the white sink the milky stream vanished: blue-grey body tint, darker refracted (fresnel) edges,
+  // brighter specular streaks — it now reads as a darker-edged glassy rope with bright glints
+  col = col * vec3(0.74, 0.82, 0.9);
+  col = mix(col, vec3(0.16, 0.21, 0.27) * (0.6 + 0.4 * streak), 0.55 * smoothstep(0.15, 0.75, 1. - ndv));
+  col += totalSpecular * (1.2 * streak) + vec3(0.9, 0.95, 1.0) * 0.35 * glint;
   float lum = max(col.r, max(col.g, col.b));
   float fade = clamp((uTime - uOn) / 0.3, 0., 1.) * clamp(1. - (uTime - uOff) / (0.3 + uFall), 0., 1.);
-  gl_FragColor = vec4(col, clamp(0.55 * streak + 0.4 * (1. - ndv) + lum * 0.3, 0., 0.97) * fade);
+  gl_FragColor = vec4(col, clamp(0.62 * streak + 0.5 * (1. - ndv) + lum * 0.3, 0., 0.97) * fade);
 }
 `;
 
@@ -186,7 +191,8 @@ void main(){
   float ang = atan(p.y, p.x);
   float foam = smoothstep(0.42, 0.0, r) * (0.45 + 0.55 * tp_noiseP(vec2(ang * 1.2732 + 4.0, r * 9. - uTime * 6.), 8.));
   float a = clamp(ring * 0.6 + foam * 0.9, 0., 1.) * smoothstep(1., 0.85, r) * on * uStrength;
-  gl_FragColor = vec4(vec3(0.92, 0.95, 0.97) * (0.55 + 0.45 * foam), a);
+  /* polish4: blue-grey rings (white foam on a white sink was invisible); the rings darker than the foam */
+  gl_FragColor = vec4(mix(vec3(0.42, 0.52, 0.6), vec3(0.93, 0.96, 0.98), clamp(foam * 1.4, 0., 1.)) * (0.6 + 0.4 * foam), clamp(a * 1.2, 0., 1.));
   if (gl_FragColor.a < 0.003) discard;
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -283,7 +289,7 @@ export function createTapFx(f, shared) {
     const ru = { uTime, uOn: on, uOff: off, uFall: { value: tFall }, uStrength: { value: big ? 1.25 : 1.15 } };
     const rm = new THREE.ShaderMaterial({ uniforms: ru, vertexShader: RIP_V, fragmentShader: RIP_F, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     mats.push(rm);
-    const rip = new THREE.Mesh(ripGeo, rm); rip.name = 'tap-ripple'; const R = big ? 0.24 : 0.14; // polish: larger foam ring rip.scale.set(R * 2, 1, R * 2);
+    const rip = new THREE.Mesh(ripGeo, rm); rip.name = 'tap-ripple'; const R = big ? 0.24 : 0.14; rip.scale.set(R * 2, 1, R * 2); /* polish: larger foam ring (polish4: the scale call had been commented out by a trailing // since polish, so the ring drew 1 m wide) */
     rip.position.set(land.x, land.y + 0.002, land.z); rip.renderOrder = 2; group.add(rip);
     maxLife = tFall + 0.8;
     shared.info = { tFall, land: land.clone().add(tip) };

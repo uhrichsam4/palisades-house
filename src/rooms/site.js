@@ -347,7 +347,12 @@ export async function build(ctx) {
   // ---------------------------------------------------------------- neighbouring houses (simple massing)
   const roofMats = new Map(), wallMats = new Map();
   const mat = (map, hex, rough) => { if (!map.has(hex)) map.set(hex, addHaze(O(new THREE.MeshStandardMaterial({ color: hex, roughness: rough })))); return map.get(hex); };
-  const glassDark = O(new THREE.MeshStandardMaterial({ color: 0x1f262d, roughness: 0.15, metalness: 0.3 }));
+  /* polish4: neighbour windows read as black squares — reflective glass (sky env) in a white frame with a sill,
+     deeper eaves, a front door with a step and two shrubs per house (all static: merged with the rest) */
+  const glassDark = O(new THREE.MeshStandardMaterial({ color: 0x3a4652, roughness: 0.06, metalness: 0.75, envMapIntensity: 1.3 }));
+  const frameWhite = O(new THREE.MeshStandardMaterial({ color: 0xe9e7e2, roughness: 0.55 }));
+  const doorMat = O(new THREE.MeshStandardMaterial({ color: 0x3b2c22, roughness: 0.5 }));
+  const shrubMat = O(new THREE.MeshStandardMaterial({ color: 0x3f5a2c, roughness: 0.9 }));
   const trimDark = O(new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.6 }));
   const garageWhite = O(new THREE.MeshStandardMaterial({ color: 0xf2f2ef, roughness: 0.5 }));
   const grooveMat = O(new THREE.MeshStandardMaterial({ color: 0xb8b8b4, roughness: 0.6 }));
@@ -363,13 +368,17 @@ export async function build(ctx) {
     const g = kit.group(root, [hx, base, hz], ry);
     const wm = mat(wallMats, wall, 0.9); const HH = floors * 3.0;
     kit.add(g, kit.box(w, HH + 6, d), wm, [0, (HH - 6) / 2, 0]);
-    kit.add(g, hipRoof(w, d, Math.min(w, d) * 0.32, 0.5), mat(roofMats, roof, 0.85), [0, HH, 0]);
-    kit.add(g, kit.box(w + 1.0, 0.18, d + 1.0), trimDark, [0, HH - 0.05, 0]);
+    kit.add(g, hipRoof(w, d, Math.min(w, d) * 0.32, 0.85), mat(roofMats, roof, 0.85), [0, HH, 0]);
+    kit.add(g, kit.box(w + 1.7, 0.22, d + 1.7), trimDark, [0, HH - 0.06, 0]);
     // windows on both long faces
     for (let f = 0; f < floors; f++) for (const side of [-1, 1]) {
       const n = Math.max(2, Math.floor(w / 3.2));
-      for (let i = 0; i < n; i++) { if (rr() < 0.25) continue; if (kind === 'garageN' && side > 0 && f === 0 && i < n - 1) continue; const wx = -w / 2 + (i + 0.5) * w / n, ww = 0.8 + rr() * 0.8, hh = f === 0 && rr() < 0.3 ? 2.3 : 1.4;
-        kit.add(g, kit.box(ww, hh, 0.06), glassDark, [wx, f * 3 + (hh > 2 ? 1.2 : 1.6), side * (d / 2 + 0.02)]); }
+      for (let i = 0; i < n; i++) { if (rr() < 0.25) continue; if (kind === 'garageN' && side > 0 && f === 0) continue; /* polish4: last slot is the front door now */ const wx = -w / 2 + (i + 0.5) * w / n, ww = 0.8 + rr() * 0.8, hh = f === 0 && rr() < 0.3 ? 2.3 : 1.4;
+        const wy = f * 3 + (hh > 2 ? 1.2 : 1.6);
+        kit.add(g, kit.box(ww + 0.16, hh + 0.16, 0.05), frameWhite, [wx, wy, side * (d / 2 + 0.02)]);
+        kit.add(g, kit.box(ww, hh, 0.04), glassDark, [wx, wy, side * (d / 2 + 0.035)]);
+        kit.add(g, kit.box(ww + 0.08, 0.025, 0.04), frameWhite, [wx, wy, side * (d / 2 + 0.06)]);
+        kit.add(g, kit.box(ww + 0.3, 0.06, 0.14), frameWhite, [wx, wy - hh / 2 - 0.1, side * (d / 2 + 0.07)]); }
     }
     if (kind === 'garageN') { kit.add(g, kit.box(5.2, 2.3, 0.08), garageWhite, [-w / 2 + 3.4, 1.15, d / 2 + 0.03]);
       for (let i = 0; i < 7; i++) kit.add(g, kit.box(5.0, 0.014, 0.02), grooveMat, [-w / 2 + 3.4, 0.3 + i * 0.3, d / 2 + 0.075]); }
@@ -378,6 +387,11 @@ export async function build(ctx) {
       kit.add(g, kit.cyl(1.9, 1.9, HH + 1.5, 20), wm, [w / 2 - 2, (HH + 1.5) / 2, -d / 2 + 0.5]);
       kit.add(g, kit.cyl(0.01, 2.3, 2.6, 20), mat(roofMats, roof, 0.85), [w / 2 - 2, HH + 1.5 + 1.3, -d / 2 + 0.5]);
     }
+    { const fs = kind === 'garageN' ? 1 : -1, dx = kind === 'garageN' ? w / 2 - 2.0 : kind === 'garage' ? 0 : w * 0.18;
+      kit.add(g, kit.box(1.25, 2.35, 0.06), frameWhite, [dx, 1.17, fs * (d / 2 + 0.02)]);
+      kit.add(g, kit.box(1.0, 2.2, 0.05), doorMat, [dx, 1.1, fs * (d / 2 + 0.045)]);
+      kit.add(g, kit.box(1.8, 0.16, 0.7), grooveMat, [dx, 0.08, fs * (d / 2 + 0.35)]);
+      for (const k of [-1, 1]) kit.add(g, new THREE.SphereGeometry(0.55 + rr() * 0.2, 10, 7), shrubMat, [dx + k * 1.4, 0.4, fs * (d / 2 + 0.5)]); }
     if (Math.hypot(hx - CENTER[0], hz - CENTER[1]) < 120) phys.solidGroup(g);
   }
   // across the street from the porch (v01/v09): two tall Italian cypresses left of the neighbour's garage,

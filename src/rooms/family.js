@@ -629,6 +629,8 @@ export async function build(ctx) {
     }
     inst.castShadow = true; inst.receiveShadow = true; g.add(inst);
     phys.boxAABB([x - 0.2, 0, z - 0.2], [x + 0.2, 0.42, z + 0.2]);
+    /* camera-only soft volume over the leafy crown */
+    phys.camSoftAdd?.([x, 1.5, z], [0.45, 0.65, 0.45]);
     return g;
   }
   fiddleFig(3.25, 19.60);

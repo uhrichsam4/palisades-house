@@ -135,6 +135,8 @@ export function createBoxing(ctx, mp, hub) {
   let waiting = null;
   mp?.onPeerLeave?.((id) => { if (!M || !M.players.includes(id)) return; if (M.phase !== 'over') { const n = snap(); n.phase = 'over'; n.winner = M.players.indexOf(id) === 0 ? 1 : 0; n.reason = 'forfeit'; n.rev++; setState(n); } });
   setTimeout(() => send({ k: 'hello' }), 2400);
+  /* late joiners: the host sends the match (with the round clock) to anyone who arrives */
+  mp?.onPeerJoin?.((id) => { if (M && isHost()) setTimeout(() => send({ k: 'state', M: { ...snap(), left: Math.max(0, endAt - performance.now()) } }, id), 700); });
 
   // ---------------------------------------------------------------- input
   const locked = () => !!document.pointerLockElement;

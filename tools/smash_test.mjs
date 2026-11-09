@@ -125,6 +125,7 @@ try {
       checks[k + 'Unhurt'] = !!h && h.hp === h.max && !h.broken; P({ phase: k, target: r.target, mat: r.mat, speed: r.thrown?.speed, ...h });
     }
     // 5. the big stone into the dining chairs: knocked over
+    const chairIds = ids.chairs.slice(); /* the dining chairs themselves (ids.chairs grows with nearby props below) */
     if (ids.chairs.length) {
       const near = await ev(A, (id) => { const T = window.__T; const c = T.pos(T.S.byId.get(id)); return T.S.items.filter(i => i.mode === 'dynamic' && i.d && !/stone/.test(i.label) && T.pos(i).distanceTo(c) < 3).map(i => i.id); }, ids.chairs[0]); ids.chairs = [...new Set([...ids.chairs, ...near])];
       const before = await ev(A, (ids) => ids.map(id => window.__smash.pose(id)), ids.chairs);
@@ -143,7 +144,8 @@ try {
       out.shots.plate = await shot(A, '08_punch_ceramic_shatter'); checks.ceramicPunchBreaks = !!b; P({ phase: 'punch-ceramic', id: cer, broken: !!b, punch: await ev(A, () => window.__smash.S.lastPunch) });
     }
     // 7. punch shoves a chair
-    const ch = ids.chairs[ids.chairs.length - 1];
+    /* punch a real dining chair (the last one: furthest from the stone's target), not a nearby napkin / vase */
+    const ch = chairIds[chairIds.length - 1];
     if (ch) {
       const b0 = await ev(A, (id) => { const T = window.__T; const it = T.S.byId.get(id); const p = T.pos(it); p.y += 0.15; T.standAt(p, 0.95, T.freeAngle(p, 1.2)); T.look(p); return window.__smash.pose(id); }, ch); await sleep(500);
       out.shots.punchBefore = await shot(A, '09_punch_chair_before');

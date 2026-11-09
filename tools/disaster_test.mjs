@@ -54,9 +54,47 @@ try {
   checks.idleNoFx = await G(A, 'window.__disaster.fx === null') && await G(B, 'window.__disaster.fx === null');
   res.connected = !!(await until(async () => (await Promise.all(ALL.map(P => P.page.evaluate(() => window.__mp.members.size)))).every(n => n >= 1), 120000, 1000));
   if (!res.connected) throw new Error('pages did not connect over the relays within 120 s');
+  for (const P of ALL) await P.page.evaluate(() => { try { window.__sky?.set?.({ tod: '15:30', frozen: true, weather: 'clear', instant: true }); } catch {} });
   const ids = { A: await G(A, 'window.__games.me'), B: await G(B, 'window.__games.me') }; res.ids = ids; await sleep(1500);
   checks.registered = await G(A, "!!window.__games.games.disaster && window.__games.order.includes('disaster')");
 
+  // --game3: one full 3-round game (host picks the disasters) end to end, then the results board on both clients
+  if (opt.game3) {
+    const step = (m) => process.stderr.write(`[disaster] ${m}\n`);
+    for (const P of ALL) await P.page.evaluate(() => { try { window.__sky?.set?.({ tod: '15:30', frozen: true, weather: 'clear', instant: true }); } catch {} });
+    const RMS = +(opt.round || 12000);
+    await A.page.evaluate((ms) => window.__games.start('disaster', { rounds: 3, roundMs: ms, annMs: 2500, interMs: 2500, autoJoin: true, autoReady: true, lobby: 4000 }), RMS);
+    const F = res.full = { rounds: [] };
+    F.play = !!(await until(async () => (await Promise.all(ALL.map(P => G(P, "window.__games.phase")))).every(p => p === 'play'), 25000, 200));
+    F.bothIn = (await G(A, 'window.__games.state?.players?.length')) === 2; step('play=' + F.play + ' bothIn=' + F.bothIn);
+    const yard = await yardSpot(A, 11.5, 26.5);
+    let seen = -1;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3 * (RMS + 12000) + 30000) {
+      const ph = await G(A, "window.__games.phase"); if (ph === 'end' || ph === 'idle') break;
+      const sA = await G(A, 'window.__disaster.state() && { round: window.__disaster.state().round, type: window.__disaster.state().type, roundAt: window.__disaster.state().roundAt }');
+      if (sA && sA.round > seen && sA.type) {
+        seen = sA.round; step('round ' + sA.round + ' ' + sA.type);
+        await sleep(3500);
+        const sB = await G(B, 'window.__disaster.state() && { round: window.__disaster.state().round, type: window.__disaster.state().type }');
+        // A watches from the yard (not inside a burning room), B stays put
+        await tp(A, yard[0], yard[1] + 0.05, yard[2], 0.35); await sleep(2500);
+        await shot(A, `game3_r${sA.round}_${sA.type}.png`);
+        F.rounds.push({ round: sA.round, type: sA.type, bAgrees: !!sB && sB.round === sA.round && sB.type === sA.type, localA: await G(A, 'window.__disaster.local()'), localB: await G(B, 'window.__disaster.local()') });
+      }
+      await sleep(500);
+    }
+    F.ended = !!(await until(() => G(A, "window.__games.phase === 'end'"), 20000, 300)); step('ended=' + F.ended);
+    await sleep(1500);
+    const resOf = (P) => G(P, 'window.__games.state?.results && { title: window.__games.state.results.title, rows: window.__games.state.results.rows.map(r => r.name + ":" + r.text) }');
+    F.resultsA = await resOf(A); F.resultsB = await resOf(B);
+    F.boardVisible = await A.page.evaluate(() => { const n = [...document.querySelectorAll('.pp-card.on, [class*=result].on, [class*=res].on')]; return n.map(x => (x.innerText || '').slice(0, 160)); });
+    res.shots.game3_results = await shot(A, 'game3_results.png'); await shot(B, 'game3_results_B.png');
+    F.hist = await G(A, 'window.__games.state?.data?.hist?.map(h => h.type) || null');
+    F.idle = !!(await until(async () => (await Promise.all(ALL.map(P => G(P, "window.__games.phase")))).every(p => p === 'idle'), 30000, 300));
+    checks.game3 = F.play && F.bothIn && F.rounds.length === 3 && F.rounds.every(r => r.bAgrees) && F.ended && !!F.resultsA && JSON.stringify(F.resultsA) === JSON.stringify(F.resultsB) && /3 SURVIVED|\/3 SURVIVED/.test(JSON.stringify(F.resultsA));
+    LIST.length = 0;
+  }
   for (const type of LIST) {
     const R = res.rounds[type] = {};
     if (opt.repair) { try { await A.page.evaluate(() => window.__building?.repair?.()); } catch {} } // --repair: building.repair() between rounds (crashes rapier: see report)
@@ -79,10 +117,12 @@ try {
       const c = await A.page.evaluate((r) => { const t = window.__disaster.state(); return null; }, room);
       const rect = await A.page.evaluate(async (r) => { const P = await import('/src/plan.js'); return P.ROOMS[r].rect; }, room);
       await tp(A, rect[0] + 0.6, 0.05, (rect[1] + rect[3]) / 2, -Math.PI / 2); void c;
+      /* shoot the fire before the smoke knocks A out (a KO swaps to the spectator orbit) */
+      await sleep(1500); res.shots.fire_mid = await shot(A, 'fire_mid.png'); R.fireShotKO = (await G(A, 'window.__disaster.local()'))?.ko;
     }
     await sleep(Math.min(7000, ROUND * 0.5));
     if (type === 'quake' || type === 'fire') await sleep(1500);
-    res.shots[type + '_mid'] = await shot(A, `${type}_mid.png`);
+    if (type !== 'fire') res.shots[type + '_mid'] = await shot(A, `${type}_mid.png`);
     R.localA = await G(A, 'window.__disaster.local()'); R.localB = await G(B, 'window.__disaster.local()');
     if (type === 'meteor') { await B.page.evaluate(() => window.__disaster.hurt(500)); R.koSync = !!(await until(() => G(A, `window.__disaster.state()?.ko?.['${ids.B}'] === true`), 5000, 150)); }
     if (type === 'fire' || type === 'flood') { await B.page.evaluate(() => window.__disaster.hurt(7)); }

@@ -77,7 +77,7 @@ export function createBasketball(ctx, mp, hub) {
     for (const id of M.players) if (owns(id)) { const b = ballOf(id); if (!prev || prev.turn !== M.turn || prev.mid !== M.mid) { if (b.body) b.body.setEnabled(false); b.held = true; b.shot = null; } }
     if (owns(turnId()) && M.mode === 'horse' && M.spot && turnId() === me() && (!prev || prev.turn !== M.turn)) player.teleport(M.spot[0], FL - VIS, M.spot[1]);
     if (turnId() === 'bot' && (!prev || prev.turn !== M.turn || prev.mid !== M.mid)) local.botAt = performance.now() + 1600;
-    if (M.phase === 'over' && (!prev || prev.phase !== 'over')) showWin();
+    if (M.phase === 'over' && (!prev || prev.phase !== 'over') && isPlayer()) showWin();
     render();
   }
   function leave() { if (M) { if (M.mode !== 'free' && M.phase !== 'over' && isPlayer()) send({ k: 'state', M: { ...snap(), phase: 'over', winner: M.players.findIndex(p => p !== me()), reason: 'forfeit', rev: M.rev + 1 } }); else send({ k: 'drop', id: me() }); setState(null); } }
@@ -123,7 +123,8 @@ export function createBasketball(ctx, mp, hub) {
     if (m.k === 'state' && m.M && Array.isArray(m.M.players)) {
       if (M && M.mid === m.M.mid && m.M.rev <= M.rev) return;
       if (!m.M.players.includes(me()) && M && isPlayer() && M.mode !== 'free' && M.phase !== 'over') return;
-      if (!m.M.players.includes(me())) { if (m.M.mode !== 'free') spectate = m.M; return; }
+      /* a match I'm not in: watch it (score bar near the court) unless I'm busy in my own session */
+      if (!m.M.players.includes(me())) { if (m.M.mode === 'free') return; spectate = m.M; if (isPlayer() && M.phase !== 'over' && M.mid !== m.M.mid) return; }
       setState(m.M); return;
     }
     if (m.k === 'drop') { dropBall(m.id); return; }
@@ -134,6 +135,9 @@ export function createBasketball(ctx, mp, hub) {
     if (m.k === 'res') { stats.log.push({ n: stats.log.length, shooter: m.id, made: m.made, pts: m.made ? m.pts : 0, swish: m.swish, remote: true }); if (m.made) { stats.makes++; netSwish(m.id); } resultFx(m.id, m.made, m.pts, m.swish); }
   };
   let spectate = null;
+  /* late joiners: players send the match to anyone who arrives (and ask once at start) */
+  mp?.onPeerJoin?.((id) => { if (M && isPlayer() && M.mode !== 'free') setTimeout(() => send({ k: 'state', M: snap() }, id), 700); });
+  setTimeout(() => send({ k: 'hello' }), 2300);
   mp?.onPeerLeave?.((id) => { dropBall(id); if (M && M.mode !== 'free' && M.players.includes(id) && M.phase !== 'over') setState({ ...snap(), phase: 'over', winner: M.players.findIndex(p => p !== id), reason: 'forfeit', rev: M.rev + 1 }); });
   function netSwish(id) { const b = balls.get(id); const x = b ? b.mesh.position.x : 0; local.nets[Math.abs(x - BB.rims[0][0]) < Math.abs(x - BB.rims[1][0]) ? 0 : 1] && (local.nets[Math.abs(x - BB.rims[0][0]) < Math.abs(x - BB.rims[1][0]) ? 0 : 1].amp = 1); }
 

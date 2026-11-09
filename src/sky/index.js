@@ -43,6 +43,7 @@ export function createSky(ctx) {
   const U = dome.uniforms;
   scene.fog = new THREE.FogExp2(0xb8c4cf, PARAMS.clear.fog);
   const dual = { envDayK: { value: 1 }, envNightK: { value: 0 }, envFlash: { value: 0 } }; // envFlash x per-room sky exposure (lighting.js)
+  const RAINU = { value: 0 }; /* polish4: falling-rain amount for the puddle ripple rings */
   const WET = { value: 0 }, SNOWC = { value: 0 }, OUTFLASH = { value: 0 }, NIGHTAMB = { value: 0 }; // NIGHTAMB (polish): outdoor-only blue night ambient // OUTFLASH: lightning ambient on outdoor materials while the camera is indoors
 
   // ---------------------------------------------------------------- clock / weather state
@@ -63,7 +64,7 @@ export function createSky(ctx) {
     skyDay: 1, star: 0, sunVis: 1, moonVis: 0, cover: 0, dark: 0, haze: 0, fogAmt: 0, fog: 0, lightI: 0, moonLight: false, hemiI: 0, envI: 1, dayK: 1, nightK: 0, lightsK: 0, exposure: 1, wet: 0, rain: 0, flash: 0 });
   const live = mkS(), refDay = mkS(), refNight = mkS();
   const COLD = new THREE.Color(0.62, 0.76, 1.0), SNOWFOG = new THREE.Color(0.55, 0.6, 0.68);
-  const _c = new THREE.Color(), MOONCOL = new THREE.Color(0.55, 0.66, 1.0), HEMI_DAY = new THREE.Color(0xeef3fa), HEMI_NIGHT = new THREE.Color(0.45, 0.55, 0.9);
+  const _c = new THREE.Color(), MOONCOL = new THREE.Color(0.45, 0.6, 1.0), HEMI_DAY = new THREE.Color(0xeef3fa), HEMI_NIGHT = new THREE.Color(0.45, 0.55, 0.9);
   let nightReady = false, indoorK = 0;
   function compute(S, E, moonEl, w, flash, wetV) {
     palette(E, 'zenith', S.zen); palette(E, 'horizon', S.hor); palette(E, 'glow', S.glow); palette(E, 'land', S.land);
@@ -80,9 +81,14 @@ export function createSky(ctx) {
     S.fog = w.fog;
     S.dayK = smooth(-6, 12, E); S.lightsK = 1 - smooth(-3, 9, E);
     const sunK = Math.pow(Math.min(1, Math.max(0, (E + 1.5) / 8)), 0.7);
-    if (E > -3) { S.moonLight = false; S.lightI = LIGHT.sunIntensity * sunK * w.light; S.lightCol.copy(S.sunCol); }
+    S.sunF = E > -3 ? sunK * w.light : 0; /* polish4: direct-sun fraction (weather x elevation) for the fake sun decals + probe day blend */
+    if (E > -3) { S.moonLight = false; S.lightI = LIGHT.sunIntensity * sunK * w.light; S.lightCol.copy(S.sunCol);
+      /* polish4: the low sun's palette colour painted white walls salmon — keep ~40% of it neutral (luma grey) near sunset */
+      const lo = 0.4 * (1 - smooth(6, 22, E)), lu = 0.2126 * S.lightCol.r + 0.7152 * S.lightCol.g + 0.0722 * S.lightCol.b; S.lightCol.lerp(_c.setRGB(lu * 1.04, lu, lu * 0.94), lo); }
     // polish: moon 0.3 -> 0.1 — at 0.3 it threw sharp, sun-like window patches onto night interiors (kitchen 22:00);
     // the outdoors get their night readability from the outdoor-only ambient (NIGHTAMB, patchOutdoor) instead
+    // polish4: moon stays 0.1 (2.4% of the 4.2 sun), slightly cooler blue; the 'sun-like' night window patches were the
+    // kitchen's painted sun decals, which now follow the real sun (applyFakeSun)
     else { S.moonLight = true; S.lightI = 0.1 * smooth(-3, -9, E) * smooth(-2, 6, moonEl) * Math.sqrt(w.light); S.lightCol.copy(MOONCOL); }
     // lightning (contain pass): the hemi light is unshadowed and reaches every interior, so its flash only applies while
     // the camera is outdoors; indoors the outdoor materials get it through OUTFLASH, rooms through their probe exposure
@@ -102,6 +108,14 @@ export function createSky(ctx) {
   }
   // emissives / probe materials / lantern glows (filled by setup)
   const emis = []; let emisK = -1, glowCap = Infinity; // glowCap (polish): api.setGlowCap — the flood clamps exterior glow
+  const fakeSun = []; let fakeK = -1;
+  function applyFakeSun(f) {
+    if (Math.abs(f - fakeK) < 0.004) return; fakeK = f;
+    for (const e of fakeSun) {
+      if (e.l) { e.l.intensity = e.base * (0.15 + 0.85 * f); continue; }
+      e.m.color.copy(e.col).multiplyScalar(f); e.o.visible = f > 0.01;
+    }
+  }
   const plainProbe = []; let plainK = -1; let glow = null, pool = null, shadows = null, rain = null, hm = null;
   function applyLights(lightsK, dayK, nightK, force) {
     if (force || Math.abs(lightsK - emisK) > 0.004) { emisK = lightsK; for (const e of emis) e.m.emissiveIntensity = e.out ? Math.min(e.base * (0.04 + 6.96 * lightsK), Math.max(e.base, 12) * lightsK + 0.04 * e.base, glowCap) /* polish: exterior lanterns / string lights / landscape lamps ≈ off at noon, full at night (capped at 12 so string-light bloom doesn't wash the deck) */ : e.base < 0.3 ? e.base * (1 - 0.75 * lightsK) : e.base * (1 + 0.35 * lightsK); /* < 0.3: fake daylight bounce, dims at night */ if (glow) { glow.material.uniforms.uAmt.value = lightsK; glow.visible = lightsK > 0.01; } }
@@ -116,9 +130,11 @@ export function createSky(ctx) {
     hemi.intensity = S.hemiI; hemi.color.copy(S.hemiSky);
     scene.environmentIntensity = S.envI;
     scene.fog.color.copy(S.fogC); scene.fog.density = S.fog * (capture ? 1 : fogIndoorK);
-    WET.value = S.wet; SNOWC.value = S.snowC || 0;
+    WET.value = S.wet; SNOWC.value = S.snowC || 0; RAINU.value = S.rain || 0;
     NIGHTAMB.value = capture ? 0 : (1 - S.dayK) * (1 - 0.6 * S.cover * S.dark); // polish: moonlit-sky fill on outdoor materials only (night readability)
-    const dk = S.dayK * (1 - 0.35 * S.cover * S.dark); dual.envFlash.value = capture ? 0 : S.flash * 0.7; OUTFLASH.value = capture ? 0 : S.flash * 3.5 * indoorK;
+    /* polish4: the day probes were baked with full clear-sky sun (sun patches + their bounce): under cloud the
+       direct-sun share of that light goes too, so the day blend drops with the weather's sun factor (storm ~0.5x) */
+    const dk = S.dayK * (1 - 0.35 * S.cover * S.dark) * (0.68 + 0.32 * Math.min(1, (S.sunF ?? 1) / Math.max(0.05, S.dayK))); dual.envFlash.value = capture ? 0 : S.flash * 0.7; OUTFLASH.value = capture ? 0 : S.flash * 3.5 * indoorK;
     dual.envDayK.value = nightReady ? dk : Math.max(dk, 0.35 * S.lightsK); dual.envNightK.value = nightReady ? S.lightsK : 0;
     applyLights(S.lightsK, dual.envDayK.value, dual.envNightK.value, capture);
     // the site piece's atmosphere: far-terrain haze follows our fog colour (unchanged at reference daylight),
@@ -150,7 +166,7 @@ export function createSky(ctx) {
     mat.onBeforeCompile = function (sh, r) {
       prev?.call(this, sh, r);
       if (!sh.fragmentShader.includes('#include <lights_physical_fragment>')) return;
-      sh.uniforms.uWet = WET; sh.uniforms.uSnowC = SNOWC; sh.uniforms.uOutFlash = OUTFLASH; sh.uniforms.uNightAmb = NIGHTAMB;
+      sh.uniforms.uWet = WET; sh.uniforms.uRainA = RAINU; sh.uniforms.uSkyT = U.uTime; sh.uniforms.uSnowC = SNOWC; sh.uniforms.uOutFlash = OUTFLASH; sh.uniforms.uNightAmb = NIGHTAMB;
       // polish: + uNightAmb — a soft blue sky fill (up-facing brighter) so facades, road and garden read at night
       // without the moon having to shine sharp patches into the rooms
       sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#if defined( RE_IndirectDiffuse )\n' +
@@ -158,17 +174,21 @@ export function createSky(ctx) {
         '  irradiance += uOutFlash * mix( vec3( 0.45, 0.43, 0.42 ), vec3( 0.8, 0.87, 1.0 ), ny ) + uNightAmb * mix( vec3( 0.07, 0.09, 0.14 ), vec3( 0.17, 0.22, 0.36 ), ny ); }\n#endif');
       // polish wet look: stronger darkening + near-mirror roughness on flat ground, plus procedural puddles (world-space
       // value noise; world position = cameraPosition + view offset rotated back, no extra varying)
-      sh.fragmentShader = 'uniform float uWet; uniform float uSnowC; uniform float uOutFlash; uniform float uNightAmb;\n' +
+      sh.fragmentShader = 'uniform float uWet; uniform float uRainA; uniform float uSkyT; uniform float uSnowC; uniform float uOutFlash; uniform float uNightAmb;\n' +
         'float skyH( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }\n' +
         'float skyN( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f ); return mix( mix( skyH( i ), skyH( i + vec2( 1, 0 ) ), f.x ), mix( skyH( i + vec2( 0, 1 ) ), skyH( i + vec2( 1, 1 ) ), f.x ), f.y ); }\n' +
         sh.fragmentShader.replace('#include <lights_physical_fragment>',
         '{ vec3 wn = inverseTransformDirection( normal, viewMatrix ); float flat_ = smoothstep( 0.25, 0.85, wn.y ); float wk = uWet * ( 0.3 + 0.7 * flat_ );\n' +
         '  float pd = 0.0; if ( uWet > 0.01 && wn.y > 0.9 ) { vec2 wp = ( cameraPosition + ( vec4( -vViewPosition, 0.0 ) * viewMatrix ).xyz ).xz;\n' +
-        '    pd = smoothstep( 0.58, 0.68, skyN( wp * 0.45 ) * 0.7 + skyN( wp * 1.7 ) * 0.3 ) * uWet * smoothstep( 0.9, 0.98, wn.y ); }\n' +
-        '  diffuseColor.rgb *= ( 1.0 - 0.5 * wk ) * ( 1.0 - 0.5 * pd ); roughnessFactor = mix( mix( roughnessFactor, 0.12, wk * 0.9 ), 0.03, pd );\n' +
+        '    pd = smoothstep( 0.52, 0.62, skyN( wp * 0.45 ) * 0.7 + skyN( wp * 1.7 ) * 0.3 ) * uWet * smoothstep( 0.9, 0.98, wn.y );\n' +
+        /* polish4: stronger wet (darker, glossier, more puddles) + rain ripple rings on the puddles (one ring per 0.4 m cell) */
+        '    if ( pd > 0.01 && uRainA > 0.01 ) { vec2 cq = wp * 2.5; vec2 ci = floor( cq ); vec2 cf = fract( cq ) - 0.5 - ( vec2( skyH( ci ), skyH( ci + 7.1 ) ) - 0.5 ) * 0.5;\n' +
+        '      float ph = fract( uSkyT * 1.1 + skyH( ci + 3.3 ) ); float rr = exp( -pow( ( length( cf ) - ph * 0.45 ) * 28.0, 2.0 ) ) * ( 1.0 - ph ) * uRainA;\n' +
+        '      pd *= 1.0 - 0.7 * rr; } }\n' +
+        '  diffuseColor.rgb *= ( 1.0 - 0.6 * wk ) * ( 1.0 - 0.55 * pd ); roughnessFactor = mix( mix( roughnessFactor, 0.08, wk * 0.9 ), 0.02, pd );\n' +
         '  float sk = uSnowC * smoothstep( 0.45, 0.9, wn.y ); diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.9, 0.93, 0.97 ), sk ); roughnessFactor = mix( roughnessFactor, 0.8, sk ); }\n#include <lights_physical_fragment>');
     };
-    mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : '') + '|wet2'; };
+    mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : '') + '|wet3'; };
     mat.needsUpdate = true;
   }
 
@@ -215,6 +235,14 @@ export function createSky(ctx) {
     });
     if (bound?.list) for (const m of bound.list) if (!m.userData.dualEnv) plainProbe.push(m);
     roomExpo = bound?.expo || null;
+    // polish4: painted sun patches (kitchen 'sunPatches' decals, dining slider wash) and the dining terrace-bounce
+    // spot are fixed clear-day fakes: they follow the real direct sun (weather + elevation), gone at night / in a storm
+    scene.traverse(o => {
+      const tag = o.name === 'sunPatches' || o.userData.fakeSun;
+      if (!tag) return;
+      if (o.isLight) { fakeSun.push({ l: o, base: o.intensity }); return; }
+      o.traverse(c => { if (c.isMesh && c.material) fakeSun.push({ o: c, m: c.material, col: c.material.color.clone(), op: c.material.opacity }); });
+    });
     outdoorLive = true; for (const m of outdoorMats) patchOutdoor(m); outdoorMats.length = 0;
     glow = makeGlows();
     // the site piece's own static sky dome is replaced by ours (it would otherwise shade every pixel first)
@@ -345,7 +373,7 @@ export function createSky(ctx) {
     const indoor = hm ? (hm.heightAt(cam.x, cam.z) > cam.y + 0.5 ? 1 : 0) : 0;
     indoorS += (indoor - indoorS) * (snap ? 1 : 1 - Math.exp(-dt / 0.5));
     fogIndoorK = 1 - 0.85 * indoorS; indoorK = indoorS;
-    apply(live);
+    apply(live); applyFakeSun(live.sunF);
     renderer.toneMappingExposure += (live.exposure - renderer.toneMappingExposure) * (snap ? 1 : 1 - Math.exp(-dt / 1.5));
     // light direction steps with the static shadow map (no per-frame shadow renders)
     if (!bakingDay) {

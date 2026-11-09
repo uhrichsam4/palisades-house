@@ -34,12 +34,14 @@ function lampMat(name) {
   m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_COLOR\n totalEmissiveRadiance *= vColor.rgb;\n#endif'); };
   m.customProgramCacheKey = () => 'carlamp'; m.name = 'car-' + name; return m;
 }
+/* polish4: glass .04 -> .1, chrome .22 -> .3, clearcoat .04 -> .12 — the near-mirror lobes turned the midday sun into
+   a bloom flare on the SUV roof / rear glass */
 export function sharedMaterials(ctx) {
   if (SHARED) return SHARED;
   const out = (m) => (ctx.kit.outdoor ? ctx.kit.outdoor(m) : m);
   SHARED = {
-    glass: out(new THREE.MeshPhysicalMaterial({ color: 0x0b0e12, metalness: 0, roughness: 0.04, transparent: true, opacity: 0.62, depthWrite: false, envMapIntensity: 1.4, name: 'car-glass' })),
-    metal: out(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 1, roughness: 0.22, name: 'car-metal' })),
+    glass: out(new THREE.MeshPhysicalMaterial({ color: 0x0b0e12, metalness: 0, roughness: 0.1, transparent: true, opacity: 0.62, depthWrite: false, envMapIntensity: 1.4, name: 'car-glass' })),
+    metal: out(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 1, roughness: 0.3, name: 'car-metal' })),
     dark: out(new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0, roughness: 0.72, name: 'car-dark' })),
     plate: new THREE.MeshStandardMaterial({ map: plateAtlas(), roughness: 0.45, name: 'car-plate' }),
   };
@@ -50,7 +52,7 @@ export function carMaterials(ctx, paint) {
   const out = (m) => (ctx.kit.outdoor ? ctx.kit.outdoor(m) : m);
   const p = paint.metal
     ? new THREE.MeshStandardMaterial({ color: paint.color, metalness: 1, roughness: paint.rough ?? 0.36, name: 'car-paint' })
-    : new THREE.MeshPhysicalMaterial({ color: paint.color, metalness: paint.metalness ?? 0.5, roughness: paint.rough ?? 0.3, clearcoat: 1, clearcoatRoughness: 0.04, name: 'car-paint' });
+    : new THREE.MeshPhysicalMaterial({ color: paint.color, metalness: paint.metalness ?? 0.5, roughness: paint.rough ?? 0.3, clearcoat: 1, clearcoatRoughness: 0.12, name: 'car-paint' });
   return { ...S, paint: out(p), head: lampMat('head'), tail: lampMat('tail') };
 }
 

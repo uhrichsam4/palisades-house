@@ -217,7 +217,7 @@ const ctxBase = {
 
 async function main() {
   status('Loading physics…');
-  const phys = await createPhysics(); ctxBase.phys = phys; mark('physics');
+  const phys = await createPhysics(); ctxBase.phys = phys; window.__phys = phys; mark('physics'); /* __phys: test/probe handle */
   // src/smash (movable / breakable world): watches piece builds so furniture can become physics objects BEFORE any merge
   let smashPrep = null; if ((!SHOT || params.get('smash') === '1') && params.get('smash') !== '0') { /* ?smash=0: off (perf A/B) */ try { smashPrep = (await import('./smash/prep.js')).installPrep(ctxBase); ctxBase.smashPrep = smashPrep; } catch (e) { console.error('[smash prep]', e); window.__errors.push('smash prep: ' + e.message); } }
   status('Loading sky…');

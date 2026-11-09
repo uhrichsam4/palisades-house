@@ -623,6 +623,8 @@ export async function build(ctx) {
     const pg = kit.group(root, [P0.x, 0, P0.z], 0, 'palmPot');
     kit.add(pg, kit.lathe([[0, 0], [0.22, 0], [0.27, 0.12], [0.29, 0.50], [0.27, 0.52], [0, 0.48]], 40), potM, [0, 0, 0]);
     phys.boxLocal(pg, 0, 0.26, 0, 0.29, 0.26, 0.29);
+    /* camera-only soft volume over the frond crown (the pot is the only solid part) */
+    phys.camSoftAdd?.([P0.x, 1.85, P0.z + 0.25], [1.15, 0.75, 1.0]);
     const stemM = std({ color: 0x46552a, roughness: 0.6 });
     const leafM = std({ color: 0xffffff, roughness: 0.5, side: THREE.DoubleSide });
     // leaflet: long narrow blade folded along its midrib, local +x = length, +y = up face

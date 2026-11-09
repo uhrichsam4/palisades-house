@@ -136,6 +136,10 @@ export async function createPhysics() {
     // ramps over steps (every dynamic prop's filter drops it, so props land on the real treads); PROPONLY = colliders
     // only props see (stair treads under a ramp; the player's character controller skips them).
     GROUPS: { PLAYER: 0x2000, PROPONLY: 0x4000, RAMP: 0x8000, ALL: 0xFFFF },
+    // camera-only soft volumes (plant crowns etc.): axis-aligned ellipsoids { c: [x,y,z], r: [rx,ry,rz] } that only the
+    // third-person camera arm respects (player.js); nothing in the physics world collides with them
+    camSoft: [],
+    camSoftAdd(c, r) { phys.camSoft.push({ c, r }); },
     groups(membership, filter = 0xFFFF) { return ((membership & 0xFFFF) << 16 | (filter & 0xFFFF)) >>> 0; },
     setGroups(collider, membership, filter = 0xFFFF) { if (collider) collider.setCollisionGroups(phys.groups(membership, filter)); return collider; },
     claim(collider, info) { if (collider) owners.set(collider.handle ?? collider, info); return collider; },

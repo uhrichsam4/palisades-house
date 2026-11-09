@@ -92,6 +92,42 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     return b.mass() >= 8;
   };
   const euler = new THREE.Euler(0, 0, 0, 'YXZ'); const back = new THREE.Vector3();
+  /* soft camera volumes (phys.camSoft: plant crowns): pull the arm in front of an ellipsoid the ray enters; ignored
+     when the pivot is already inside one (standing under the plant) */
+  function camSoftClamp(o, dir, d) {
+    const L = phys.camSoft; if (!L || !L.length) return d;
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i].c, r = L[i].r;
+      const ox = (o.x - c[0]) / r[0], oy = (o.y - c[1]) / r[1], oz = (o.z - c[2]) / r[2];
+      const dx = dir.x / r[0], dy = dir.y / r[1], dz = dir.z / r[2];
+      const C = ox * ox + oy * oy + oz * oz - 1; if (C <= 0) continue;
+      const A = dx * dx + dy * dy + dz * dz, B = ox * dx + oy * dy + oz * dz; const disc = B * B - A * C; if (disc <= 0) continue;
+      const t = (-B - Math.sqrt(disc)) / A; if (t > 0 && t < d) d = Math.max(0.25, t - 0.05);
+    }
+    return d;
+  }
+  /* polish4: cars' physics boxes stop at the belt line except over the cab (truck bed, boot, bonnet stay open), so the
+     arm used to slide into the bodywork after getting out (white panel filling the view). Clamp the arm / shoulder
+     against each car's visual box (local frame, + margin); skipped when the ray starts inside one (riding in a bed). */
+  const _cl = new THREE.Vector3(), _cd = new THREE.Vector3(), _sd = new THREE.Vector3(), _cq = new THREE.Quaternion();
+  function carClamp(o, dir, d, m) {
+    const L = window.__cars?.cars; if (!L) return d;
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i]; if (!c || !c.ready || !c.size || state.seat?.vehicle) continue;
+      _cq.copy(c.quat).invert(); _cl.copy(o).sub(c.pos).applyQuaternion(_cq); _cd.copy(dir).applyQuaternion(_cq);
+      const cx = c.ctr ? c.ctr.x : 0, cz = c.ctr ? c.ctr.z : 0;
+      const lo = [cx - c.size.x / 2 - m, -0.2, cz - c.size.z / 2 - m], hi = [cx + c.size.x / 2 + m, c.size.y + m, cz + c.size.z / 2 + m];
+      const P = [_cl.x, _cl.y, _cl.z], D = [_cd.x, _cd.y, _cd.z]; let tn = -Infinity, tf = Infinity, inside = true;
+      for (let k = 0; k < 3; k++) {
+        if (P[k] < lo[k] || P[k] > hi[k]) inside = false;
+        if (Math.abs(D[k]) < 1e-6) { if (P[k] < lo[k] || P[k] > hi[k]) { tn = Infinity; break; } continue; }
+        let t0 = (lo[k] - P[k]) / D[k], t1 = (hi[k] - P[k]) / D[k]; if (t0 > t1) { const q = t0; t0 = t1; t1 = q; }
+        if (t0 > tn) tn = t0; if (t1 < tf) tf = t1;
+      }
+      if (!inside && tn <= tf && tn > 0 && tn < d) d = tn;
+    }
+    return d;
+  }
   let disturbT = 0, frameMs = 0, lastSwimBlocked = 0, climbOut = 0; const climbDir = new THREE.Vector3();
 
   function update(dt) {
@@ -152,7 +188,7 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       state.vel.x += (wish.x * sp - state.vel.x) * a; state.vel.z += (wish.z * sp - state.vel.z) * a;
       if (climbOut > 0) { climbOut -= dt; state.vel.x = climbDir.x * 1.6; state.vel.z = climbDir.z * 1.6; }
       if (state.grounded && state.jumpQueued) state.vy = 4.8;
-      state.vy -= 9.81 * dt * (state.inWater ? 0.55 : 1); if (state.grounded && state.vy < 0) state.vy = -0.5;
+      state.vy -= 9.81 * dt * (state.inWater ? 0.55 : 1); if (state.grounded && state.vy < 0) state.vy = -0.08; /* small hold: -0.5 cancelled the climb on the 41 deg stair ramp (stuck at the foot); snap-to-ground keeps contact going down */
       mvx = state.vel.x * dt; mvy = state.vy * dt; mvz = state.vel.z * dt;
     }
     state.jumpQueued = false;
@@ -164,13 +200,22 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
     let nx = t.x + m.x, ny = t.y + m.y, nz = t.z + m.z;
     if (ny < -30) { nx = spawn[0]; ny = spawn[1] + 1; nz = spawn[2]; state.vy = 0; }
     body.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
-    const groundedNow = cc.computedGrounded();
+    // computedGrounded() misses the first moment on a ramp/slope edge (e.g. the bottom of the foyer stair ramp):
+    // gravity then builds up and the controller slides the player back down every frame (stuck at the foot).
+    // Any contact whose surface faces up within the climbable slope (<= 50 deg) counts as ground too.
+    let onWalkable = false;
+    for (let i = 0, n = cc.numComputedCollisions?.() || 0; i < n && !onWalkable; i++) { const c = cc.computedCollision(i); /* rapier's normal2 points INTO the obstacle (measured: (0,-0.76,0.66) on the stair ramp's top face) */ if (-(c?.normal2?.y ?? 0) > 0.64) onWalkable = true; }
+    const groundedNow = cc.computedGrounded() || (onWalkable && state.vy <= 0.5);
+    if (state.debugKcc) { const cs = []; for (let i = 0, n = cc.numComputedCollisions?.() || 0; i < n; i++) { const c = cc.computedCollision(i); cs.push([+(c?.normal2?.x ?? 0).toFixed(2), +(c?.normal2?.y ?? 0).toFixed(2), +(c?.normal2?.z ?? 0).toFixed(2), String(phys.tags?.get?.(c?.collider?.handle) || '?')]); } state.debugKcc = { want: [+mvx.toFixed(4), +mvy.toFixed(4), +mvz.toFixed(4)], got: [+m.x.toFixed(4), +m.y.toFixed(4), +m.z.toFixed(4)], g: cc.computedGrounded(), cs }; }
     if (groundedNow && !state.grounded && state.vy < -6) { /* hard landing: the fluid sim squashes + splashes */ }
     state.grounded = groundedNow && !state.swimming;
     // real velocity from the resolved movement (what the fluid and the network see)
     const iv = 1 / dt; const rvx = m.x * iv, rvy = m.y * iv, rvz = m.z * iv;
     if (state.swimming) { const want = Math.hypot(mvx, mvz), got = Math.hypot(m.x, m.z); lastSwimBlocked = want > 0.004 && got < want * 0.35 ? lastSwimBlocked + dt : 0; }
-    if (!state.swimming) { state.vel.x = rvx; state.vel.z = rvz; if (state.grounded) state.vy = Math.min(state.vy, Math.max(-0.5, rvy)); else if (rvy > state.vy + 0.5 || (state.vy > 0 && m.y < mvy * 0.5)) state.vy = rvy; }
+    /* climbing a walkable slope/stair ramp: keep the wanted horizontal speed (feeding back the slope-shortened
+       movement made stairs a 0.3 m/s crawl); walls and props still stop you via the resolved movement */
+    const climbing = onWalkable && groundedNow && m.y > 0.0004;
+    if (!state.swimming) { if (!climbing) { state.vel.x = rvx; state.vel.z = rvz; } if (state.grounded) state.vy = Math.min(state.vy, Math.max(-0.08, rvy)); else if (rvy > state.vy + 0.5 || (state.vy > 0 && m.y < mvy * 0.5)) state.vy = rvy; }
     state.speed = Math.hypot(rvx, rvz);
     state.pos.set(nx, ny - halfH - radius, nz);
     state.velOut = state.velOut || new THREE.Vector3(); state.velOut.set(rvx, state.swimming ? rvy : (state.grounded ? 0 : state.vy), rvz);
@@ -199,11 +244,14 @@ export function createPlayer(ctx, { spawn = [9.8, 0.05, 5.4], yaw = Math.PI } = 
       // over the shoulder: 0.38 m to the camera's right (ray-checked so it never pokes through a wall)
       { const rx = Math.cos(state.yaw), rz = -Math.sin(state.yaw); let so = 0.38;
         const sh = world.castShape({ x: pivot.x, y: pivot.y, z: pivot.z }, ROT0, { x: rx, y: 0, z: rz }, camShape, 0.0, so, true, CAM_ARM_FLAGS, CAM_GROUPS, collider, undefined, camPred);
-        if (sh) so = Math.max(0, sh.time_of_impact - 0.04); shoulder += (so - shoulder) * (1 - Math.exp(-dt * 8));
+        if (sh) so = Math.max(0, sh.time_of_impact - 0.04);
+        so = carClamp(pivot, _sd.set(rx, 0, rz), so, 0.3); shoulder += (so - shoulder) * (1 - Math.exp(-dt * 8));
         pivot2.set(pivot.x + rx * shoulder, pivot.y, pivot.z + rz * shoulder); }
       let d = state.camWant;
       const hit = world.castShape({ x: pivot2.x, y: pivot2.y, z: pivot2.z }, ROT0, { x: back.x, y: back.y, z: back.z }, camShape, 0.0, state.camWant, true, CAM_ARM_FLAGS, CAM_GROUPS, collider, undefined, camPred);
       if (hit) d = Math.max(0.25, hit.time_of_impact - 0.04);
+      d = camSoftClamp(pivot2, back, d);
+      d = Math.max(Math.min(d, 0.25), carClamp(pivot2, back, d, 0.28));
       state.camDist = d < state.camDist ? d : state.camDist + (d - state.camDist) * (1 - Math.exp(-dt * 3));
       // boxed in (back to a wall): fall back to an eye-level view instead of jamming the lens into the wall
       const close = THREE.MathUtils.clamp((state.camDist - 0.55) / 0.35, 0, 1);

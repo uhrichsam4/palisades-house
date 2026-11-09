@@ -44,17 +44,17 @@ export const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0
 
 // ---------------------------------------------------------------- weather
 // cover/dark: cloud layer; fog: FogExp2 density outdoors; haze: dome horizon fog; rain/snow 0..1 (precipitation);
-// wind 0..1; light: direct sun/moon factor; bolt: lightning rate; dT: °C added to the time-of-day temperature;
+// wind 0..1; light: direct sun/moon factor (polish4: cloudy .6, overcast/snow .18, fog .2, rain .14, storm .1); bolt: lightning rate; dT: °C added to the time-of-day temperature;
 // cold/coldT: weight + absolute °C for snow weather (blended so transitions stay smooth); sev: storminess 0..1.
 export const WEATHERS = ['clear', 'cloudy', 'overcast', 'fog', 'rain', 'storm', 'snow', 'blizzard'];
 export const PARAMS = {
   clear:    { cover: 0.06, dark: 0.0,  fog: 0.00025, haze: 0.15, rain: 0,   wind: 0.15, light: 1.0,  bolt: 0, snow: 0, dT: 0,  cold: 0, coldT: 0,   sev: 0 },
-  cloudy:   { cover: 0.50, dark: 0.25, fog: 0.0005, haze: 0.25, rain: 0,   wind: 0.30, light: 0.75, bolt: 0, snow: 0, dT: -2, cold: 0, coldT: 0,   sev: 0.05 },
-  overcast: { cover: 0.97, dark: 0.50, fog: 0.002,  haze: 0.45, rain: 0,   wind: 0.35, light: 0.22, bolt: 0, snow: 0, dT: -3, cold: 0, coldT: 0,   sev: 0.1 },
-  fog:      { cover: 0.80, dark: 0.30, fog: 0.045,  haze: 1.0,  rain: 0,   wind: 0.05, light: 0.28, bolt: 0, snow: 0, dT: -4, cold: 0, coldT: 0,   sev: 0.15 },
+  cloudy:   { cover: 0.50, dark: 0.25, fog: 0.0005, haze: 0.25, rain: 0,   wind: 0.30, light: 0.6,  bolt: 0, snow: 0, dT: -2, cold: 0, coldT: 0,   sev: 0.05 },
+  overcast: { cover: 0.97, dark: 0.50, fog: 0.002,  haze: 0.45, rain: 0,   wind: 0.35, light: 0.18, bolt: 0, snow: 0, dT: -3, cold: 0, coldT: 0,   sev: 0.1 },
+  fog:      { cover: 0.80, dark: 0.30, fog: 0.045,  haze: 1.0,  rain: 0,   wind: 0.05, light: 0.2,  bolt: 0, snow: 0, dT: -4, cold: 0, coldT: 0,   sev: 0.15 },
   rain:     { cover: 1.0,  dark: 0.70, fog: 0.010,  haze: 0.6,  rain: 0.55, wind: 0.45, light: 0.14, bolt: 0, snow: 0, dT: -4, cold: 0, coldT: 0,   sev: 0.4 },
-  storm:    { cover: 1.0,  dark: 0.92, fog: 0.028,  haze: 0.7,  rain: 1.0, wind: 0.95, light: 0.08, bolt: 1, snow: 0, dT: -6, cold: 0, coldT: 0,   sev: 0.8 },
-  snow:     { cover: 0.96, dark: 0.35, fog: 0.007,  haze: 0.65, rain: 0,   wind: 0.25, light: 0.25, bolt: 0, snow: 0.6, dT: 0, cold: 1, coldT: -3,  sev: 0.35 },
+  storm:    { cover: 1.0,  dark: 0.92, fog: 0.028,  haze: 0.7,  rain: 1.0, wind: 0.95, light: 0.1,  bolt: 1, snow: 0, dT: -6, cold: 0, coldT: 0,   sev: 0.8 },
+  snow:     { cover: 0.96, dark: 0.35, fog: 0.007,  haze: 0.65, rain: 0,   wind: 0.25, light: 0.18, bolt: 0, snow: 0.6, dT: 0, cold: 1, coldT: -3,  sev: 0.35 },
   blizzard: { cover: 1.0,  dark: 0.55, fog: 0.035,  haze: 0.95, rain: 0,   wind: 1.0,  light: 0.12, bolt: 0, snow: 1.0, dT: 0, cold: 1, coldT: -12, sev: 1.0 },
 };
 export const KEYS_W = Object.keys(PARAMS.clear);

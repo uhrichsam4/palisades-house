@@ -199,13 +199,14 @@ export function startCars(ctx, api) {
     const p = seatWorld(car, i, new THREE.Vector3());
     player.setSeat({ pos: [p.x, p.y, p.z], yaw: yawOf(car.quat), pose: 'sit', vehicle: car.def.name });
     savedCam = player.state.camWant; player.state.camWant = 3; chaseD = car.def.cam[0]; player.state.pitch = -0.16;
-    if (ctx.interact) ctx.interact.modal = { label: () => 'GET OUT', use: () => { exitCar(); return true; } };
+    /* polish4: no mid-screen GET OUT prompt while moving (the HUD's E chip says it) — only when nearly stopped */
+    if (ctx.interact) ctx.interact.modal = { label: () => (Math.abs(car.speed || 0) < 1 ? 'GET OUT' : ''), use: () => { exitCar(); return true; } };
     hud.show(true, i === 0); ensureVoice(car);
   }
   // free standing spot next to the seat's door (or around the car), on the ground, clear of everything solid
   const capShape = new R.Capsule(0.55, 0.28);
   function exitSpot(car, i) {
-    const side = car.def.seats[i][0] < 0 ? -1 : 1; const hw = car.size.x / 2 + 0.5;
+    const side = car.def.seats[i][0] < 0 ? -1 : 1; const hw = car.size.x / 2 + 0.7; /* polish4: +0.5 -> +0.7, room for the over-shoulder camera */
     const cands = [];
     for (const [sx, dz] of [[side, 0], [side, -0.8], [side, 0.8], [side, -1.6], [side, 1.6], [-side, 0], [-side, 0.8], [-side, -0.8]]) cands.push([sx * hw, car.def.seats[i][2] + dz]);
     cands.push([0, -(car.size.z / 2 + 0.7)], [0, car.size.z / 2 + 0.7], [side * (hw + 0.8), car.def.seats[i][2]]);
@@ -406,7 +407,7 @@ export function startCars(ctx, api) {
         let hit = null; try { hit = world.castRay(headRay, 45, true, HEAD_FLAGS, undefined, undefined, car.body); } catch {}
         far = Math.max(far, hit ? (hit.timeOfImpact ?? hit.toi) : 45); if (far >= 45) break;
       }
-      headWant = Math.min(45, far + 0.35);
+      headWant = Math.min(30, far + 0.35);
     }
     headCur = headWant < headCur ? headWant : headCur + (headWant - headCur) * Math.min(1, dt * 4);
     return headCur;
@@ -423,7 +424,10 @@ export function startCars(ctx, api) {
   const hud = (() => {
     const el = document.createElement('div'); el.id = 'car-hud';
     const chips = [['W/S', 'GAS'], ['A/D', 'STEER'], ['SPACE', 'DRIFT'], ['SHIFT', 'BOOST'], ['N', 'HORN'], ['R', 'RESET'], ['E', 'GET OUT']];
-    el.innerHTML = '<span class="ch kmh"><b>KMH</b><i>::</i><em>0</em></span>' + chips.map(([k, v]) => `<span class="ch drv"><b>${k}</b><i>::</i><em>${v}</em></span>`).join('');
+    /* polish4: 4 chips by default (KMH, W/S, A/D, E); the rest behind `/` (same key as the walk hints) */
+    const CORE = new Set(['W/S', 'A/D', 'E']);
+    el.innerHTML = '<span class="ch kmh"><b>KMH</b><i>::</i><em>0</em></span>' + chips.map(([k, v]) => `<span class="ch drv${CORE.has(k) ? '' : ' xtra'}${k === 'E' ? ' eout' : ''}"><b>${k}</b><i>::</i><em>${v}</em></span>`).join('') + '<span class="ch drv xtog"><b>/</b><i>::</i><em>MORE</em></span>';
+    addEventListener('keydown', (e) => { if (e.code !== 'Slash' || e.repeat || (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'))) return; el.classList.toggle('more'); });
     document.body.appendChild(el);
     const css = document.createElement('style');
     css.textContent = `#car-hud{position:fixed;left:50%;bottom:72px;transform:translate(-50%,6px);opacity:0;pointer-events:none;z-index:35;display:flex;gap:6px;flex-wrap:wrap;justify-content:center;
@@ -432,7 +436,8 @@ export function startCars(ctx, api) {
 #car-hud .ch{background:#2f2f2f;border:1px solid rgba(247,247,247,.06);border-radius:2px;padding:4px 7px;box-shadow:0 2px 6px -2px rgba(0,0,0,.2);white-space:nowrap}
 #car-hud b{color:rgba(247,247,247,.32);font-weight:600}#car-hud i{font-style:normal;color:rgba(247,247,247,.32)}#car-hud em{font-style:normal;color:rgba(247,247,247,.66)}
 #car-hud .kmh em{color:#f2c84b;display:inline-block;min-width:3ch;text-align:right}
-#car-hud.pass .drv{display:none}#car-hud.pass .drv:last-child{display:inline-block}
+#car-hud .xtra{display:none}#car-hud.more .xtra{display:inline-block}#car-hud.more .xtog{display:none}
+#car-hud.pass .drv{display:none!important}#car-hud.pass .drv.eout{display:inline-block!important}
 body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-hud{display:none!important}
 @media (prefers-reduced-motion:reduce){#car-hud{transition:opacity .15s linear}}`;
     document.head.appendChild(css);
@@ -557,7 +562,11 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
         camera.position.copy(piv).addScaledVector(back, chaseD); camera.quaternion.setFromEuler(_e);
         ray.dir.x = 0; ray.dir.y = -1; ray.dir.z = 0;
       } else {
-        camera.position.copy(_v.set(0, car.def.eye, -0.02).applyQuaternion(car.quat).add(seatP));
+        /* driver's head: back from the wheel (+z = rearward) and a little higher, but always under the roof
+           (bbox top - 0.13) so the lens never pokes out of the cabin */
+        const seat = car.def.seats[mySeat.i]; const roof = car.ctr.y + car.size.y / 2 - 0.13;
+        const ey = Math.min(seat[1] + car.def.eye + 0.12, roof) - seat[1];
+        camera.position.copy(_v.set(0, ey, 0.28).applyQuaternion(car.quat).add(seatP));
       }
       const cr = player.creature?.root; if (cr) { cr.position.x += seatP.x - oldSeat.x; cr.position.y += seatP.y - oldSeat.y; cr.position.z += seatP.z - oldSeat.z; cr.rotation.y = cy; }
       if (mySeat) hud.speed(car.speed);
@@ -622,9 +631,11 @@ body.menu-open #car-hud,body.paused #car-hud,body.photo #car-hud,body.shot #car-
 
     // ---- headlight spot (only the local player's car, only at night; created on first need)
     const mine = mySeat && mySeat.i === 0 ? mySeat.car : null;
-    if (mine && night && !spot) { spot = new THREE.SpotLight(0xfff2dc, 0, 45, 0.55, 0.55, 1.6); spot.castShadow = false; spot.userData.keep = true; scene.add(spot, spot.target); }
+    /* polish4: brighter, warm-white, flatter falloff (decay 1.6 -> 1.3, 900 -> 2000 cd), ~6 deg down, reach capped at 30 m by headRange —
+       at 900 cd the road (lit at a grazing angle) stayed black past the bumper */
+    if (mine && night && !spot) { spot = new THREE.SpotLight(0xffe9cc, 0, 30, 0.5, 0.6, 1.3); spot.castShadow = false; spot.userData.keep = true; scene.add(spot, spot.target); }
     if (spot) {
-      if (mine && night) { _v.set(0, 0.75, -mine.size.z / 2).applyQuaternion(mine.quat).add(mine.pos); spot.position.copy(_v); spot.target.position.copy(_v2.set(0, -0.6, -mine.size.z / 2 - 14).applyQuaternion(mine.quat).add(mine.pos)); spot.target.updateMatrixWorld(); spot.intensity = 900;
+      if (mine && night) { _v.set(0, 0.75, -mine.size.z / 2).applyQuaternion(mine.quat).add(mine.pos); spot.position.copy(_v); spot.target.position.copy(_v2.set(0, -0.75, -mine.size.z / 2 - 14).applyQuaternion(mine.quat).add(mine.pos)); spot.target.updateMatrixWorld(); spot.intensity = 2000;
         spot.distance = headRange(mine, dt); }
       else spot.intensity = 0;
     }
